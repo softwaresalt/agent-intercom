@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Remote Agent Server — Resource Contracts",
+  "description": "MCP resource definitions exposed by the monocoque-agent-rem server. Resources provide read-only context to connected agents.",
+
+  "resources": {
+    "slack://channel/{id}/recent": {
+      "description": "Recent chat history from the configured Slack channel. Allows the agent to read operator instructions posted directly in the channel.",
+      "uriTemplate": "slack://channel/{id}/recent",
+      "parameters": {
+        "id": {
+          "type": "string",
+          "description": "Slack channel ID (e.g., 'C0123456789'). Must match the channel_id configured in config.toml."
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of messages to retrieve"
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ts": {
+                  "type": "string",
+                  "description": "Slack message timestamp"
+                },
+                "user": {
+                  "type": "string",
+                  "description": "Slack user ID of the message author"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Message text content"
+                },
+                "thread_ts": {
+                  "type": "string",
+                  "description": "Thread timestamp if the message is a reply, null otherwise"
+                }
+              },
+              "required": ["ts", "user", "text"]
+            }
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more messages are available beyond the limit"
+          }
+        },
+        "required": ["messages", "has_more"]
+      },
+      "security": "Only messages from the configured channel_id are returned. Bot messages included. File uploads represented by text summary only."
+    }
+  },
+
+  "notifications": {
+    "monocoque/nudge": {
+      "description": "Server-to-client notification sent when the server detects an agent stall and needs to prompt the agent to resume work. Delivered via CustomNotification on the MCP transport.",
+      "direction": "server-to-client",
+      "params": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session that triggered the stall alert"
+          },
+          "message": {
+            "type": "string",
+            "description": "Continuation message (default or custom from operator)"
+          },
+          "nudge_count": {
+            "type": "integer",
+            "description": "How many nudges have been sent for this stall event"
+          },
+          "idle_seconds": {
+            "type": "integer",
+            "description": "How long the agent has been idle"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["operator", "auto"],
+            "description": "Whether the nudge was triggered by operator action or auto-escalation"
+          }
+        },
+        "required": ["session_id", "message"]
+      }
+    }
+  },
+
+  "slashCommands": {
+    "description": "Slack slash commands handled by the server's command dispatcher. All invoked via /monocoque <command> [args].",
+    "commands": {
+      "help": {
+        "args": "[category]",
+        "description": "List all available commands, optionally filtered by category"
+      },
+      "sessions": {
+        "args": "",
+        "description": "List all tracked sessions with state, timestamps, and last activity"
+      },
+      "session-start": {
+        "args": "<prompt>",
+        "description": "Start a new agent session with the given initial prompt"
+      },
+      "session-clear": {
+        "args": "[session_id]",
+        "description": "Terminate and clean up a session (defaults to active session)"
+      },
+      "session-pause": {
+        "args": "[session_id]",
+        "description": "Pause a running session"
+      },
+      "session-resume": {
+        "args": "[session_id]",
+        "description": "Resume a paused session"
+      },
+      "session-checkpoint": {
+        "args": "[session_id] [label]",
+        "description": "Create a named checkpoint of the current session state"
+      },
+      "session-restore": {
+        "args": "<checkpoint_id>",
+        "description": "Restore a previously checkpointed session"
+      },
+      "session-checkpoints": {
+        "args": "[session_id]",
+        "description": "List all checkpoints, optionally filtered by session"
+      },
+      "list-files": {
+        "args": "[path] [--depth N]",
+        "description": "List workspace directory contents (default depth: 3)"
+      },
+      "show-file": {
+        "args": "<path> [--lines START:END]",
+        "description": "Display file contents with syntax highlighting"
+      }
+    }
+  }
+}
