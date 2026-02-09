@@ -34,18 +34,27 @@
 │  elapsed_secs    │      │  consumed_at     │      │  slack_bot_token  │
 │  actions_taken   │      └──────────────────┘      │  channel_id       │
 │  decision        │                                │  authorized_users │
-│  slack_ts        │      ┌──────────────────┐      │  max_sessions     │
-│  created_at      │──1:N─│   StallAlert     │      │  timeouts{}       │
-└─────────────────┘      │                  │      │  stall_config{}   │
-                          │  alert_id     PK │      └───────────────────┘
+│  instruction     │                                │  max_sessions     │
+│  slack_ts        │      ┌──────────────────┐      │  timeouts{}       │
+│  created_at      │      │   StallAlert     │      │  stall_config{}   │
+└─────────────────┘      │                  │      └───────────────────┘
+                          │  alert_id     PK │
                           │  session_id   FK │
                           │  last_tool       │
+                          │  last_activity_at│
                           │  idle_seconds    │
                           │  nudge_count     │
                           │  status          │
+                          │  nudge_message   │
                           │  slack_ts        │
                           │  created_at      │
                           └──────────────────┘
+
+Relationships (all via session_id FK):
+  Session ──1:N── Checkpoint
+  Session ──1:N── ApprovalRequest
+  Session ──1:N── ContinuationPrompt
+  Session ──1:N── StallAlert
 ```
 
 ## Entities
