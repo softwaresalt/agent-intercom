@@ -168,10 +168,6 @@ Finalize all changes with a Git commit:
 
 ## Troubleshooting
 
-### Build fails on fastembed/ort-sys
-
-The `fastembed` crate is gated behind the `embeddings` feature flag. Default builds exclude it. If Phase 6 (semantic search) requires it, configure the TLS feature flag first.
-
 ### Tests pass locally but fail in CI
 
 Verify `rust-toolchain.toml` matches the CI configuration in `.github/workflows/ci.yml`. Check that the `[[test]]` entries in `Cargo.toml` include all external test files.
