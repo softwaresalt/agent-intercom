@@ -1,0 +1,1 @@
+//! Stall alert model placeholder.

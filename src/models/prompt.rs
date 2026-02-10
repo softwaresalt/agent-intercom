@@ -1,0 +1,1 @@
+//! Continuation prompt model placeholder.

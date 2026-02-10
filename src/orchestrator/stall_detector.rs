@@ -1,0 +1,1 @@
+//! Agent stall detection placeholder.

@@ -1,0 +1,1 @@
+//! Checkpoint repository placeholder.

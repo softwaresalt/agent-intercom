@@ -1,0 +1,1 @@
+//! Diff application placeholder.

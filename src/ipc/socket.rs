@@ -1,0 +1,1 @@
+//! Local socket interface placeholder.

@@ -1,0 +1,1 @@
+//! Workspace policy model placeholder.
