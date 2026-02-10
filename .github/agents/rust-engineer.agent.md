@@ -1,6 +1,6 @@
 ````chatagent
 ---
-description: Expert Rust software engineer specializing in the monocoque-agent-rem MCP remote agent server — overrides speckit.implement with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
+description: Expert Rust software engineer specializing in the monocoque-agent-rem MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
 tools:
   - run_in_terminal
   - read_file
@@ -242,7 +242,7 @@ All Slack-posting modules send messages through a rate-limited in-memory queue w
 
 ## Implementation Workflow
 
-This agent **overrides** `speckit.implement` for the monocoque-agent-rem crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
+This agent **inherits** and **overrides** `speckit.implement` for the monocoque-agent-rem crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
 
 For ad-hoc questions, fixes, or reviews that do not involve the full task plan, skip to the Supplemental Workflow section at the end.
 

@@ -1,4 +1,11 @@
-# Tasks: MCP Remote Agent Server
+---
+title: Tasks: MCP Remote Agent Server
+description: Task list for the MCP remote agent server implementation
+ms.date: 2026-02-09
+ms.topic: reference
+---
+
+## Tasks: MCP Remote Agent Server
 
 **Input**: Design documents from `/specs/001-mcp-remote-agent-server/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
@@ -26,10 +33,10 @@
 
 **Purpose**: Project initialization, Cargo workspace, directory skeleton
 
-- [ ] T001 Create Cargo workspace with two binary targets (`monocoque-agent-rem` in src/main.rs, `monocoque-ctl` in ctl/main.rs) in Cargo.toml
-- [ ] T002 Add all dependencies to Cargo.toml: rmcp (features: server, transport-sse-server, transport-io), slack-morphism (features: hyper, socket-mode), axum 0.8, tokio (features: full), serde/serde_json, diffy 0.4, notify, tracing/tracing-subscriber, surrealdb (features: kv-rocksdb, kv-mem), sha2, tempfile, interprocess (features: tokio), uuid (features: v4, serde), chrono (features: serde), clap (features: derive), toml
-- [ ] T003 Create full directory structure with stub mod.rs module declarations per plan.md: src/models/, src/mcp/tools/, src/mcp/resources/, src/slack/, src/persistence/, src/orchestrator/, src/policy/, src/diff/, src/ipc/, ctl/, tests/contract/, tests/integration/, tests/unit/
-- [ ] T004 [P] Add rustfmt.toml (max_width=100, edition=2021) and configure clippy lints in Cargo.toml
+- [x] T001 Create Cargo workspace with two binary targets (`monocoque-agent-rem` in src/main.rs, `monocoque-ctl` in ctl/main.rs) in Cargo.toml
+- [x] T002 Add all dependencies to Cargo.toml: rmcp (features: server, transport-sse-server, transport-io), slack-morphism (features: hyper, socket-mode), axum 0.8, tokio (features: full), serde/serde_json, diffy 0.4, notify, tracing/tracing-subscriber, surrealdb (features: kv-rocksdb, kv-mem), sha2, tempfile, interprocess (features: tokio), uuid (features: v4, serde), chrono (features: serde), clap (features: derive), toml
+- [x] T003 Create full directory structure with stub mod.rs module declarations per plan.md: src/models/, src/mcp/tools/, src/mcp/resources/, src/slack/, src/persistence/, src/orchestrator/, src/policy/, src/diff/, src/ipc/, ctl/, tests/contract/, tests/integration/, tests/unit/
+- [x] T004 [P] Add rustfmt.toml (max_width=100, edition=2021) and configure clippy lints in Cargo.toml
 
 ---
 

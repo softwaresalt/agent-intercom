@@ -1,0 +1,1 @@
+//! heartbeat tool handler placeholder.
