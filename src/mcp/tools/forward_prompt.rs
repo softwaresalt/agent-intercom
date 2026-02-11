@@ -1,1 +1,1 @@
-//! forward_prompt tool handler placeholder.
+//! `forward_prompt` tool handler placeholder.

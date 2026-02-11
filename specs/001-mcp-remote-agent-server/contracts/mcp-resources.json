@@ -86,6 +86,18 @@
             "type": "string",
             "enum": ["operator", "auto"],
             "description": "Whether the nudge was triggered by operator action or auto-escalation"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Progress snapshot from the session at nudge time. Includes summary of completed items and next pending item so the agent can reorient.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "status": { "type": "string", "enum": ["done", "in_progress", "pending"] }
+              },
+              "required": ["label", "status"]
+            }
           }
         },
         "required": ["session_id", "message"]

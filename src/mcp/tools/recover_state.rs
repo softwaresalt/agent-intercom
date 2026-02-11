@@ -1,1 +1,1 @@
-//! recover_state tool handler placeholder.
+//! `recover_state` tool handler placeholder.

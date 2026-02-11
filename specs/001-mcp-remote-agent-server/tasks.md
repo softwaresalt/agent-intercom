@@ -1,42 +1,40 @@
----
-title: Tasks: MCP Remote Agent Server
-description: Task list for the MCP remote agent server implementation
-ms.date: 2026-02-09
-ms.topic: reference
----
+# Tasks: MCP Remote Agent Server
 
-## Tasks: MCP Remote Agent Server
+**Input**: Design documents from `specs/001-mcp-remote-agent-server/`
+**Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/
 
-**Input**: Design documents from `/specs/001-mcp-remote-agent-server/`
-**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
+**Tests**: Not explicitly requested — test tasks omitted. Run `cargo test` / `cargo clippy` after each phase.
 
-**Tests**: Not included — tests were not explicitly requested in the feature specification. Add test phases per user story if TDD is desired.
-
-**Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
+**Organization**: Tasks grouped by user story (10 stories from spec.md, priority P1→P3).
 
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2)
-- Include exact file paths in descriptions
+- Exact file paths included in all descriptions
 
 ## Path Conventions
 
-- **Single project**: `src/`, `ctl/`, `tests/` at repository root
-- Two binary targets: `monocoque-agent-rem` (server) and `monocoque-ctl` (CLI)
-- Config: `config.toml` at project root or `~/.config/monocoque/config.toml`
-- Workspace policy: `.monocoque/settings.json` inside workspace root
+Single Rust project at repository root per plan.md:
+
+```text
+src/           # Main binary source
+ctl/           # monocoque-ctl companion binary
+tests/         # contract/, integration/, unit/
+```
 
 ---
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-**Purpose**: Project initialization, Cargo workspace, directory skeleton
+**Purpose**: Project initialization, dependency wiring, and basic compile-check structure
 
-- [x] T001 Create Cargo workspace with two binary targets (`monocoque-agent-rem` in src/main.rs, `monocoque-ctl` in ctl/main.rs) in Cargo.toml
-- [x] T002 Add all dependencies to Cargo.toml: rmcp (features: server, transport-sse-server, transport-io), slack-morphism (features: hyper, socket-mode), axum 0.8, tokio (features: full), serde/serde_json, diffy 0.4, notify, tracing/tracing-subscriber, surrealdb (features: kv-rocksdb, kv-mem), sha2, tempfile, interprocess (features: tokio), uuid (features: v4, serde), chrono (features: serde), clap (features: derive), toml
-- [x] T003 Create full directory structure with stub mod.rs module declarations per plan.md: src/models/, src/mcp/tools/, src/mcp/resources/, src/slack/, src/persistence/, src/orchestrator/, src/policy/, src/diff/, src/ipc/, ctl/, tests/contract/, tests/integration/, tests/unit/
-- [x] T004 [P] Add rustfmt.toml (max_width=100, edition=2021) and configure clippy lints in Cargo.toml
+- [X] T001 Add `keyring = "3"` dependency to `Cargo.toml` workspace dependencies and package dependencies for OS keychain credential loading (FR-036)
+- [X] T002 [P] Create shared error type enum `AppError` with variants for config, persistence, slack, mcp, diff, policy, ipc, and path violation errors in `src/errors.rs`; implement `std::fmt::Display` and `std::error::Error`
+- [X] T003 [P] Initialize tracing subscriber with `env-filter` and `fmt` features in `src/main.rs`; configure JSON output via `--log-format json` CLI flag using `clap` (FR-037)
+- [X] T004 Verify project compiles with `cargo build` and passes `cargo clippy`
+
+**Checkpoint**: Project compiles, tracing initialized, error types defined
 
 ---
 
@@ -44,311 +42,350 @@ ms.topic: reference
 
 **Purpose**: Core infrastructure that MUST be complete before ANY user story can be implemented
 
-**CRITICAL**: No user story work can begin until this phase is complete
+**⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Implement GlobalConfig TOML parsing with all fields (workspace_root, slack tokens, channel_id, authorized_user_ids, max_concurrent_sessions, timeouts, stall config, host CLI, commands map, http_port, ipc_name) in src/config.rs
-- [ ] T006 [P] Define shared error types (AppError enum with variants for config, db, slack, path_violation, patch_conflict, not_found, unauthorized, already_consumed), Result type alias, and module re-exports in src/lib.rs
-- [ ] T007 [P] Configure tracing-subscriber with structured JSON logging and env-filter in src/main.rs
-- [ ] T008 Implement SurrealDB embedded connection (kv-rocksdb for production, kv-mem for tests), namespace/database setup, and schema DDL with DEFINE TABLE/FIELD for Session, ApprovalRequest, Checkpoint, ContinuationPrompt, StallAlert in src/persistence/db.rs
-- [ ] T009 [P] Implement Session model with status enum (Created, Active, Paused, Terminated, Interrupted), mode enum (Remote, Local, Hybrid), validation rules, and serde derives in src/models/session.rs
-- [ ] T010 Implement Session SurrealDB repository: create, get_by_id, update_status, update_last_activity, list_active, count_active in src/persistence/session_repo.rs
-- [ ] T011 [P] Implement path validation utility: canonicalize path, verify starts_with(workspace_root), reject traversal attempts, return AppError::PathViolation on failure in src/diff/mod.rs
-- [ ] T012 Implement MCP ServerHandler trait with tool_list (all 9 tools) and call_tool router dispatching to individual tool handler modules in src/mcp/server.rs
-- [ ] T013 [P] Implement Slack Socket Mode client: WebSocket connection lifecycle, auto-reconnect via SlackSocketModeClientsManager, on_message/on_error/on_disconnect hooks in src/slack/client.rs
-- [ ] T014 [P] Implement base Slack Block Kit builders: text_section, button_action, actions_block, code_block, rich_text_preformatted, divider, context_block in src/slack/blocks.rs
-- [ ] T015 Implement Slack interaction event handler scaffold: route block_actions and view_submission payloads by action_id, extract session_id/request_id from button values in src/slack/events.rs
-- [ ] T016 [P] Implement Axum HTTP/SSE transport: mount rmcp StreamableHttpService on /mcp route, bind to configurable http_port on 127.0.0.1 in src/main.rs
-- [ ] T017 Wire server entry point: load config, init DB, connect Slack, start stall detector, spawn Axum server, set up stdio MCP transport, register signal handlers in src/main.rs
-- [ ] T089 Implement Slack message queue with rate limit handling: in-memory queue, exponential backoff retry, respect Retry-After headers, drain queue on reconnect. All Slack-posting modules use this queue instead of direct API calls in src/slack/client.rs
-- [ ] T090 [P] Implement Slack channel recent history MCP resource: fetch via conversations.history API, return messages with ts/user/text/thread_ts, register as slack://channel/{id}/recent resource in src/mcp/resources/slack_channel.rs and src/mcp/resources/mod.rs
+### Configuration & Credentials
 
-**Checkpoint**: Foundation ready — user story implementation can now begin
+- [ ] T005 Implement `GlobalConfig` struct and TOML deserialization in `src/config.rs` per data-model.md GlobalConfig entity; include `default_workspace_root`, `slack` (channel_id, authorized_user_ids), `timeouts`, `stall`, `commands`, `http_port`, `ipc_name`, `retention_days`, `max_concurrent_sessions`, `host_cli`, `host_cli_args` fields
+- [ ] T006 Implement credential loading in `src/config.rs`: load `slack_app_token` and `slack_bot_token` from OS keychain (service `monocoque-agent-rem`) using `keyring` crate, falling back to `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` environment variables (FR-036); wrap keychain calls in `tokio::task::spawn_blocking`
+- [ ] T007 Add CLI argument parsing in `src/main.rs` using `clap`: `--config <path>` (required), `--log-format <text|json>` (default text), `--workspace <path>` (optional override for primary agent workspace root)
+
+### Domain Models
+
+- [ ] T008 [P] Implement `Session` struct in `src/models/session.rs` per data-model.md: `session_id`, `owner_user_id`, `workspace_root`, `status` (enum: Created, Active, Paused, Terminated, Interrupted), `prompt`, `mode` (enum: Remote, Local, Hybrid), `created_at`, `updated_at`, `terminated_at`, `last_tool`, `nudge_count`, `stall_paused`, `progress_snapshot` (Option<Vec<ProgressItem>>); derive `Serialize`/`Deserialize`
+- [ ] T009 [P] Implement `ApprovalRequest` struct in `src/models/approval.rs` per data-model.md: `request_id`, `session_id`, `title`, `description`, `diff_content`, `file_path`, `risk_level` (enum: Low, High, Critical), `status` (enum: Pending, Approved, Rejected, Expired, Consumed, Interrupted), `original_hash`, `slack_ts`, `created_at`, `consumed_at`; derive `Serialize`/`Deserialize`
+- [ ] T010 [P] Implement `Checkpoint` struct in `src/models/checkpoint.rs` per data-model.md: `checkpoint_id`, `session_id`, `label`, `session_state` (serde_json::Value), `file_hashes` (HashMap<String, String>), `workspace_root`, `progress_snapshot`, `created_at`; derive `Serialize`/`Deserialize`
+- [ ] T011 [P] Implement `ContinuationPrompt` struct in `src/models/prompt.rs` per data-model.md: `prompt_id`, `session_id`, `prompt_text`, `prompt_type` (enum: Continuation, Clarification, ErrorRecovery, ResourceWarning), `elapsed_seconds`, `actions_taken`, `decision` (enum: Continue, Refine, Stop), `instruction`, `slack_ts`, `created_at`; derive `Serialize`/`Deserialize`
+- [ ] T012 [P] Implement `StallAlert` struct in `src/models/stall.rs` per data-model.md: `alert_id`, `session_id`, `last_tool`, `last_activity_at`, `idle_seconds`, `nudge_count`, `status` (enum: Pending, Nudged, SelfRecovered, Escalated, Dismissed), `nudge_message`, `progress_snapshot`, `slack_ts`, `created_at`; derive `Serialize`/`Deserialize`
+- [ ] T013 [P] Implement `WorkspacePolicy` struct in `src/models/policy.rs` per data-model.md: `enabled`, `commands`, `tools`, `file_patterns` (write/read glob lists), `risk_level_threshold`, `log_auto_approved`, `summary_interval_seconds`; derive `Deserialize` from JSON
+- [ ] T014 [P] Implement `ProgressItem` struct in `src/models/progress.rs`: `label: String`, `status: ProgressStatus` (enum: Done, InProgress, Pending); derive `Serialize`/`Deserialize`; add validation function to reject malformed snapshots
+- [ ] T015 Create `src/models/mod.rs` re-exporting all model types from session, approval, checkpoint, prompt, stall, policy, progress submodules
+
+### SurrealDB Persistence Layer
+
+- [ ] T016 Implement database connection and initialization in `src/persistence/db.rs`: connect to SurrealDB embedded (RocksDB backend from config path, in-memory for tests via feature flag), select namespace `monocoque` and database `agent_rem`
+- [ ] T017 Implement schema DDL in `src/persistence/schema.rs`: define SCHEMAFULL tables `session`, `approval_request`, `checkpoint`, `continuation_prompt`, `stall_alert` with `DEFINE FIELD` and `ASSERT` constraints per data-model.md; execute on startup with `IF NOT EXISTS` for idempotent migrations
+- [ ] T018 [P] Implement `SessionRepo` in `src/persistence/session_repo.rs`: CRUD operations for Session — `create`, `get_by_id`, `list_active`, `update_status`, `update_activity` (sets updated_at + last_tool), `update_progress_snapshot`, `set_terminated`, `count_active_sessions`
+- [ ] T019 [P] Implement `ApprovalRepo` in `src/persistence/approval_repo.rs`: CRUD operations for ApprovalRequest — `create`, `get_by_id`, `get_pending_for_session`, `update_status`, `mark_consumed`, `list_pending`
+- [ ] T020 [P] Implement `CheckpointRepo` in `src/persistence/checkpoint_repo.rs`: CRUD for Checkpoint — `create`, `get_by_id`, `list_for_session`, `delete_for_session`
+- [ ] T021 [P] Implement `PromptRepo` in `src/persistence/prompt_repo.rs`: CRUD for ContinuationPrompt — `create`, `get_by_id`, `get_pending_for_session`, `update_decision`
+- [ ] T022 [P] Implement `StallAlertRepo` in `src/persistence/stall_repo.rs`: CRUD for StallAlert — `create`, `get_active_for_session`, `update_status`, `increment_nudge_count`, `dismiss`
+- [ ] T023 Implement `RetentionService` in `src/persistence/retention.rs`: background task running hourly via `tokio::time::interval`; delete children first (approval_request, checkpoint, continuation_prompt, stall_alert), then session where `status = terminated AND terminated_at < now - retention_days` (FR-035)
+- [ ] T024 Create `src/persistence/mod.rs` re-exporting db, schema, all repos, and retention service
+
+### Slack Client Foundation
+
+- [ ] T025 Implement Slack Socket Mode client wrapper in `src/slack/client.rs`: connect using `slack-morphism` `SlackSocketModeClientsManager` with app_token; handle reconnection; expose methods `post_message`, `update_message`, `upload_file`, `open_modal`; implement rate-limit queue with exponential backoff (FR-020)
+- [ ] T026 [P] Implement Slack Block Kit message builders in `src/slack/blocks.rs`: helper functions for building `rich_text_preformatted` blocks (small diffs), file upload payloads (large diffs), `actions` blocks with buttons (Accept/Reject, Continue/Refine/Stop, Nudge/Stop), severity-formatted log messages (info ℹ️, success ✅, warning ⚠️, error ❌)
+- [ ] T027 [P] Implement interaction handler dispatch in `src/slack/interactions.rs`: receive button press and modal submission payloads from Socket Mode events; dispatch to appropriate handler by `action_id`; verify `user.id` matches session owner (FR-013); replace buttons with static status text after first action (FR-022)
+- [ ] T028 Create `src/slack/mod.rs` re-exporting client, blocks, interactions
+
+### MCP Server Foundation
+
+- [ ] T029 Implement MCP server handler struct `AgentRemServer` in `src/mcp/handler.rs`: implement `rmcp::ServerHandler` trait with `call_tool`, `list_tools`, `list_resources`, `read_resource`, `on_initialized` methods; store reference to shared application state (config, DB, Slack client, session registry); tracing span on every tool call (FR-037)
+- [ ] T030 Implement session context resolution in `src/mcp/context.rs`: given an MCP request context, resolve the active `Session` and its `workspace_root`; create `ToolContext` struct carrying session reference, workspace_root, peer handle, and shared state
+- [ ] T031 [P] Implement stdio transport setup in `src/mcp/transport.rs`: wire `AgentRemServer` to `rmcp::transport::stdio` for the primary agent connection; create and auto-activate a default session on first tool call using `default_workspace_root` from GlobalConfig or `--workspace` CLI arg
+- [ ] T032 [P] Implement HTTP/SSE transport setup in `src/mcp/sse.rs`: mount `rmcp::StreamableHttpService` onto an `axum::Router` via `nest_service("/mcp", service)`; bind to `config.http_port` on localhost; each SSE connection creates a new session with workspace_root from connection parameters
+- [ ] T033 Create `src/mcp/mod.rs` re-exporting handler, context, transport, sse
+
+### Path Safety
+
+- [ ] T034 Implement path validation utility in `src/diff/path_safety.rs`: `validate_path(file_path, workspace_root) -> Result<PathBuf>` that canonicalizes both paths, verifies the resolved path `starts_with` the workspace root, rejects `..` segments, and returns the canonicalized absolute path (FR-006)
+
+### Server Bootstrap
+
+- [ ] T035 Implement server bootstrap in `src/main.rs`: load config (T005-T007), initialize DB and run schema (T016-T017), start retention service (T023), connect Slack client (T025), create `AgentRemServer` with shared state, start stdio transport (T031), start SSE transport with axum (T032), register Slack interaction handler (T027), set up graceful shutdown handler for SIGTERM/SIGINT that persists in-flight state and notifies Slack (FR-021)
+- [ ] T036 Update `src/lib.rs` to re-export all public modules: config, errors, models, persistence, slack, mcp, diff, policy, orchestrator, ipc
+- [ ] T037 Verify full compilation with `cargo build` and `cargo clippy` pass cleanly
+
+**Checkpoint**: Foundation ready — all infrastructure compiled, SurrealDB schema deployed, Slack connected, MCP server accepting connections, session context resolution operational. User story implementation can now begin.
 
 ---
 
-## Phase 3: User Story 1 — Remote Code Review and Approval (Priority: P1) MVP
+## Phase 3: User Story 1 — Remote Code Review and Approval (Priority: P1) 🎯 MVP
 
-**Goal**: Agent submits code proposals for remote operator approval via Slack with Accept/Reject buttons
+**Goal**: Agent submits code proposals for remote approval via Slack; operator reviews diffs and taps Accept/Reject from mobile
 
-**Independent Test**: Start server, connect agent, invoke ask_approval with a sample diff, verify diff appears in Slack with actionable buttons. Tap Accept and confirm agent receives approval response.
+**Independent Test**: Start server, connect agent, invoke `ask_approval` with a sample diff, verify diff appears in Slack with actionable buttons, tap Accept, verify agent receives approved response
 
 ### Implementation for User Story 1
 
-- [ ] T018 [P] [US1] Implement ApprovalRequest model with status enum (Pending, Approved, Rejected, Expired, Consumed, Interrupted), risk_level enum (Low, High, Critical), serde derives, and validation rules in src/models/approval.rs
-- [ ] T019 [US1] Implement ApprovalRequest SurrealDB repository: create, get_by_id, update_status, set_consumed, query_pending_by_session, query_by_session in src/persistence/approval_repo.rs
-- [ ] T020 [US1] Implement ask_approval tool handler: validate file_path within workspace_root, compute SHA-256 of target file, create ApprovalRequest record, post diff to Slack, block via tokio::sync::oneshot until operator response or timeout in src/mcp/tools/ask_approval.rs
-- [ ] T021 [US1] Implement size-adaptive diff rendering: inline rich_text_preformatted for diffs under 20 lines, files.upload as .diff snippet with syntax highlighting for diffs of 20+ lines in src/slack/blocks.rs
-- [ ] T022 [US1] Implement Accept/Reject interactive button payloads (action_id: approval_accept/approval_reject, value: JSON with request_id and session_id) and response handler that resolves the blocked tool call in src/slack/events.rs
-- [ ] T023 [US1] Implement approval timeout logic: tokio::time::timeout wrapping the oneshot receiver, transition status to Expired, post timeout notification to Slack in src/mcp/tools/ask_approval.rs
-- [ ] T024 [US1] Implement double-submission prevention: on first button action, call chat.update to replace action buttons with static status text (approved/rejected with timestamp) in src/slack/events.rs
-- [ ] T025 [US1] Register ask_approval tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T038 [US1] Implement `ask_approval` MCP tool handler in `src/mcp/tools/ask_approval.rs`: accept `title`, `description`, `diff`, `file_path`, `risk_level` per mcp-tools.json contract; validate `file_path` via `validate_path` against session's `workspace_root`; compute SHA-256 hash of current file content; create `ApprovalRequest` record (status=Pending) in SurrealDB; render diff in Slack (inline for <20 lines, snippet upload for ≥20 lines) with Accept/Reject buttons carrying `request_id` in action value; block on `tokio::sync::oneshot` channel until operator responds or timeout elapses; return `{status, request_id, reason}` per contract
+- [ ] T039 [US1] Implement approval interaction callback in `src/slack/handlers/approval.rs`: handle Accept and Reject button presses from `src/slack/interactions.rs` dispatch; verify session owner (FR-013); update `ApprovalRequest` status in DB; resolve the `oneshot::Sender` to unblock the waiting tool call; replace buttons with status text (FR-022); for Reject, capture optional reason from operator
+- [ ] T040 [US1] Implement approval timeout logic in `src/mcp/tools/ask_approval.rs`: if `timeouts.approval_seconds` elapses with no response, resolve oneshot with `timeout` status, update DB record to Expired, post timeout notification to Slack channel
+- [ ] T041 [US1] Wire pending approval request map in `src/mcp/handler.rs`: maintain `HashMap<String, oneshot::Sender<ApprovalResponse>>` keyed by `request_id` in shared state; `ask_approval` inserts sender, interaction callback extracts and resolves it
+- [ ] T042 [US1] Add tracing spans to `ask_approval` tool: span covering full tool execution with `request_id`, `file_path`, `risk_level` attributes; child span for Slack API call; log final outcome (approved/rejected/timeout) at info level
 
-**Checkpoint**: Remote code review and approval workflow is functional end-to-end via Slack
+**Checkpoint**: User Story 1 functional — agent can submit diffs, operator can review and approve/reject from Slack
 
 ---
 
 ## Phase 4: User Story 2 — Programmatic Diff Application (Priority: P1)
 
-**Goal**: Approved code changes are applied directly to the local file system with integrity checks and atomic writes
+**Goal**: After approval, server applies code changes to the local file system programmatically
 
-**Independent Test**: Submit a diff for approval, approve via Slack, invoke accept_diff with the request_id. Verify file is written to disk with correct content and Slack receives confirmation.
+**Independent Test**: Submit diff via `ask_approval`, approve it, invoke `accept_diff` with the `request_id`, verify file written to disk with correct content
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] Implement diff applicator: parse unified diffs via diffy::Patch::from_str, apply patches via diffy::apply, support full-file write mode for raw content payloads in src/diff/applicator.rs
-- [ ] T027 [US2] Implement file integrity checking: compute SHA-256 via sha2 crate, compare against stored original_hash, return AppError::PatchConflict when hashes diverge (unless force=true) in src/diff/applicator.rs
-- [ ] T028 [US2] Implement atomic file writes: write to tempfile::NamedTempFile in same directory, create parent directories with std::fs::create_dir_all, persist via rename in src/diff/applicator.rs
-- [ ] T029 [US2] Implement accept_diff tool handler: validate request_id exists and status is Approved, invoke diff applicator, transition status to Consumed with consumed_at timestamp, handle already_consumed and not_approved errors in src/mcp/tools/accept_diff.rs
-- [ ] T030 [US2] Post diff application confirmation to Slack channel (file path, bytes written, checkmark indicator) in src/mcp/tools/accept_diff.rs
-- [ ] T031 [US2] Register accept_diff tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T043 [US2] Implement file writing utility in `src/diff/writer.rs`: `write_full_file(path, content, workspace_root) -> Result<WriteSummary>` that validates path, creates parent directories if needed, writes to `tempfile::NamedTempFile` in the same directory, then `persist()` for atomic rename; return `{path, bytes_written}`
+- [ ] T044 [US2] Implement diff/patch application utility in `src/diff/patcher.rs`: `apply_patch(path, unified_diff, workspace_root) -> Result<WriteSummary>` using `diffy::Patch::from_str` and `diffy::apply`; read existing file, apply patch, write result via `write_full_file`; handle patch failure with descriptive error
+- [ ] T045 [US2] Implement `accept_diff` MCP tool handler in `src/mcp/tools/accept_diff.rs`: accept `request_id` and `force` per mcp-tools.json contract; look up `ApprovalRequest` by ID; validate status is `Approved` (return `not_approved` error otherwise); verify `consumed_at` is None (return `already_consumed` if set); recompute SHA-256 of current file and compare to `original_hash` — if mismatch and `force=false` return `patch_conflict`, if `force=true` log warning to Slack; determine full-file vs patch mode from `diff_content` format; apply via writer or patcher; mark request as `Consumed` with `consumed_at` timestamp; post confirmation to Slack; return `{status: applied, files_written}` per contract
+- [ ] T046 [US2] Add tracing spans to `accept_diff` tool: span with `request_id`, `file_path`, `force` attributes; log hash comparison result; log write outcome
 
-**Checkpoint**: End-to-end remote approval and file application workflow complete
+**Checkpoint**: End-to-end remote workflow complete — agent proposes, operator approves, server writes files
 
 ---
 
 ## Phase 5: User Story 4 — Agent Stall Detection and Remote Nudge (Priority: P1)
 
-**Goal**: Server detects silent agent stalls, alerts operator via Slack, and injects continuation prompts to resume work
+**Goal**: Server detects when agent goes silent, alerts operator via Slack, and nudges agent to resume
 
-**Independent Test**: Connect agent, simulate tool calls, then go silent past threshold. Verify stall alert posts to Slack. Tap Nudge and verify agent receives continuation notification.
+**Independent Test**: Connect agent, make several tool calls, simulate silence (no calls for threshold period), verify stall alert in Slack, tap Nudge, verify agent receives notification
 
 ### Implementation for User Story 4
 
-- [ ] T032 [P] [US4] Implement StallAlert model with status enum (Pending, Nudged, SelfRecovered, Escalated, Dismissed), serde derives, and validation rules in src/models/stall.rs
-- [ ] T033 [US4] Implement per-session stall detector: tokio::time::interval timer, reset on any MCP activity (tool call request, tool call response, heartbeat), auto-pause during long-running server operations, configurable thresholds from GlobalConfig in src/orchestrator/stall_detector.rs
-- [ ] T034 [US4] Implement heartbeat tool handler: reset stall timer for session, optionally log status_message to Slack, return acknowledged/session_id/stall_detection_enabled in src/mcp/tools/heartbeat.rs
-- [ ] T035 [US4] Implement stall alert Slack messages: include last tool called, elapsed idle time, session prompt context, with Nudge/Nudge with Instructions/Stop action buttons in src/slack/blocks.rs
-- [ ] T036 [US4] Implement stall interaction handler: Nudge triggers default message delivery, Nudge with Instructions opens modal for custom text, Stop terminates session in src/slack/events.rs
-- [ ] T037 [US4] Implement monocoque/nudge CustomNotification delivery via context.peer.send_notification(ServerNotification::CustomNotification) with session_id, message, nudge_count, idle_seconds, source fields in src/orchestrator/stall_detector.rs
-- [ ] T038 [US4] Implement auto-nudge escalation policy: after escalation_threshold_seconds without operator response, auto-nudge agent; after max_retries consecutive auto-nudges, post escalated alert with @channel mention in src/orchestrator/stall_detector.rs
-- [ ] T039 [US4] Implement self-recovery detection: when agent resumes MCP activity after stall alert, call chat.update to mark alert as self-recovered and disable action buttons in src/orchestrator/stall_detector.rs
-- [ ] T040 [US4] Wire stall detector into session lifecycle: start timer on session activation, stop on pause/terminate, integrate with Session.last_tool and Session.nudge_count tracking in src/orchestrator/stall_detector.rs
-- [ ] T041 [US4] Register heartbeat tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T047 [US4] Implement per-session stall detection timer in `src/orchestrator/stall_detector.rs`: for each active session, maintain a `tokio::time::Interval` that fires after `stall.inactivity_threshold_seconds` of no MCP activity; expose `reset()` method called on every tool call request, tool call response, and heartbeat; expose `pause()` and `resume()` for long-running server operations; use `CancellationToken` for cleanup on session termination
+- [ ] T048 [US4] Implement stall alert posting in `src/orchestrator/stall_detector.rs`: when timer fires, create `StallAlert` record in DB, post alert to Slack with last tool name, idle seconds, and session prompt context; if session has a `progress_snapshot`, render checklist with ✅/🔄/⬜ emoji per item (FR-026); include Nudge, Nudge with Instructions, and Stop buttons
+- [ ] T049 [US4] Implement `heartbeat` MCP tool handler in `src/mcp/tools/heartbeat.rs`: accept `status_message` and optional `progress_snapshot` per mcp-tools.json contract; validate snapshot structure if provided (reject malformed, preserve existing); update session's `progress_snapshot` in DB if provided; reset stall timer; optionally log `status_message` to Slack via `remote_log`; return `{acknowledged, session_id, stall_detection_enabled}` per contract
+- [ ] T050 [US4] Implement nudge interaction callback in `src/slack/handlers/nudge.rs`: handle Nudge, Nudge with Instructions, and Stop button presses; for Nudge: send `monocoque/nudge` CustomNotification via `context.peer.send_notification()` with default message, progress_snapshot summary, and nudge_count (FR-027); for Nudge with Instructions: open Slack modal for custom message, then send notification with that text; for Stop: terminate session; update StallAlert status in DB; replace buttons with status text
+- [ ] T051 [US4] Implement auto-nudge escalation in `src/orchestrator/stall_detector.rs`: after `stall.escalation_threshold_seconds` with no operator response, auto-nudge the agent with default continuation message including progress snapshot summary (FR-028, FR-034); increment nudge counter; if counter exceeds `stall.max_retries`, post escalated alert with `@channel` mention (FR-029)
+- [ ] T052 [US4] Implement self-recovery detection in `src/orchestrator/stall_detector.rs`: when agent resumes activity (any tool call resets timer) while a stall alert is pending/nudged, update alert status to SelfRecovered, update Slack message to show auto-recovery, disable action buttons (FR-030)
+- [ ] T053 [US4] Wire stall timer reset into MCP handler in `src/mcp/handler.rs`: on every `call_tool` invocation and every tool response, call `stall_detector.reset(session_id)`; auto-pause timer when executing long-running server operations (command execution) and resume on completion (FR-025)
+- [ ] T054 [US4] Add tracing spans to stall detection: spans for timer fire, alert posting, nudge sending, auto-nudge escalation, self-recovery events
 
-**Checkpoint**: All P1 stories complete — agent stalls are detected, alerted, and recoverable
+**Checkpoint**: Stall detection operational — silent agents detected, operator alerted, nudge restores agent, auto-escalation works
 
 ---
 
 ## Phase 6: User Story 3 — Remote Status Logging (Priority: P2)
 
-**Goal**: Agent sends non-blocking progress updates to Slack with severity-based formatting
+**Goal**: Agent sends non-blocking progress messages to Slack with severity-based formatting
 
-**Independent Test**: Invoke remote_log with messages at each severity level (info, success, warning, error) and verify each appears in Slack with correct visual indicator.
+**Independent Test**: Invoke `remote_log` with messages at info/success/warning/error levels, verify each appears in Slack with correct formatting
 
 ### Implementation for User Story 3
 
-- [ ] T042 [P] [US3] Implement remote_log tool handler: post message to Slack via chat.postMessage (or chat.postMessage with thread_ts for replies), return posted=true with message timestamp in src/mcp/tools/remote_log.rs
-- [ ] T043 [US3] Implement severity-based visual formatting: info (plain text), success (checkmark emoji prefix), warning (warning emoji prefix), error (x emoji prefix with red sidebar via attachment color) in src/slack/blocks.rs
-- [ ] T044 [US3] Register remote_log tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T055 [US3] Implement `remote_log` MCP tool handler in `src/mcp/tools/remote_log.rs`: accept `message`, `level`, `thread_ts` per mcp-tools.json contract; format message using Block Kit severity builders from `src/slack/blocks.rs` (info ℹ️, success ✅, warning ⚠️, error ❌); post to Slack channel (or thread if `thread_ts` provided); do NOT block agent — queue message via Slack client's rate-limit queue; return `{posted, ts}` per contract
+- [ ] T056 [US3] Add tracing span to `remote_log` tool: span with `level`, `thread_ts` attributes; log post result
 
-**Checkpoint**: Agent progress is visible to operator in real time via Slack
+**Checkpoint**: Agent can send visible progress updates to Slack
 
 ---
 
 ## Phase 7: User Story 5 — Continuation Prompt Forwarding (Priority: P2)
 
-**Goal**: Agent continuation prompts are forwarded to Slack with actionable response buttons, eliminating blocking meta-prompts
+**Goal**: Agent-generated continuation prompts forwarded to Slack with Continue/Refine/Stop buttons
 
-**Independent Test**: Invoke forward_prompt with a continuation prompt. Verify it appears in Slack with Continue/Refine/Stop buttons. Tap Continue and verify agent receives the decision.
+**Independent Test**: Invoke `forward_prompt` with a continuation prompt, verify it appears in Slack with three buttons, tap Continue, verify agent receives decision
 
 ### Implementation for User Story 5
 
-- [ ] T045 [US5] Implement ContinuationPrompt model with prompt_type enum (Continuation, Clarification, ErrorRecovery, ResourceWarning), decision enum (Continue, Refine, Stop), serde derives in src/models/prompt.rs
-- [ ] T091 [US5] Implement ContinuationPrompt SurrealDB repository: create, get_by_id, update_decision, query_pending_by_session in src/persistence/prompt_repo.rs (required for FR-007 crash recovery of pending prompts)
-- [ ] T046 [US5] Implement forward_prompt tool handler: create ContinuationPrompt record, post prompt to Slack with context (elapsed_seconds, actions_taken), block via oneshot until operator response or timeout in src/mcp/tools/forward_prompt.rs
-- [ ] T047 [US5] Implement Slack prompt message with Continue/Refine/Stop action buttons (action_id: prompt_continue/prompt_refine/prompt_stop, value: JSON with prompt_id and session_id) in src/slack/blocks.rs
-- [ ] T048 [US5] Implement Refine modal dialog: views.open triggered from prompt_refine button, text input for revised instructions, on submission deliver refine decision with instruction text in src/slack/events.rs
-- [ ] T092 [US5] Implement double-submission prevention for prompt buttons: on first button action (Continue/Refine/Stop), call chat.update to replace action buttons with static status text (decision with timestamp) in src/slack/events.rs
-- [ ] T049 [US5] Implement prompt timeout with auto-continue: tokio::time::timeout wrapping oneshot, default decision=continue, post timeout notification to Slack in src/mcp/tools/forward_prompt.rs
-- [ ] T050 [US5] Register forward_prompt tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T057 [US5] Implement `forward_prompt` MCP tool handler in `src/mcp/tools/forward_prompt.rs`: accept `prompt_text`, `prompt_type`, `elapsed_seconds`, `actions_taken` per mcp-tools.json contract; create `ContinuationPrompt` record in DB; post prompt to Slack with Continue/Refine/Stop buttons and elapsed time context; block on `oneshot` channel until response or `timeouts.prompt_seconds` elapses; on timeout, auto-respond with `continue` decision and post timeout notification (FR-008); return `{decision, instruction}` per contract
+- [ ] T058 [US5] Implement prompt interaction callback in `src/slack/handlers/prompt.rs`: handle Continue, Refine, and Stop button presses; for Continue: resolve oneshot with `continue`; for Refine: open modal dialog for revised instruction text, on submission resolve with `refine` + instruction; for Stop: resolve with `stop`; update DB record with decision; replace buttons with status text (FR-022)
+- [ ] T059 [US5] Wire pending prompt map in `src/mcp/handler.rs`: maintain `HashMap<String, oneshot::Sender<PromptResponse>>` keyed by `prompt_id` in shared state, similar to approval pattern
+- [ ] T060 [US5] Add tracing spans to `forward_prompt`: span with `prompt_type`, `prompt_id` attributes; log decision outcome
 
-**Checkpoint**: Continuation prompts no longer block unattended agent sessions
+**Checkpoint**: Continuation prompts forwarded and resolved from Slack
 
 ---
 
 ## Phase 8: User Story 6 — Workspace Auto-Approve Policy (Priority: P2)
 
-**Goal**: Pre-authorized safe operations bypass the remote approval gate, reducing notification noise
+**Goal**: Workspace policy file auto-approves pre-trusted operations, reducing Slack notification noise
 
-**Independent Test**: Create .monocoque/settings.json with auto-approve for "cargo test". Invoke check_auto_approve and verify it returns auto_approved=true. Verify operations exceeding risk threshold still require approval.
+**Independent Test**: Create `.monocoque/settings.json` with "cargo test" auto-approved, invoke `check_auto_approve`, verify returns `auto_approved: true`
 
 ### Implementation for User Story 6
 
-- [ ] T051 [P] [US6] Implement WorkspacePolicy model (in-memory, not persisted): parse .monocoque/settings.json, fields for enabled, commands[], tools[], file_patterns (write/read), risk_level_threshold, log_auto_approved, summary_interval_seconds in src/models/policy.rs
-- [ ] T052 [US6] Implement policy evaluator: match tool_name against commands and tools lists (glob wildcard support), match file_path against file_patterns, compare risk_level against threshold in src/policy/evaluator.rs
-- [ ] T053 [US6] Implement global config allowlist enforcement: workspace policy commands must exist in GlobalConfig.commands map, reject commands not in global allowlist in src/policy/evaluator.rs
-- [ ] T054 [US6] Implement policy file watcher: notify crate watching .monocoque/settings.json, on modify event re-parse and hot-swap the in-memory WorkspacePolicy, fall back to require-everything on parse error with warning logged to console and Slack in src/policy/watcher.rs
-- [ ] T055 [US6] Implement check_auto_approve tool handler: invoke policy evaluator with tool_name and context, return auto_approved boolean and matched_rule in src/mcp/tools/check_auto_approve.rs
-- [ ] T056 [US6] Register check_auto_approve tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T061 [US6] Implement policy file loader in `src/policy/loader.rs`: parse `.monocoque/settings.json` from a given `workspace_root` into `WorkspacePolicy` struct; on parse error, fall back to "require approval for everything" and emit tracing warning (edge case from spec); validate `commands` entries exist in global `config.commands` allowlist (FR-011)
+- [ ] T062 [US6] Implement policy evaluator in `src/policy/evaluator.rs`: `check_auto_approve(tool_name, context, workspace_policy, global_config) -> AutoApproveResult` matching against commands, tools, file_patterns, and risk_level_threshold; return matched rule name or `auto_approved: false`
+- [ ] T063 [US6] Implement policy hot-reload via `notify` file watcher in `src/policy/watcher.rs`: watch `.monocoque/settings.json` for each active workspace_root using `notify::RecommendedWatcher`; on change event, reload policy via loader; register/unregister watchers as sessions start/terminate (FR-010)
+- [ ] T064 [US6] Implement `check_auto_approve` MCP tool handler in `src/mcp/tools/check_auto_approve.rs`: accept `tool_name` and `context` per mcp-tools.json contract; load policy for session's workspace_root; evaluate via `PolicyEvaluator`; return `{auto_approved, matched_rule}` per contract
+- [ ] T065 [US6] Create `src/policy/mod.rs` re-exporting loader, evaluator, watcher
+- [ ] T066 [US6] Add tracing spans to policy evaluation: span with tool_name, matched_rule, auto_approved attributes
 
-**Checkpoint**: All P2 stories complete — logging, prompts, and auto-approve operational
+**Checkpoint**: Auto-approve policy functional — trusted operations bypass Slack round-trip
 
 ---
 
 ## Phase 9: User Story 7 — Remote Session Orchestration (Priority: P3)
 
-**Goal**: Operator starts, pauses, resumes, terminates, checkpoints, and restores agent sessions entirely from Slack
+**Goal**: Operator starts, pauses, resumes, terminates, checkpoints, and restores sessions from Slack
 
-**Independent Test**: Use /monocoque session-start to spawn an agent. Pause, resume, and terminate it. Create a checkpoint, make changes, restore, and verify prior state is recovered.
+**Independent Test**: Issue `session-start` via Slack, verify agent spawns; pause and resume; create checkpoint; restore checkpoint
 
 ### Implementation for User Story 7
 
-- [ ] T057 [P] [US7] Implement Checkpoint model with file_hashes map (path → SHA-256) for divergence detection, serialized session_state, label, serde derives in src/models/checkpoint.rs
-- [ ] T058 [US7] Implement Checkpoint SurrealDB repository: create, get_by_id, list_by_session, delete in src/persistence/checkpoint_repo.rs
-- [ ] T059 [US7] Implement session spawner: tokio::process::Command with kill_on_drop(true), configure host CLI binary and args from GlobalConfig, capture stdin/stdout for MCP transport in src/orchestrator/spawner.rs
-- [ ] T060 [US7] Implement session manager: start (validate authorized user, enforce concurrent limit, spawn process, create Session record), pause (send pause signal, update status), resume (send resume signal, update status), terminate (kill process, update status) in src/orchestrator/session_manager.rs
-- [ ] T061 [US7] Implement slash command router: parse /monocoque commands, dispatch to handler functions, validate session owner on all session-scoped commands in src/slack/commands.rs
-- [ ] T062 [US7] Implement session management commands: session-start (spawn + confirm), session-pause, session-resume, session-clear (terminate + cleanup), sessions (list all with state/timestamps) in src/slack/commands.rs
-- [ ] T063 [US7] Implement checkpoint commands: session-checkpoint (snapshot session state + compute file hashes), session-restore (compare file hashes, warn on divergence, post Slack message with diverged file list and Confirm Restore/Cancel buttons, restore state only after operator confirms), session-checkpoints (list with labels/timestamps) in src/slack/commands.rs and src/slack/events.rs
-- [ ] T064 [US7] Implement wait_for_instruction tool handler: post standby message to Slack, block via oneshot until operator sends resume signal or new instruction via slash command, support configurable timeout in src/mcp/tools/wait_for_instruction.rs
-- [ ] T065 [US7] Implement concurrent session limit enforcement: check count_active against max_concurrent_sessions before session-start, return descriptive error when limit exceeded in src/orchestrator/session_manager.rs
-- [ ] T066 [US7] Implement session owner validation: on all session-scoped interactions (button clicks, slash commands), verify Slack user_id matches Session.owner_user_id, reject with informative message if mismatch in src/orchestrator/session_manager.rs
-- [ ] T067 [US7] Register wait_for_instruction tool in MCP ServerHandler call_tool router and wire slash command handler into Slack event dispatcher in src/mcp/server.rs
+- [ ] T067 [US7] Implement slash command dispatcher in `src/slack/commands.rs`: parse `/monocoque <command> [args]` from Slack slash command events; dispatch to handler by command name per mcp-resources.json slashCommands contract; verify user is in `authorized_user_ids` (FR-013); for session-scoped commands, verify user is session owner
+- [ ] T068 [US7] Implement agent process spawner in `src/orchestrator/spawner.rs`: `spawn_session(prompt, workspace_root, config) -> Result<Session>` using `tokio::process::Command` with `kill_on_drop(true)`; set `MONOCOQUE_WORKSPACE_ROOT` env var; pass `--config` and SSE endpoint URL to host CLI; create Session record in DB with status=Created; enforce `max_concurrent_sessions` limit (FR-023)
+- [ ] T069 [US7] Implement session lifecycle commands in `src/orchestrator/session_manager.rs`: `pause_session` (set status=Paused, stop processing tool calls), `resume_session` (set status=Active), `terminate_session` (set status=Terminated, set terminated_at, send SIGTERM to child process with 5s grace, force kill if needed, post notification to Slack) (FR-012, FR-021)
+- [ ] T070 [US7] Implement checkpoint creation in `src/orchestrator/checkpoint_manager.rs`: `create_checkpoint(session_id, label)` — snapshot session state, compute SHA-256 hashes of workspace files, capture progress_snapshot, store Checkpoint record in DB, post confirmation to Slack (FR-024)
+- [ ] T071 [US7] Implement checkpoint restore in `src/orchestrator/checkpoint_manager.rs`: `restore_checkpoint(checkpoint_id)` — load checkpoint, compare `file_hashes` against current files, warn operator of divergences via Slack with file list, wait for confirmation, restore session state, include progress_snapshot in restore response (FR-024)
+- [ ] T072 [US7] Implement `sessions` and `session-checkpoints` list commands in `src/slack/commands.rs`: query DB for active sessions or checkpoints, format and post to Slack
+- [ ] T073 [US7] Implement `help` command in `src/slack/commands.rs`: list all available slash commands grouped by category per mcp-resources.json (FR-019)
+- [ ] T074 [US7] Create `src/orchestrator/mod.rs` re-exporting spawner, session_manager, checkpoint_manager, stall_detector
+- [ ] T075 [US7] Add tracing spans to session lifecycle: spans for spawn, pause, resume, terminate, checkpoint-create, checkpoint-restore
 
-**Checkpoint**: Full session orchestration available from Slack — start, manage, checkpoint, restore
+**Checkpoint**: Full session orchestration operational from Slack
 
 ---
 
 ## Phase 10: User Story 8 — Remote File Browsing and Command Execution (Priority: P3)
 
-**Goal**: Operator browses workspace files and executes pre-approved commands from Slack
+**Goal**: Operator browses workspace files and runs pre-approved commands from Slack
 
-**Independent Test**: Issue list-files via Slack and verify directory tree appears. Issue show-file and verify file contents with syntax highlighting. Execute a registered command and verify output posts to Slack.
+**Independent Test**: Issue `list-files` via Slack, verify directory tree; issue `show-file`, verify file contents; run a registered command
 
 ### Implementation for User Story 8
 
-- [ ] T068 [P] [US8] Implement list-files slash command: recursive directory listing with configurable depth (default 3), format as indented tree, respect workspace_root boundary in src/slack/commands.rs
-- [ ] T069 [P] [US8] Implement show-file slash command: read file content, validate path within workspace_root, render with syntax highlighting via code block with language hint, support --lines START:END range in src/slack/commands.rs
-- [ ] T070 [US8] Implement custom command execution: look up alias in GlobalConfig.commands registry, reject unknown commands with explicit error, execute via tokio::process::Command, capture stdout/stderr in src/slack/commands.rs
-- [ ] T071 [US8] Implement command output Slack formatting: wrap output in code blocks, truncate to Slack message limit (3000 chars) with "truncated" indicator, upload as snippet for large output in src/slack/blocks.rs
+- [ ] T076 [US8] Implement `list-files` command handler in `src/slack/commands.rs`: accept optional path and `--depth N` flag; list directory contents from session's workspace_root; validate path stays within workspace root (FR-006); format as tree and post to Slack
+- [ ] T077 [US8] Implement `show-file` command handler in `src/slack/commands.rs`: accept path and optional `--lines START:END` range; validate path within workspace root; read file contents; upload to Slack as snippet with syntax highlighting based on file extension
+- [ ] T078 [US8] Implement custom command execution handler in `src/slack/commands.rs`: accept command alias from Slack; look up in `config.commands` registry (FR-014); if not found return "command not found" error; if found, execute via `tokio::process::Command` with working directory set to session's workspace_root; capture stdout/stderr; post output to Slack; auto-pause stall timer during execution (FR-025)
+- [ ] T079 [US8] Add tracing spans to file browsing and command execution
 
-**Checkpoint**: Remote workspace visibility and command execution available
+**Checkpoint**: Remote file browsing and command execution functional
 
 ---
 
 ## Phase 11: User Story 9 — State Recovery After Crash (Priority: P3)
 
-**Goal**: Pending requests and session state survive server restarts; agent recovers last known state on reconnection
+**Goal**: After server crash/restart, agent recovers last known state including pending requests
 
-**Independent Test**: Submit an approval request, kill the server, restart it, invoke recover_state and verify the pending request is returned with original data.
+**Independent Test**: Submit approval, kill server, restart, invoke `recover_state`, verify pending request returned
 
 ### Implementation for User Story 9
 
-- [ ] T072 [US9] Implement recover_state tool handler: query SurrealDB for interrupted/active sessions, pending ApprovalRequests (status=Pending), and pending ContinuationPrompts (decision=null) via prompt_repo, return recovered status with session_id, pending_requests list (type: approval|prompt), and last_checkpoint in src/mcp/tools/recover_state.rs
-- [ ] T073 [US9] Implement graceful shutdown handler: register SIGTERM/SIGINT/ctrl_c via tokio::signal, trigger CancellationToken on receipt in src/main.rs
-- [ ] T074 [US9] Implement state persistence on shutdown: mark all active sessions as Interrupted, mark pending approvals as Interrupted, flush SurrealDB writes in src/main.rs
-- [ ] T075 [US9] Implement Slack shutdown notification (post "Server shutting down" with pending request count) and child process cleanup (SIGTERM with 5-second grace period, then force kill) in src/main.rs
-- [ ] T076 [US9] Register recover_state tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T080 [US9] Implement `recover_state` MCP tool handler in `src/mcp/tools/recover_state.rs`: accept optional `session_id` per mcp-tools.json contract; if provided, load specific session; otherwise find most recently active session; collect pending approval requests and prompts; include last checkpoint info; include `progress_snapshot` from session record; return `{status: recovered|clean, session_id, pending_requests, last_checkpoint, progress_snapshot}` per contract
+- [ ] T081 [US9] Implement graceful shutdown handler in `src/main.rs`: on SIGTERM/SIGINT, mark all pending requests as Interrupted in DB, post final notification to Slack, terminate spawned agent processes with 5s grace period, flush and close DB connection (FR-021)
+- [ ] T082 [US9] Add Slack reconnection on startup: on server start, check for sessions with status=Interrupted, re-post any pending approval requests that were in-flight to Slack (edge case: Slack WebSocket drop mid-approval)
+- [ ] T083 [US9] Add tracing spans to recovery: span covering recovery query with session_id, pending_count attributes
 
-**Checkpoint**: Server crash recovery is reliable — no data loss on restart
+**Checkpoint**: Crash recovery operational — no data loss on server restart
 
 ---
 
 ## Phase 12: User Story 10 — Operational Mode Switching (Priority: P3)
 
-**Goal**: Switch between remote (Slack), local (IPC), and hybrid modes at runtime
+**Goal**: Developer switches between remote/local/hybrid modes at runtime
 
-**Independent Test**: Set mode to local and verify Slack notifications stop. Set to remote and verify Slack resumes. Set to hybrid and verify both channels active.
+**Independent Test**: Set mode to local, verify Slack suppressed; set to remote, verify Slack active; set to hybrid, verify both channels active
 
 ### Implementation for User Story 10
 
-- [ ] T077 [P] [US10] Implement IPC local socket listener: create named pipe (Windows) / Unix domain socket (Linux/macOS) via interprocess crate, accept connections, parse JSON-RPC commands for approve/reject/list in src/ipc/socket.rs
-- [ ] T078 [US10] Implement set_operational_mode tool handler: validate mode value, update Session.mode, persist mode to DB, return previous_mode and current_mode in src/mcp/tools/set_operational_mode.rs
-- [ ] T079 [US10] Implement mode-aware routing: when mode=remote route to Slack, when mode=local route to IPC, when mode=hybrid route to both (first response wins via tokio::select) in src/mcp/server.rs
-- [ ] T080 [US10] Implement monocoque-ctl CLI binary: clap-based CLI with subcommands list (show pending requests), approve <request_id>, reject <request_id> --reason, connecting to server via IPC socket in ctl/main.rs
-- [ ] T081 [US10] Register set_operational_mode tool in MCP ServerHandler call_tool router in src/mcp/server.rs
+- [ ] T084 [US10] Implement `set_operational_mode` MCP tool handler in `src/mcp/tools/set_mode.rs`: accept `mode` per mcp-tools.json contract; update session's mode in DB; persist across restarts; return `{previous_mode, current_mode}` per contract
+- [ ] T085 [US10] Implement mode-aware message routing in `src/slack/client.rs`: before posting any Slack message, check session's current mode; if `local` mode, suppress Slack post and route to IPC channel; if `hybrid`, post to both; if `remote` (default), Slack only
+- [ ] T086 [US10] Implement `wait_for_instruction` MCP tool handler in `src/mcp/tools/wait_for_instruction.rs`: accept `message` and `timeout_seconds` per mcp-tools.json contract; post waiting status to Slack; block on resume signal from Slack or IPC; return `{status: resumed|timeout, instruction}` per contract
+- [ ] T087 [US10] Implement IPC server in `src/ipc/server.rs`: listen on named pipe (Windows) or Unix domain socket (Linux/macOS) using `interprocess::local_socket`; accept local approve/reject/resume commands from `monocoque-ctl`; route to appropriate handler (FR-016)
+- [ ] T088 [US10] Implement `monocoque-ctl` CLI in `ctl/main.rs`: connect to IPC socket; implement `list`, `approve <id>`, `reject <id> [--reason]`, `resume [instruction]`, `mode <remote|local|hybrid>`, `credential set <key>` subcommands using `clap`
+- [ ] T089 [US10] Create `src/ipc/mod.rs` re-exporting server
+- [ ] T090 [US10] Add tracing spans to mode switching and IPC operations
 
-**Checkpoint**: All P3 stories complete — full feature set operational
-
----
-
-## Phase 13: Polish and Cross-Cutting Concerns
-
-**Purpose**: Documentation, security hardening, and remaining Slack enhancements
-
-> **Note**: Slack rate limit handling (T089) and MCP resource implementation (T090) were promoted to Phase 2 as foundational infrastructure.
-
-- [ ] T083 [P] Implement help slash command: list all available slash commands grouped by category (Session Management, File Operations, System) with descriptions and argument syntax in src/slack/commands.rs
-- [ ] T086 [P] Update README.md with project overview, architecture diagram, setup instructions, configuration reference, and usage examples
-- [ ] T087 Run quickstart.md validation: build project, create config.toml, connect agent, execute basic approval workflow, verify end-to-end
-- [ ] T088 Security hardening audit: verify all file paths use canonicalize + starts_with(workspace_root), verify unauthorized user interactions are logged with user ID and action, verify command allowlist is enforced, verify session owner binding is immutable
+**Checkpoint**: Full mode switching and local override operational
 
 ---
 
-## Dependencies and Execution Order
+## Phase 13: User Story MCP Resource — Slack Channel History
+
+**Goal**: Expose Slack channel history as an MCP resource for agent context
+
+### Implementation
+
+- [ ] T091 Implement `slack://channel/{id}/recent` MCP resource handler in `src/mcp/resources/channel_history.rs`: read recent messages from configured Slack channel using `conversations.history` API; return `{messages, has_more}` per mcp-resources.json contract; validate `id` matches `config.slack.channel_id` (FR-018)
+- [ ] T092 Wire resource handler into `AgentRemServer::read_resource` in `src/mcp/handler.rs`
+
+**Checkpoint**: Agent can read operator instructions from Slack channel
+
+---
+
+## Phase 14: Polish & Cross-Cutting Concerns
+
+**Purpose**: Improvements that affect multiple user stories
+
+- [ ] T093 [P] Add authorization guard for all Slack interactions in `src/slack/interactions.rs`: verify user is in `authorized_user_ids` for all button presses and slash commands; silently ignore unauthorized users and log security event (FR-013, SC-009)
+- [ ] T094 [P] Add double-submission prevention across all interactive messages in `src/slack/interactions.rs`: after first button action on any message (approval, prompt, stall alert), immediately call `chat.update` to replace buttons with static status text (FR-022)
+- [ ] T095 [P] Add Slack reconnection handling in `src/slack/client.rs`: use `SlackSocketModeClientsManager` reconnection hooks; on reconnect, re-post any pending interactive messages that may have been lost (SC-003)
+- [ ] T096 Verify end-to-end workflow: run server, connect agent, submit approval → approve → apply diff → send log → trigger stall → nudge → recover; validate all acceptance scenarios
+- [ ] T097 Run `cargo clippy -- -D warnings` and `cargo test` to verify no regressions
+- [ ] T098 Validate quickstart.md: follow setup steps from `specs/001-mcp-remote-agent-server/quickstart.md` end-to-end and verify accuracy
+
+---
+
+## Dependencies & Execution Order
 
 ### Phase Dependencies
 
-- **Setup (Phase 1)**: No dependencies — start immediately
-- **Foundational (Phase 2)**: Depends on Phase 1 completion — **BLOCKS all user stories**
-- **US1 (Phase 3)**: Depends on Phase 2 — first MVP deliverable
-- **US2 (Phase 4)**: Depends on Phase 3 (needs ApprovalRequest with Approved status)
-- **US4 (Phase 5)**: Depends on Phase 2 — can run in parallel with Phase 3/4 if staffed
-- **US3 (Phase 6)**: Depends on Phase 2 — can run in parallel with Phase 3/4/5 if staffed
-- **US5 (Phase 7)**: Depends on Phase 2 — can run in parallel with Phase 3-6 if staffed
-- **US6 (Phase 8)**: Depends on Phase 2 — can run in parallel with Phase 3-7 if staffed
-- **US7 (Phase 9)**: Depends on Phase 2 — can run in parallel with other stories if staffed
-- **US8 (Phase 10)**: Depends on Phase 9 (needs slash command router from T061)
-- **US9 (Phase 11)**: Depends on Phase 2 — can run in parallel with other stories if staffed
-- **US10 (Phase 12)**: Depends on Phase 2 — can run in parallel with other stories if staffed
-- **Polish (Phase 13)**: Depends on all desired user stories being complete
+- **Phase 1 (Setup)**: No dependencies — start immediately
+- **Phase 2 (Foundational)**: Depends on Phase 1 — BLOCKS all user stories
+- **Phases 3-4 (US1, US2)**: Depend on Phase 2 — US2 depends on US1 (needs approval before diff application)
+- **Phase 5 (US4)**: Depends on Phase 2 — stall detection is independent of US1/US2
+- **Phase 6 (US3)**: Depends on Phase 2 — logging is independent
+- **Phase 7 (US5)**: Depends on Phase 2 — prompt forwarding is independent
+- **Phase 8 (US6)**: Depends on Phase 2 — auto-approve is independent
+- **Phase 9 (US7)**: Depends on Phase 2 — session orchestration is independent but benefits from US4 (stall detection)
+- **Phase 10 (US8)**: Depends on Phase 2 — file browsing is independent
+- **Phase 11 (US9)**: Depends on Phase 2 — recovery benefits from US1/US4 entities being in place
+- **Phase 12 (US10)**: Depends on Phase 2 — mode switching is independent
+- **Phase 13 (Resource)**: Depends on Phase 2
+- **Phase 14 (Polish)**: Depends on all desired user stories being complete
 
 ### User Story Dependencies
 
-- **US1 (P1)**: No story dependencies — first to implement
-- **US2 (P1)**: Depends on US1 (needs approved ApprovalRequest to apply)
-- **US4 (P1)**: No story dependencies — independent stall detection
-- **US3 (P2)**: No story dependencies — independent logging
-- **US5 (P2)**: No story dependencies — independent prompt forwarding (T091 adds persistence repo for crash recovery)
-- **US6 (P2)**: No story dependencies — independent policy evaluation
-- **US7 (P3)**: No story dependencies — independent session orchestration
-- **US8 (P3)**: Depends on US7 (shares slash command infrastructure)
-- **US9 (P3)**: No story dependencies — independent recovery
-- **US10 (P3)**: No story dependencies — independent IPC/mode routing
-
-### Within Each User Story
-
-- Models before repositories
-- Repositories before tool handlers
-- Slack rendering before interaction handlers
-- Core implementation before tool router registration
-- Story complete before moving to next priority
+- **US1 (P1)**: After Phase 2 — no dependencies on other stories
+- **US2 (P1)**: After US1 — requires ApprovalRequest to exist (approval→apply flow)
+- **US4 (P1)**: After Phase 2 — independent, can run parallel with US1
+- **US3 (P2)**: After Phase 2 — independent, can run parallel
+- **US5 (P2)**: After Phase 2 — independent, can run parallel
+- **US6 (P2)**: After Phase 2 — independent, can run parallel
+- **US7 (P3)**: After Phase 2 — independent
+- **US8 (P3)**: After Phase 2 — independent, benefits from US7 session model
+- **US9 (P3)**: After Phase 2 — benefits from US1, US4 entities being defined
+- **US10 (P3)**: After Phase 2 — independent
 
 ### Parallel Opportunities
 
-- All tasks marked [P] within a phase can run concurrently
-- After Phase 2 completes, multiple user stories can be worked in parallel:
-  - **Stream A**: US1 → US2 (sequential — US2 depends on US1)
-  - **Stream B**: US4 (independent stall detection)
-  - **Stream C**: US3, US5, US6 (independent P2 stories)
-  - **Stream D**: US7 → US8 (sequential — US8 needs slash commands)
-  - **Stream E**: US9, US10 (independent P3 stories)
+After Phase 2 completion, the following can run in parallel:
+
+```text
+Stream A (P1 critical path): US1 → US2
+Stream B (P1 parallel):      US4 (stall detection)
+Stream C (P2 batch):         US3, US5, US6 (all independent)
+Stream D (P3 batch):         US7, US8, US9, US10 (all independent)
+```
+
+### Within Each User Story
+
+- Models → Persistence → Service logic → MCP tool handler → Slack handler → Tracing
+- Core implementation before integration with other stories
+- Story complete before polish phase
 
 ---
 
-## Parallel Example: User Story 1
+## Parallel Example: Phase 2 Foundational
 
 ```text
-# These US1 tasks can run in parallel (different files):
-T018: ApprovalRequest model          → src/models/approval.rs
-(all other US1 tasks depend on T018/T019)
+# Launch all model definitions in parallel (different files):
+T008: Session model in src/models/session.rs
+T009: ApprovalRequest model in src/models/approval.rs
+T010: Checkpoint model in src/models/checkpoint.rs
+T011: ContinuationPrompt model in src/models/prompt.rs
+T012: StallAlert model in src/models/stall.rs
+T013: WorkspacePolicy model in src/models/policy.rs
+T014: ProgressItem model in src/models/progress.rs
 
-# After T019 (repo), these can proceed in parallel:
-T020: ask_approval handler           → src/mcp/tools/ask_approval.rs
-T021: diff rendering                 → src/slack/blocks.rs
-T022: button interaction handler     → src/slack/events.rs
-```
+# Then launch all repo implementations in parallel (different files):
+T018: SessionRepo in src/persistence/session_repo.rs
+T019: ApprovalRepo in src/persistence/approval_repo.rs
+T020: CheckpointRepo in src/persistence/checkpoint_repo.rs
+T021: PromptRepo in src/persistence/prompt_repo.rs
+T022: StallAlertRepo in src/persistence/stall_repo.rs
 
-## Parallel Example: User Story 4
-
-```text
-# These US4 tasks can run in parallel (different files):
-T032: StallAlert model               → src/models/stall.rs
-T034: heartbeat handler              → src/mcp/tools/heartbeat.rs
-
-# After T032, these can proceed:
-T033: stall detector                 → src/orchestrator/stall_detector.rs
-T035-T039: follow sequentially within stall_detector.rs and slack/
+# Launch Slack and MCP foundations in parallel:
+T025: Slack client in src/slack/client.rs
+T026: Block Kit builders in src/slack/blocks.rs
+T029: MCP handler in src/mcp/handler.rs
+T031: Stdio transport in src/mcp/transport.rs
+T032: SSE transport in src/mcp/sse.rs
 ```
 
 ---
@@ -358,49 +395,39 @@ T035-T039: follow sequentially within stall_detector.rs and slack/
 ### MVP First (User Stories 1 + 2 Only)
 
 1. Complete Phase 1: Setup
-2. Complete Phase 2: Foundational (**CRITICAL** — blocks everything)
-3. Complete Phase 3: US1 — Remote Code Review
-4. Complete Phase 4: US2 — Diff Application
-5. **STOP AND VALIDATE**: Agent can submit diff → operator reviews on mobile → file written to disk
+2. Complete Phase 2: Foundational (CRITICAL — blocks all stories)
+3. Complete Phase 3: User Story 1 (remote approval)
+4. Complete Phase 4: User Story 2 (diff application)
+5. **STOP and VALIDATE**: Test end-to-end approve→apply flow independently
 6. Deploy/demo if ready — this is the core value proposition
 
 ### Incremental Delivery
 
 1. Setup + Foundational → Foundation ready
-2. US1 + US2 → Remote approval + file writes (**MVP**)
-3. US4 → Stall detection safety net (completes P1)
-4. US3 → Operator visibility via logging
-5. US5 → Eliminate prompt-based stalls
-6. US6 → Reduce notification noise (completes P2)
-7. US7 + US8 → Full session orchestration
-8. US9 → Crash recovery
-9. US10 → Mode switching (completes P3)
-10. Polish → Resources, docs, hardening
+2. US1 + US2 → MVP: remote approve + apply ✅
+3. US4 → Stall detection + nudge ✅ (completes P1)
+4. US3 + US5 + US6 → Logging, prompts, auto-approve ✅ (P2)
+5. US7 + US8 + US9 + US10 → Session mgmt, file browsing, recovery, modes ✅ (P3)
+6. Polish → Cross-cutting hardening
 
 ### Parallel Team Strategy
 
-With multiple developers:
-
-1. Team completes Setup + Foundational together
-2. Once Foundational is done:
-   - Developer A: US1 → US2 (approval pipeline — sequential)
-   - Developer B: US4 (stall detection — independent)
-   - Developer C: US3 + US5 + US6 (P2 features — independent)
-3. After P1/P2 complete:
-   - Developer A: US7 → US8 (session orchestration)
-   - Developer B: US9 + US10 (recovery + mode switching)
-   - Developer C: Polish
+With multiple developers after Phase 2:
+- **Developer A**: US1 → US2 (critical path)
+- **Developer B**: US4 (stall detection, P1)
+- **Developer C**: US3 + US5 + US6 (P2 batch)
+- Developer D: US7 + US8 + US9 + US10 (P3 batch, after C finishes)
 
 ---
 
 ## Notes
 
-- [P] tasks = different files, no dependencies on incomplete tasks in same phase
-- [Story] label maps each task to a specific user story for traceability
-- Each user story should be independently completable and testable after Phase 2
+- [P] tasks = different files, no dependencies on incomplete tasks
+- [Story] label maps task to specific user story for traceability
+- Each user story is independently completable and testable
 - Commit after each task or logical group
-- Stop at any checkpoint to validate the story independently
-- All 9 MCP tools are always visible to agents (FR-032) — return errors for inapplicable calls, do not hide tools
-- Session owner binding is immutable after creation (FR-013) — enforce in all interaction handlers
-- Workspace policy can only reduce friction, never expand beyond GlobalConfig allowlist (FR-011)
-- Total tasks: 92 (T001–T092, including T089–T092 added during analysis remediation)
+- Stop at any checkpoint to validate story independently
+- Run `cargo clippy` after each phase to catch issues early
+- All model structs use `#[derive(Serialize, Deserialize, Debug, Clone)]`
+- All MCP tool handlers emit tracing spans per FR-037
+- All Slack interactions verify session owner per FR-013

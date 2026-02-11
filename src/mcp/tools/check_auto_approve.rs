@@ -1,1 +1,1 @@
-//! check_auto_approve tool handler placeholder.
+//! `check_auto_approve` tool handler placeholder.

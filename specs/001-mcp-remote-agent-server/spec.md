@@ -14,6 +14,15 @@
 - Q: Should tool call responses reset the inactivity timer, and should long-running operations suppress stall detection? → A: Hybrid approach. Both agent-initiated tool call requests and server responses reset the timer. A lightweight `heartbeat` MCP tool allows the agent to signal liveness during its own long-running local operations. The server automatically pauses the stall timer while it is executing a known long-running operation (e.g., a custom command). This covers both agent-side and server-side long operations with no blind spots.
 - Q: Should all MCP tools be unconditionally exposed to every connected agent, or conditionally hidden based on configuration? → A: All tools are always visible to every connected agent regardless of configuration or session type. The server returns an error if a tool is called in a context where it does not apply. This keeps the tool surface simple and consistent.
 
+### Session 2026-02-10
+
+- Q: How should the server know where the agent is in its task list when a stall occurs mid-todo? → A: The existing `heartbeat` tool is extended to accept an optional structured progress snapshot (a list of todo items with labels and statuses). The server stores the most recent snapshot as opaque structured data on the Session record and uses it to enrich stall alerts, nudge messages, crash recovery responses, and checkpoint metadata. The server does not interpret the todo semantics — it is a store-and-forward cache. The agent is the sole source of truth for its own progress.
+- Q: What is the data retention policy for approval requests, session state, checkpoints, and stall alerts? → A: Time-based auto-purge. All persisted data (sessions, approval requests, checkpoints, stall alerts) is automatically purged 30 days after the owning session is terminated. Active sessions are never purged.
+- Q: How should Slack tokens and other sensitive credentials be stored? → A: OS keychain as the primary mechanism (Windows Credential Manager / macOS Keychain), with environment variables as a fallback when the keychain is unavailable or not configured.
+- Q: What observability signals should the server emit beyond Slack notifications? → A: Structured tracing spans to stderr via `tracing-subscriber`. No metrics endpoint or external collector. Spans cover tool calls, Slack interactions, stall detection events, and session lifecycle transitions.
+- Q: Which embedded database should be used for persistent state? → A: SurrealDB (already decided). Made explicit in the spec.
+- Q: What is explicitly out of scope for v1? → A: Multi-machine/distributed deployment, web-based dashboard or UI (Slack is the sole remote interface), agent-to-agent communication or multi-agent collaboration, and custom Slack app distribution. Multi-workspace Slack support IS in scope — the server acts as a local service supporting multiple concurrent workspaces.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Remote Code Review and Approval (Priority: P1)
@@ -77,8 +86,8 @@ An AI agent is working through a multi-step todo list (e.g., "implement auth mod
 
 **Acceptance Scenarios**:
 
-1. **Given** an active session where the agent has been making tool calls, **When** the agent stops making any tool calls or producing output for longer than the configured inactivity threshold, **Then** the server posts a stall alert to Slack with the agent's last known activity (last tool called, elapsed idle time, and the session's original prompt)
-2. **Given** a stall alert in Slack, **When** the operator taps "Nudge", **Then** the server sends an MCP server-to-client notification with a configurable continuation message (e.g., "Continue working on the current task. Pick up where you left off.") and the agent resumes execution
+1. **Given** an active session where the agent has been making tool calls, **When** the agent stops making any tool calls or producing output for longer than the configured inactivity threshold, **Then** the server posts a stall alert to Slack with the agent's last known activity (last tool called, elapsed idle time, and the session's original prompt). If the session has a progress snapshot, the alert also renders a checklist showing completed and remaining todo items with the in-progress item highlighted
+2. **Given** a stall alert in Slack, **When** the operator taps "Nudge", **Then** the server sends an MCP server-to-client notification with a configurable continuation message (e.g., "Continue working on the current task. Pick up where you left off.") and the agent resumes execution. If the session has a progress snapshot, the nudge notification payload includes a summary of completed items and the next pending item so the agent can reorient
 3. **Given** a stall alert in Slack, **When** the operator taps "Nudge with Instructions", **Then** a dialog opens for the operator to type a custom nudge message, and the server injects that message into the agent's input
 4. **Given** a stall alert in Slack, **When** the operator taps "Stop", **Then** the session is terminated and the operator receives confirmation
 5. **Given** a stall alert has been posted, **When** the agent resumes activity on its own before the operator responds, **Then** the server updates the Slack alert to indicate the agent self-recovered and disables the action buttons
@@ -87,6 +96,9 @@ An AI agent is working through a multi-step todo list (e.g., "implement auth mod
 8. **Given** the operator has configured stall detection to be disabled for a session, **When** the agent goes idle, **Then** no stall alert is posted
 9. **Given** the agent is performing a long-running local operation (e.g., processing a large codebase), **When** the agent calls the `heartbeat` tool periodically, **Then** the stall detection timer is reset and no stall alert is posted despite the absence of other tool calls
 10. **Given** the server is executing a long-running custom command on behalf of the agent, **When** the command takes longer than the inactivity threshold, **Then** the stall timer is automatically paused for the duration of the command and no false stall alert is posted
+11. **Given** the agent calls the `heartbeat` tool with a structured progress snapshot (a list of todo items with labels and statuses), **When** the server receives the call, **Then** the server stores the snapshot on the session record, resets the stall timer, and returns success. The snapshot replaces any previously stored snapshot for that session
+12. **Given** the agent has previously reported a progress snapshot and subsequently stalls, **When** the auto-nudge fires, **Then** the auto-nudge continuation message includes a summary of the progress snapshot (e.g., "You completed 3/7 tasks. Resume with: 'update API docs'") so the agent can reorient without re-deriving its position
+13. **Given** the agent calls the `heartbeat` tool without a progress snapshot (status message only or no arguments), **When** the server receives the call, **Then** the server resets the stall timer and leaves the existing progress snapshot (if any) unchanged
 
 ---
 
@@ -138,7 +150,7 @@ The remote operator initiates, pauses, resumes, and terminates agent sessions en
 1. **Given** the server is running, **When** the operator issues a "session-start" command with a prompt via Slack, **Then** a new agent process spawns on the local workstation and connects to the server, and a confirmation with the session ID appears in Slack
 2. **Given** an active session, **When** the operator issues a "session-pause" command, **Then** the agent enters a wait state and no further tool calls are processed until resumed
 3. **Given** a paused session, **When** the operator issues a "session-resume" command, **Then** the agent continues from where it was suspended
-4. **Given** an active session, **When** the operator issues a "session-checkpoint" command with a label, **Then** the session state is snapshot and stored with the provided label, and a confirmation appears in Slack
+4. **Given** an active session, **When** the operator issues a "session-checkpoint" command with a label, **Then** the session state is snapshot and stored with the provided label, and a confirmation appears in Slack. If the session has a progress snapshot, it is included in the checkpoint metadata
 5. **Given** a stored checkpoint, **When** the operator issues a "session-restore" command with the checkpoint ID, **Then** the server warns about file divergences (if any), and upon confirmation, restores the session to the checkpointed state
 6. **Given** the concurrent session limit has been reached, **When** the operator attempts to start another session, **Then** the server returns an error indicating the limit has been exceeded
 7. **Given** operator A owns an active session, **When** operator B (also in the authorized user list) attempts to interact with operator A's session, **Then** the interaction is rejected and operator B is informed the session belongs to a different operator
@@ -175,6 +187,7 @@ The server persists all pending approval requests and session state to an embedd
 1. **Given** a pending approval request was in flight when the server was terminated, **When** the server restarts and the agent invokes state recovery, **Then** the pending request is returned with its original title, type, and creation timestamp
 2. **Given** no pending state exists, **When** the agent invokes state recovery, **Then** the server returns a "clean" status indicating a fresh start
 3. **Given** the server is shutting down gracefully, **When** shutdown is initiated, **Then** all pending requests are marked as "interrupted" in the database and a final notification is posted to Slack
+4. **Given** a session had a progress snapshot when the server was terminated, **When** the server restarts and the agent invokes state recovery, **Then** the recovered session state includes the last-reported progress snapshot so the agent can determine which todo items were completed and which remain
 
 ---
 
@@ -209,6 +222,17 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * What happens when the agent stalls and the auto-nudge wakes it up, but it immediately stalls again? The server tracks consecutive nudge attempts per session. After exceeding the configurable max-retries, it escalates to the operator rather than continuing to auto-nudge in an infinite loop.
 * What happens when multiple stall alerts fire in rapid succession across concurrent sessions? Each session has its own independent stall timer. Alerts are posted with the session ID prominently displayed so the operator can distinguish between them.
 * What happens when the agent calls `heartbeat` indefinitely but never makes progress? The heartbeat resets the stall timer, so no stall alert fires. However, the operator retains visibility via `remote_log` messages and session elapsed time. A future enhancement could track heartbeat-without-progress as a distinct anomaly, but for v1 the heartbeat is trusted as a liveness signal.
+* What happens when the agent sends a malformed or empty progress snapshot in the `heartbeat` call? The server validates the snapshot structure (an ordered list of items, each with a string label and a status enum). If the snapshot is malformed, the server rejects the heartbeat call with a descriptive error, leaves the existing snapshot unchanged, and still resets the stall timer.
+* What happens when a checkpoint is restored and the stored progress snapshot no longer matches the agent's actual state? The restored progress snapshot is informational — the agent is the source of truth. The server includes the checkpoint's progress snapshot in the restore response so the agent can use it for orientation, but the agent is expected to submit a fresh progress snapshot via `heartbeat` once it re-evaluates its position. The server does not enforce consistency between the snapshot and actual file system state.
+
+## Out of Scope (v1)
+
+* Multi-machine or distributed deployment (server runs on a single local workstation)
+* Web-based dashboard or UI (Slack is the sole remote interface)
+* Agent-to-agent communication or multi-agent collaboration protocols
+* Custom Slack app distribution or marketplace listing (assumes pre-configured bot)
+
+> **Note**: Multi-workspace Slack support IS in scope. The server acts as a locally hosted service supporting multiple concurrent IDE workspaces (VS Code, GitHub Copilot CLI, etc.), each with its own agent sessions and workspace root.
 
 ## Requirements *(mandatory)*
 
@@ -220,7 +244,7 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * **FR-004**: System MUST provide interactive "Accept" and "Reject" buttons on code proposals that resolve the agent's blocked state when the operator responds
 * **FR-005**: System MUST apply approved code changes directly to the local file system, supporting both full-file writes and unified diff patch application
 * **FR-006**: System MUST validate that all file operations resolve within the configured workspace root directory, rejecting path traversal attempts
-* **FR-007**: System MUST persist all pending approval requests and session state to an embedded database that survives process restarts
+* **FR-007**: System MUST persist all pending approval requests and session state to SurrealDB (embedded mode) that survives process restarts
 * **FR-008**: System MUST forward agent continuation prompts to Slack with "Continue", "Refine", and "Stop" action buttons and return the operator's decision to the agent
 * **FR-009**: System MUST support a workspace-level auto-approve policy file that permits pre-authorized operations to bypass the remote approval gate
 * **FR-010**: System MUST hot-reload the workspace policy file when it changes, without requiring a server restart
@@ -239,23 +263,28 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * **FR-023**: System MUST enforce a configurable maximum on concurrent agent sessions to prevent resource exhaustion
 * **FR-024**: System MUST verify file integrity (via content hashing) before applying diffs and before restoring checkpoints, warning the operator of divergences
 * **FR-025**: System MUST track the timestamp of the most recent MCP activity (tool call requests, tool call responses, and heartbeat calls) for each active session and detect when the idle interval exceeds a configurable inactivity threshold. The stall timer is automatically paused while the server is executing a known long-running operation (e.g., a custom command) and resumes when the operation completes.
-* **FR-026**: System MUST post a stall alert to Slack when an active session's inactivity threshold is exceeded, including the last tool called, elapsed idle time, and session context
-* **FR-027**: System MUST provide a "Nudge" action on stall alerts that delivers a configurable continuation message to the agent via an MCP server-to-client notification (custom method name) to prompt it to resume work
+* **FR-026**: System MUST post a stall alert to Slack when an active session's inactivity threshold is exceeded, including the last tool called, elapsed idle time, and session context. If the session has a progress snapshot, the alert MUST render a checklist of todo items showing completed (✅), in-progress (🔄), and pending (⬜) items
+* **FR-027**: System MUST provide a "Nudge" action on stall alerts that delivers a configurable continuation message to the agent via an MCP server-to-client notification (custom method name) to prompt it to resume work. If the session has a progress snapshot, the nudge notification payload MUST include a summary of completed items and the next pending item
 * **FR-028**: System MUST support an auto-nudge escalation policy: after a configurable wait period without operator response, the server auto-nudges the agent and notifies Slack
 * **FR-029**: System MUST cap the number of consecutive auto-nudge attempts per session and escalate to the operator with an elevated alert when the cap is exceeded
 * **FR-030**: System MUST automatically dismiss stall alerts (updating the Slack message and disabling action buttons) when the agent self-recovers and resumes making tool calls
-* **FR-031**: System MUST expose a lightweight `heartbeat` MCP tool that the agent can call during its own long-running local operations to reset the stall detection timer. The tool accepts an optional status message and returns immediately with no side effects beyond resetting the timer and optionally logging the status to the operator.
+* **FR-031**: System MUST expose a lightweight `heartbeat` MCP tool that the agent can call during its own long-running local operations to reset the stall detection timer. The tool accepts an optional status message and an optional structured progress snapshot (a list of todo items, each with a label and a status of "done", "in_progress", or "pending"). When a progress snapshot is provided, the server persists it on the session record, replacing any previous snapshot. When omitted, any existing snapshot is preserved. The tool returns immediately with no side effects beyond resetting the timer, updating the progress snapshot, and optionally logging the status to the operator.
+* **FR-033**: System MUST persist the most recently reported progress snapshot on the session record in the embedded database so that it survives server restarts. The progress snapshot MUST be included in state recovery responses and checkpoint metadata.
+* **FR-034**: System MUST include the progress snapshot in auto-nudge continuation messages, summarizing completed items and identifying the next pending item so the agent can reorient after a stall without re-deriving its position.
 * **FR-032**: System MUST unconditionally expose all MCP tools to every connected agent regardless of server configuration or session type. Tools called in inapplicable contexts (e.g., `heartbeat` when stall detection is disabled) MUST return a descriptive error rather than being hidden from the tool listing.
+* **FR-035**: System MUST automatically purge all persisted data (sessions, approval requests, checkpoints, stall alerts) 30 days after the owning session is terminated. Active (non-terminated) sessions and their associated data MUST NOT be purged. The retention period MUST be configurable via the global configuration file.
+* **FR-036**: System MUST load Slack tokens and other sensitive credentials from the OS keychain (Windows Credential Manager / macOS Keychain) as the primary mechanism. If the keychain is unavailable or credentials are not found, the system MUST fall back to reading from environment variables. Credentials MUST NOT be stored in plaintext configuration files.
+* **FR-037**: System MUST emit structured tracing spans to stderr via `tracing-subscriber` covering MCP tool call execution, Slack API interactions, stall detection events, and session lifecycle transitions. No metrics endpoint or external telemetry collector is required.
 
 ### Key Entities
 
 * **Approval Request**: A pending human decision on a code proposal. Attributes include a unique request ID, proposal title, description, diff content, target file path, risk level, status (pending, approved, rejected, expired, consumed), and creation timestamp. Belongs to exactly one Session.
-* **Session**: A tracked instance of an agent process. Attributes include a unique session ID, owner Slack user ID (bound at creation, immutable for the session's lifetime), state (created, active, paused, terminated), associated prompt/instruction, creation timestamp, and last activity timestamp. Only the owner may interact with the session's approvals, prompts, stall alerts, and commands. May have zero or more Checkpoints and zero or more Approval Requests.
-* **Checkpoint**: A named snapshot of a session's state at a point in time. Attributes include a unique checkpoint ID, human-readable label, creation timestamp, serialized session state, and a manifest of workspace file hashes for divergence detection. Belongs to exactly one Session.
+* **Session**: A tracked instance of an agent process. Attributes include a unique session ID, owner Slack user ID (bound at creation, immutable for the session's lifetime), state (created, active, paused, terminated), associated prompt/instruction, creation timestamp, last activity timestamp, and last-reported progress snapshot (an optional ordered list of todo items, each with a label and status of "done", "in_progress", or "pending"). Only the owner may interact with the session's approvals, prompts, stall alerts, and commands. May have zero or more Checkpoints and zero or more Approval Requests.
+* **Checkpoint**: A named snapshot of a session's state at a point in time. Attributes include a unique checkpoint ID, human-readable label, creation timestamp, serialized session state, a manifest of workspace file hashes for divergence detection, and the session's progress snapshot at the time of creation (if any). Belongs to exactly one Session.
 * **Continuation Prompt**: A forwarded meta-prompt from an agent. Attributes include a unique prompt ID, raw prompt text, prompt type (continuation, clarification, error recovery, resource warning), elapsed execution time, action count, and the operator's decision (continue, refine, stop). Belongs to exactly one Session.
 * **Workspace Policy**: The auto-approve configuration for a workspace. Contains approved commands, approved tools, file path patterns, risk level threshold, and notification preferences. Loaded from a per-workspace configuration file.
 * **Registry Command**: A pre-approved shell command mapped from a user-facing alias to an executable command string. Defined in the global configuration. Attributes include the alias key and the full command value.
-* **Stall Alert**: A watchdog notification triggered by detected agent inactivity. Attributes include the session ID, last tool call name, last activity timestamp, elapsed idle time, nudge attempt count, alert status (pending, nudged, self-recovered, escalated, dismissed), and the operator's response action. Belongs to exactly one Session.
+* **Stall Alert**: A watchdog notification triggered by detected agent inactivity. Attributes include the session ID, last tool call name, last activity timestamp, elapsed idle time, nudge attempt count, alert status (pending, nudged, self-recovered, escalated, dismissed), the operator's response action, and the session's progress snapshot at the time of the alert (if any). Belongs to exactly one Session.
 
 ## Success Criteria *(mandatory)*
 
@@ -279,7 +308,8 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * The operator has a Slack workspace with a bot application configured for Socket Mode (App-Level Token and Bot Token available)
 * The local workstation has a stable internet connection for Slack WebSocket communication, though temporary interruptions are tolerated
 * The AI agent (Claude Code, GitHub Copilot CLI, Cursor, etc.) supports the Model Context Protocol and can connect to a local MCP server
-* The workspace root directory is pre-configured in the server's global configuration file before startup
+* Each connected agent is associated with a workspace root directory. The server supports multiple concurrent workspaces, each identified by its root path. Workspace roots are specified per-session at connection time rather than as a single global setting
 * Only one primary agent connects via the standard transport (stdio); additional spawned sessions connect via an HTTP-based transport on a local port
 * The operator's Slack user ID is known in advance and configured in the server's authorized user list
 * The host CLI binary for session spawning (e.g., "claude", "gh copilot") is installed and available on the system PATH
+* SurrealDB is used in embedded mode as the persistent storage engine for all session state, approval requests, checkpoints, and stall alerts

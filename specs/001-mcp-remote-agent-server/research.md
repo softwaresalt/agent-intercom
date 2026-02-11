@@ -1,7 +1,7 @@
 # Research: MCP Remote Agent Server
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-**Date**: 2026-02-09
+**Date**: 2026-02-10 (updated from 2026-02-09)
 
 ## 1. MCP SDK Selection
 
@@ -160,3 +160,103 @@
 **Rationale**: Follows the existing technical spec's architecture. TOML for the server's global configuration (Slack tokens, workspace root, authorized users, command allowlist, timeouts). JSON for per-workspace auto-approve policies with JSON Schema validation. `notify` crate watches the workspace policy file for hot-reload.
 
 **Hierarchy**: Global `config.toml` defines the absolute security boundary. Workspace `.monocoque/settings.json` can only reduce friction within that boundary, never expand it. Runtime mode overrides supersede workspace policy.
+
+## 10. Credential Storage (OS Keychain)
+
+**Decision**: Use `keyring` crate for cross-platform OS keychain access, with environment variable fallback.
+
+**Rationale**: `keyring` is the most widely used Rust crate for OS credential storage, supporting Windows Credential Manager, macOS Keychain, and Linux Secret Service. It provides a simple sync API. For the tokio runtime, keychain calls are wrapped in `tokio::task::spawn_blocking()` since they are infrequent (startup only). Environment variables serve as a fallback for environments without a keychain daemon (e.g., headless CI).
+
+**Alternatives considered**:
+
+- `secret-service` crate — Linux-only, no cross-platform support.
+- Encrypted config file — adds key management complexity without clear benefit for a single-workstation tool.
+- Plaintext config — explicitly rejected by FR-036.
+
+**API pattern**:
+
+```rust
+use keyring::Entry;
+
+fn load_credential(service: &str, key: &str, env_var: &str) -> Result<String> {
+    Entry::new(service, key)
+        .ok()
+        .and_then(|e| e.get_password().ok())
+        .or_else(|| std::env::var(env_var).ok())
+        .ok_or_else(|| ConfigError::MissingCredential {
+            key: key.to_string(),
+            env_var: env_var.to_string(),
+        })
+}
+```
+
+**Service name**: `monocoque-agent-rem` (consistent across platforms).
+**Account names**: `slack_app_token`, `slack_bot_token`.
+
+**Platform caveats**:
+
+- Linux: requires `secret-service` D-Bus daemon (e.g., `gnome-keyring`). Falls back to env vars if unavailable.
+- Windows: built-in, no extra setup.
+- macOS: built-in, no extra setup.
+
+## 11. Data Retention and Auto-Purge
+
+**Decision**: Background periodic purge task using SurrealQL `DELETE` queries, running hourly via `tokio::time::interval`.
+
+**Rationale**: SurrealDB does not have native TTL or scheduled deletion. A background task with a configurable retention period (default: 30 days) is the simplest reliable approach. Child records (approval requests, checkpoints, continuation prompts, stall alerts) are deleted before parent sessions to maintain referential integrity. Only terminated sessions are purged; active sessions are never touched.
+
+**Alternatives considered**:
+
+- SurrealDB events/triggers — not reliable for periodic purge in embedded mode.
+- Application-level TTL fields — requires checking on every read, adds complexity.
+- Manual cleanup only — violates FR-035 which requires automatic purge.
+
+**Purge query pattern**:
+
+```sql
+-- Find eligible sessions
+SELECT id FROM session
+WHERE status = 'terminated'
+AND updated_at < type::datetime($cutoff);
+
+-- Delete children first (no cascade in SurrealDB)
+DELETE FROM approval_request WHERE session_id = $id;
+DELETE FROM checkpoint WHERE session_id = $id;
+DELETE FROM continuation_prompt WHERE session_id = $id;
+DELETE FROM stall_alert WHERE session_id = $id;
+DELETE FROM session WHERE id = $id;
+```
+
+**Configuration**: `retention_days` field in `config.toml` (default: 30). Purge interval: hourly.
+
+## 12. Multi-Workspace Support
+
+**Decision**: Workspace root is specified per-session rather than as a single global setting. The `Session` model gains a `workspace_root` field. All tool handlers, policy evaluation, and path validation use the session's workspace root.
+
+**Rationale**: The spec was updated to support multiple concurrent IDE workspaces (VS Code, GitHub Copilot CLI, etc.), each with its own agent sessions. The primary stdio agent inherits a default workspace root from `GlobalConfig` (or CLI arguments). Spawned SSE sessions specify their workspace root via connection parameters.
+
+**Architecture changes from v1**:
+
+1. **Session model**: Add `workspace_root: PathBuf` field (required, set at creation).
+2. **Tool context**: Thread `workspace_root` from the active session through all tool handlers instead of reading from `GlobalConfig`.
+3. **Policy loading**: `PolicyEvaluator` loads `.monocoque/settings.json` relative to the session's workspace root. `notify` watcher is registered per unique workspace root.
+4. **Checkpoint model**: Captures `workspace_root` at checkpoint time for restore fidelity.
+5. **Session spawning**: `/monocoque session-start` accepts an optional workspace path argument. Spawned agents receive workspace root via `MONOCOQUE_WORKSPACE_ROOT` environment variable.
+6. **Path validation**: `validate_path()` already accepts `workspace_root: &Path` — no change needed.
+7. **GlobalConfig**: `workspace_root` remains as the default for the primary stdio agent. Removed as a hard requirement; becomes optional with per-session override.
+
+## 13. Observability Architecture
+
+**Decision**: Structured tracing spans to stderr via `tracing-subscriber` with `env-filter` and `fmt` features. No metrics endpoint or external collector.
+
+**Rationale**: For a single-workstation CLI tool, full observability infrastructure (Prometheus, OpenTelemetry) is unnecessary overhead. `tracing` spans provide sufficient debugging context with zero runtime dependency. The `RUST_LOG` environment variable controls verbosity. JSON output format available via `--log-format json` flag for machine consumption.
+
+**Span coverage**:
+
+- MCP tool call execution (tool name, session ID, duration, result status)
+- Slack API interactions (method name, response status, rate limit headers)
+- Stall detection events (session ID, idle duration, action taken)
+- Session lifecycle transitions (session ID, old state → new state)
+- Diff application (file path, hash match, write result)
+- Policy evaluation (tool/command checked, matched rule, auto-approve decision)
+- Credential loading (source: keychain or env var, key name — never the value)

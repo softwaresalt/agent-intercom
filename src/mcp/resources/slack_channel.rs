@@ -1,1 +1,1 @@
-//! slack://channel/{id}/recent resource placeholder.
+//! `slack://channel/{id}/recent` resource placeholder.

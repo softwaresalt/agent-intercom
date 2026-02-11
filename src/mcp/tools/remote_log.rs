@@ -1,1 +1,1 @@
-//! remote_log tool handler placeholder.
+//! `remote_log` tool handler placeholder.

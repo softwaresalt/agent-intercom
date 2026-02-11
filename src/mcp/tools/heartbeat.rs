@@ -1,1 +1,1 @@
-//! heartbeat tool handler placeholder.
+//! `heartbeat` tool handler placeholder.

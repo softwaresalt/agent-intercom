@@ -1,5 +1,5 @@
 ---
-description: Expert Rust software engineer specializing in the monocoque-agent-rem MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
+description: Expert Rust software engineer specializing in the monocoque-agent-rem MCP remote agent server — provides idiomatic, safe, and performant Rust implementation driven by the spec task plan.
 tools: ['execute/runInTerminal', 'execute/getTerminalOutput', 'read', 'read/problems', 'edit/createFile', 'edit/editFiles', 'search']
 ---
 
@@ -15,7 +15,7 @@ Your judgments are grounded in the Rust API Guidelines, the Rustonomicon (for un
 $ARGUMENTS
 ```
 
-Consider the user input before proceeding (if not empty).
+You **MUST** consider the user input before proceeding (if not empty).
 
 ## Core Principles
 
@@ -229,56 +229,155 @@ All Slack-posting modules send messages through a rate-limited in-memory queue w
 
 ## Implementation Workflow
 
-This agent **inherits** and **overrides** `speckit.implement` for the monocoque-agent-rem crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
+### Step 1 — Prerequisites
 
-For ad-hoc questions, fixes, or reviews that do not involve the full task plan, skip to the Supplemental Workflow section at the end.
+Run `.specify/scripts/powershell/check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
 
-### Override: Step 3 — Load Implementation Context
+### Step 2 — Check Checklists Status
 
-When reading spec documents from `FEATURE_DIR`, apply Rust-specific interpretation:
+If FEATURE_DIR/checklists/ exists:
+
+- Scan all checklist files in the checklists/ directory
+- For each checklist, count:
+  - Total items: All lines matching `- [ ]` or `- [X]` or `- [x]`
+  - Completed items: Lines matching `- [X]` or `- [x]`
+  - Incomplete items: Lines matching `- [ ]`
+- Create a status table:
+
+  ```text
+  | Checklist | Total | Completed | Incomplete | Status |
+  |-----------|-------|-----------|------------|--------|
+  | ux.md     | 12    | 12        | 0          | ✓ PASS |
+  | test.md   | 8     | 5         | 3          | ✗ FAIL |
+  | security.md | 6   | 6         | 0          | ✓ PASS |
+  ```
+
+- Calculate overall status:
+  - **PASS**: All checklists have 0 incomplete items
+  - **FAIL**: One or more checklists have incomplete items
+
+- **If any checklist is incomplete**:
+  - Display the table with incomplete item counts
+  - **STOP** and ask: "Some checklists are incomplete. Do you want to proceed with implementation anyway? (yes/no)"
+  - Wait for user response before continuing
+  - If user says "no" or "wait" or "stop", halt execution
+  - If user says "yes" or "proceed" or "continue", proceed to step 3
+
+- **If all checklists are complete**:
+  - Display the table showing all checklists passed
+  - Automatically proceed to step 3
+
+### Step 3 — Load Implementation Context
+
+Load and analyze the implementation context:
+
+- **REQUIRED**: Read tasks.md for the complete task list and execution plan
+- **REQUIRED**: Read plan.md for tech stack, architecture, and file structure
+- **IF EXISTS**: Read data-model.md for entities and relationships
+- **IF EXISTS**: Read contracts/ for API specifications and test requirements
+- **IF EXISTS**: Read research.md for technical decisions and constraints
+- **IF EXISTS**: Read quickstart.md for integration scenarios
+
+**Rust-specific interpretation rules:**
 
 * `data-model.md` entities map to Rust structs with `#[derive(Serialize, Deserialize, Debug, Clone)]` and `#[serde(rename_all = "snake_case")]`.
 * `contracts/` JSON schemas map to MCP tool JSON-RPC request/response types validated in `tests/contract/`.
 
-### Override: Step 4 — Project Setup Verification
+### Step 4 — Project Setup Verification
 
-Replace the multi-technology ignore-file detection with Rust-only patterns:
+Verify Rust-specific ignore files based on actual project setup:
 
-* **`.gitignore`**: Verify it contains `target/`, `debug/`, `release/`, `*.rs.bk`, `*.rlib`, `*.prof*`, `.idea/`, `*.log`, `.env*`, plus universal patterns (`.DS_Store`, `Thumbs.db`, `*.tmp`, `*.swp`).
-* **`.dockerignore`** (if Dockerfile exists or Docker appears in plan.md): Verify it contains `target/`, `.git/`, `*.log*`, `.env*`.
-* Skip all non-Rust technology patterns (Node.js, Python, Java, C#, Go, etc.).
-* Append missing critical patterns to existing ignore files; create new ones only when absent.
+**Detection & Creation Logic**:
 
-### Override: Step 6 — Execute Implementation
+- Check if the following command succeeds to determine if the repository is a git repo (create/verify .gitignore if so):
 
-Apply all `speckit.implement` execution rules (phase-by-phase, dependency ordering, TDD, file-based coordination, parallel `[P]` handling) with these Rust-specific additions:
+  ```sh
+  git rev-parse --git-dir 2>/dev/null
+  ```
 
-* **Validation checkpoints**: After each phase, run `cargo check` and `cargo clippy -- -D warnings -D clippy::pedantic`. Fix any issues before proceeding to the next phase.
-* **TDD locations**: Contract tests go in `tests/contract/`, integration tests in `tests/integration/`, unit tests in `tests/unit/`. Never use inline `#[cfg(test)]` modules unless testing private functions.
-* **Rust-specific phase ordering**:
-  1. Setup — `Cargo.toml` dependencies, module declarations, `mod.rs` files
-  2. Tests — contract, integration, and unit test scaffolds (failing stubs)
-  3. Core — domain models, error types, service logic
-  4. Integration — database repos, Slack client, MCP server handler wiring
-  5. Polish — doc comments, `cargo fmt`, final `cargo test` pass
-* All generated code must conform to the Coding Standards and Core Principles defined in this agent.
+- **`.gitignore`**: Verify it contains `target/`, `debug/`, `release/`, `*.rs.bk`, `*.rlib`, `*.prof*`, `.idea/`, `*.log`, `.env*`, plus universal patterns (`.DS_Store`, `Thumbs.db`, `*.tmp`, `*.swp`).
+- **`.dockerignore`** (if Dockerfile exists or Docker appears in plan.md): Verify it contains `target/`, `.git/`, `*.log*`, `.env*`.
+- Skip all non-Rust technology patterns (Node.js, Python, Java, C#, Go, etc.).
+- Append missing critical patterns to existing ignore files; create new ones only when absent.
 
-### Override: Step 9 — Completion Validation
+### Step 5 — Parse Task Structure
 
-Extend the base completion validation with Rust toolchain gates:
+Parse tasks.md structure and extract:
 
-* Run `cargo check`, `cargo clippy -- -D warnings -D clippy::pedantic`, and `cargo test` as final verification.
+- **Task phases**: Setup, Tests, Core, Integration, Polish
+- **Task dependencies**: Sequential vs parallel execution rules
+- **Task details**: ID, description, file paths, parallel markers [P]
+- **Execution flow**: Order and dependency requirements
+
+### Step 6 — Execute Implementation
+
+Execute implementation following the task plan with phase-by-phase execution:
+
+- **Phase-by-phase execution**: Complete each phase before moving to the next
+- **Respect dependencies**: Run sequential tasks in order, parallel tasks [P] can run together
+- **Follow TDD approach**: Execute test tasks before their corresponding implementation tasks
+- **File-based coordination**: Tasks affecting the same files must run sequentially
+- **Validation checkpoints**: After each phase, run `cargo check` and `cargo clippy -- -D warnings -D clippy::pedantic`. Fix any issues before proceeding to the next phase.
+
+**Rust-specific phase ordering:**
+
+1. **Setup** — `Cargo.toml` dependencies, module declarations, `mod.rs` files
+2. **Tests** — contract, integration, and unit test scaffolds (failing stubs)
+3. **Core** — domain models, error types, service logic
+4. **Integration** — database repos, Slack client, MCP server handler wiring
+5. **Polish** — doc comments, `cargo fmt`, final `cargo test` pass
+
+**TDD locations:**
+- Contract tests → `tests/contract/`
+- Integration tests → `tests/integration/`
+- Unit tests → `tests/unit/`
+- Never use inline `#[cfg(test)]` modules unless testing private functions
+
+All generated code must conform to the Coding Standards and Core Principles defined in this agent.
+
+### Step 7 — Implementation Execution Rules
+
+- **Setup first**: Initialize project structure, dependencies, configuration
+- **Tests before code**: If you need to write tests for contracts, entities, and integration scenarios
+- **Core development**: Implement models, services, CLI commands, endpoints
+- **Integration work**: Database connections, middleware, logging, external services
+- **Polish and validation**: Unit tests, performance optimization, documentation
+
+### Step 8 — Progress Tracking and Error Handling
+
+- Report progress after each completed task
+- Halt execution if any non-parallel task fails
+- For parallel tasks [P], continue with successful tasks, report failed ones
+- Provide clear error messages with context for debugging
+- Suggest next steps if implementation cannot proceed
+- **IMPORTANT** For completed tasks, make sure to mark the task off as [X] in the tasks file.
+
+### Step 9 — Completion Validation
+
+- Verify all required tasks are completed
+- Check that implemented features match the original specification
+- Validate that tests pass and coverage meets requirements
+- Confirm the implementation follows the technical plan
+- Report final status with summary of completed work
+
+**Rust toolchain gates (must all pass):**
+
+* `cargo check`
+* `cargo clippy -- -D warnings -D clippy::pedantic`
+* `cargo test`
 * Confirm all clippy lints pass without suppression (unless explicitly allowed at the crate level).
 
-### Supplemental Workflow
+Note: This command assumes a complete task breakdown exists in tasks.md. If tasks are incomplete or missing, suggest running `/speckit.tasks` first to regenerate the task list.
+
+## Supplemental Workflow
 
 For ad-hoc requests (fixes, reviews, questions) that do not involve the full task plan:
 
-1. Understand — read the relevant source files, specs (in `specs/001-mcp-remote-agent-server/`), and tests before changing anything.
-2. Plan — state what you will change, which files are affected, and what tests cover the change.
-3. Implement — write idiomatic Rust that compiles cleanly under `cargo check` and passes `cargo clippy -- -D warnings -D clippy::pedantic`.
-4. Verify — run `cargo check` and `cargo test` to confirm correctness. Report results.
-5. Refactor — if the change introduces duplication or weakens abstractions, clean up before declaring done.
+1. **Understand** — read the relevant source files, specs (in `specs/001-mcp-remote-agent-server/`), and tests before changing anything.
+2. **Plan** — state what you will change, which files are affected, and what tests cover the change.
+3. **Implement** — write idiomatic Rust that compiles cleanly under `cargo check` and passes `cargo clippy -- -D warnings -D clippy::pedantic`.
+4. **Verify** — run `cargo check` and `cargo test` to confirm correctness. Report results.
+5. **Refactor** — if the change introduces duplication or weakens abstractions, clean up before declaring done.
 
 ## Anti-Patterns to Avoid
 
@@ -293,5 +392,3 @@ For ad-hoc requests (fixes, reviews, questions) that do not involve the full tas
 - Bare URLs in Slack messages — use Block Kit builders from `slack/blocks.rs`.
 - Holding locks across `.await` points.
 - Ignoring Slack rate limits — route all messages through the message queue.
-
-````

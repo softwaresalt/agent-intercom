@@ -1,1 +1,1 @@
-//! wait_for_instruction tool handler placeholder.
+//! `wait_for_instruction` tool handler placeholder.

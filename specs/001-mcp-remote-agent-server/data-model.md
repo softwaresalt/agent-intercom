@@ -1,51 +1,55 @@
 # Data Model: MCP Remote Agent Server
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-**Date**: 2026-02-09
+**Date**: 2026-02-10 (updated from 2026-02-09)
 
 ## Entity Relationship Diagram
 
 ```text
 ┌─────────────────┐      ┌──────────────────┐      ┌───────────────────┐
 │     Session      │──1:N─│    Checkpoint     │      │  WorkspacePolicy  │
-│                  │      │                  │      │   (in-memory)     │
-│  session_id  PK  │      │  checkpoint_id PK│      │                   │
-│  owner_user_id   │      │  session_id   FK │      │  auto_approve     │
-│  status          │      │  label           │      │  commands[]       │
-│  prompt          │      │  session_state   │      │  tools[]          │
-│  mode            │      │  file_hashes{}   │      │  file_patterns{}  │
-│  created_at      │      │  created_at      │      │  risk_threshold   │
-│  updated_at      │      └──────────────────┘      └───────────────────┘
-│  last_tool       │
+│                  │      │                  │      │ (in-memory, per   │
+│  session_id  PK  │      │  checkpoint_id PK│      │  workspace_root)  │
+│  owner_user_id   │      │  session_id   FK │      │                   │
+│  workspace_root  │      │  label           │      │  auto_approve     │
+│  status          │      │  session_state   │      │  commands[]       │
+│  prompt          │      │  file_hashes{}   │      │  tools[]          │
+│  mode            │      │  progress_snap   │      │  file_patterns{}  │
+│  created_at      │      │  workspace_root  │      │  risk_threshold   │
+│  updated_at      │      │  created_at      │      └───────────────────┘
+│  last_tool       │      └──────────────────┘
 │  nudge_count     │      ┌──────────────────┐      ┌───────────────────┐
 │  stall_paused    │──1:N─│ ApprovalRequest   │      │  RegistryCommand  │
-└─────────────────┘      │                  │      │   (config.toml)   │
-        │                 │  request_id   PK │      │                   │
-        │                 │  session_id   FK │      │  alias         PK │
-        │ 1:N             │  title           │      │  command          │
-        ▼                 │  description     │      └───────────────────┘
-┌─────────────────┐      │  diff_content    │
-│ContPrompt       │      │  file_path       │      ┌───────────────────┐
-│                  │      │  risk_level      │      │   GlobalConfig    │
-│  prompt_id   PK  │      │  status          │      │   (config.toml)   │
-│  session_id  FK  │      │  original_hash   │      │                   │
-│  prompt_text     │      │  slack_ts        │      │  workspace_root   │
-│  prompt_type     │      │  created_at      │      │  slack_app_token  │
-│  elapsed_secs    │      │  consumed_at     │      │  slack_bot_token  │
-│  actions_taken   │      └──────────────────┘      │  channel_id       │
-│  decision        │                                │  authorized_users │
-│  instruction     │                                │  max_sessions     │
-│  slack_ts        │      ┌──────────────────┐      │  timeouts{}       │
-│  created_at      │      │   StallAlert     │      │  stall_config{}   │
+│  progress_snap   │      │                  │      │   (config.toml)   │
+│  terminated_at   │      │  request_id   PK │      │                   │
+└─────────────────┘      │  session_id   FK │      │  alias         PK │
+        │                 │  title           │      │  command          │
+        │                 │  description     │      └───────────────────┘
+        │ 1:N             │  diff_content    │
+        ▼                 │  file_path       │      ┌───────────────────┐
+┌─────────────────┐      │  risk_level      │      │   GlobalConfig    │
+│ContPrompt       │      │  status          │      │   (config.toml    │
+│                  │      │  original_hash   │      │   + keychain/env) │
+│  prompt_id   PK  │      │  slack_ts        │      │                   │
+│  session_id  FK  │      │  created_at      │      │  default_ws_root  │
+│  prompt_text     │      │  consumed_at     │      │  slack_app_token* │
+│  prompt_type     │      └──────────────────┘      │  slack_bot_token* │
+│  elapsed_secs    │                                │  channel_id       │
+│  actions_taken   │                                │  authorized_users │
+│  decision        │                                │  max_sessions     │
+│  instruction     │                                │  timeouts{}       │
+│  slack_ts        │      ┌──────────────────┐      │  stall_config{}   │
+│  created_at      │      │   StallAlert     │      │  retention_days   │
 └─────────────────┘      │                  │      └───────────────────┘
-                          │  alert_id     PK │
-                          │  session_id   FK │
+                          │  alert_id     PK │      * loaded from OS
+                          │  session_id   FK │        keychain or env
                           │  last_tool       │
                           │  last_activity_at│
                           │  idle_seconds    │
                           │  nudge_count     │
                           │  status          │
                           │  nudge_message   │
+                          │  progress_snap   │
                           │  slack_ts        │
                           │  created_at      │
                           └──────────────────┘
@@ -67,14 +71,17 @@ Represents a tracked instance of an agent process connected to the MCP server.
 |-------|------|-------------|-------------|
 | `session_id` | `string` | PK, unique, generated UUID | Unique identifier for the session |
 | `owner_user_id` | `string` | Required, immutable after creation | Slack user ID bound at creation time |
+| `workspace_root` | `string` | Required, immutable after creation | Absolute path to the workspace directory for this session |
 | `status` | `string` | Required, enum | Current lifecycle state |
 | `prompt` | `string` | Optional | Initial instruction/prompt for the session |
 | `mode` | `string` | Required, default `"remote"` | Operational mode: `remote`, `local`, `hybrid` |
 | `created_at` | `datetime` | Required, auto-set | When the session was created |
 | `updated_at` | `datetime` | Required, auto-updated | Last MCP activity timestamp (tool call, response, heartbeat) |
+| `terminated_at` | `datetime` | Optional | When the session was terminated (used for retention purge) |
 | `last_tool` | `string` | Optional | Name of the last tool called by the agent |
 | `nudge_count` | `int` | Required, default `0` | Consecutive auto-nudge attempts for current stall |
 | `stall_paused` | `bool` | Required, default `false` | Whether stall detection is paused (long-running op) |
+| `progress_snapshot` | `object` | Optional | Last-reported progress snapshot from `heartbeat` (ordered list of `{label, status}` items) |
 
 **Status values**: `created` → `active` → `paused` | `terminated` | `interrupted`
 
@@ -91,8 +98,11 @@ created ──▶ active ──▶ paused ──▶ active (resume)
 
 - `owner_user_id` must be in the global `authorized_user_ids` list at creation time.
 - `owner_user_id` cannot be changed after session creation.
+- `workspace_root` must be a valid absolute path and cannot be changed after creation.
 - Only the session owner may interact with the session's requests and commands.
 - Total active + paused sessions must not exceed `max_concurrent_sessions`.
+- `terminated_at` is set when status transitions to `terminated` or `interrupted`. Used by the retention purge service (FR-035).
+- `progress_snapshot` is updated by the `heartbeat` tool. When provided, replaces the previous snapshot. When omitted from heartbeat, existing snapshot is preserved.
 
 ### ApprovalRequest
 
@@ -133,6 +143,8 @@ A named snapshot of a session's state at a point in time.
 | `label` | `string` | Optional | Human-readable name (e.g., "before-refactor") |
 | `session_state` | `object` | Required | Serialized session state snapshot |
 | `file_hashes` | `object` | Required | Map of `file_path → SHA-256 hash` for divergence detection |
+| `workspace_root` | `string` | Required | Workspace root at checkpoint time (for restore fidelity) |
+| `progress_snapshot` | `object` | Optional | Session's progress snapshot at checkpoint time |
 | `created_at` | `datetime` | Required, auto-set | When the checkpoint was created |
 
 **Validation rules**:
@@ -180,6 +192,7 @@ A watchdog notification triggered by detected agent inactivity.
 | `nudge_count` | `int` | Required, default `0` | Number of nudge attempts for this alert |
 | `status` | `string` | Required, enum | Current state of the alert |
 | `nudge_message` | `string` | Optional | Custom nudge message from operator |
+| `progress_snapshot` | `object` | Optional | Session's progress snapshot at alert time |
 | `slack_ts` | `string` | Optional | Slack message timestamp for updates |
 | `created_at` | `datetime` | Required, auto-set | When the alert was created |
 
@@ -191,9 +204,9 @@ A watchdog notification triggered by detected agent inactivity.
 - Self-recovery (agent resumes activity) dismisses the alert and disables Slack buttons via `chat.update`.
 - After `max_retries` auto-nudges, status transitions to `escalated` with `@channel` mention.
 
-### WorkspacePolicy (in-memory, not persisted)
+### WorkspacePolicy (in-memory, per workspace root, not persisted)
 
-The auto-approve configuration loaded from `.monocoque/settings.json`.
+The auto-approve configuration loaded from `.monocoque/settings.json` relative to the session's `workspace_root`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -212,13 +225,13 @@ The auto-approve configuration loaded from `.monocoque/settings.json`.
 - On parse error, fall back to "require approval for everything" and log warning to console and Slack.
 - Hot-reloaded via `notify` file watcher without server restart.
 
-### GlobalConfig (config.toml, read-only at startup)
+### GlobalConfig (config.toml + OS keychain/env vars, read-only at startup)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `workspace_root` | `string` | Absolute path to the workspace directory |
-| `slack.app_token` | `string` | Slack App-Level Token for Socket Mode |
-| `slack.bot_token` | `string` | Slack Bot User OAuth Token |
+| `default_workspace_root` | `string` | Default workspace root for the primary stdio agent (optional; per-session override takes precedence) |
+| `slack.app_token` | `string` | Slack App-Level Token for Socket Mode — loaded from OS keychain (`monocoque-agent-rem/slack_app_token`) or `SLACK_APP_TOKEN` env var |
+| `slack.bot_token` | `string` | Slack Bot User OAuth Token — loaded from OS keychain (`monocoque-agent-rem/slack_bot_token`) or `SLACK_BOT_TOKEN` env var |
 | `slack.channel_id` | `string` | Target Slack channel ID |
 | `authorized_user_ids` | `string[]` | Slack user IDs permitted to create sessions |
 | `max_concurrent_sessions` | `int` | Maximum concurrent sessions (default: 3) |
@@ -235,6 +248,7 @@ The auto-approve configuration loaded from `.monocoque/settings.json`.
 | `commands` | `map<string, string>` | Custom command alias → shell command mapping |
 | `http_port` | `int` | Port for SSE transport (default: 3000) |
 | `ipc_name` | `string` | Named pipe / socket name (default: `monocoque-agent-rem`) |
+| `retention_days` | `int` | Days after session termination before data is purged (default: 30) |
 
 ### RegistryCommand (derived from GlobalConfig)
 

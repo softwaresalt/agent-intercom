@@ -1,1 +1,1 @@
-//! ask_approval tool handler placeholder.
+//! `ask_approval` tool handler placeholder.

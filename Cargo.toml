@@ -13,6 +13,7 @@ axum = "0.8"
 clap = { version = "4.5", features = ["derive"] }
 diffy = "0.4"
 interprocess = { version = "2.0", features = ["tokio"] }
+keyring = "3"
 notify = "6.1"
 rmcp = { version = "0.5", features = ["server", "transport-sse-server", "transport-io"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -49,6 +50,7 @@ axum = { workspace = true }
 clap = { workspace = true }
 diffy = { workspace = true }
 interprocess = { workspace = true }
+keyring = { workspace = true }
 notify = { workspace = true }
 rmcp = { workspace = true }
 serde = { workspace = true }

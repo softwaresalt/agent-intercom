@@ -1,1 +1,1 @@
-//! accept_diff tool handler placeholder.
+//! `accept_diff` tool handler placeholder.

@@ -1,7 +1,7 @@
 # Quickstart: MCP Remote Agent Server
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-**Date**: 2026-02-09
+**Date**: 2026-02-10 (updated from 2026-02-09)
 
 ## Prerequisites
 
@@ -29,18 +29,42 @@ The build produces two binaries:
 - `target/release/monocoque-agent-rem` — the MCP server
 - `target/release/monocoque-ctl` — the local CLI override tool
 
-### 2. Create the global configuration
+### 2. Store Slack credentials
+
+Credentials are loaded from the OS keychain first, with environment variables as fallback.
+
+**Option A: OS keychain (recommended)**
+
+```bash
+# Using the monocoque-ctl helper
+monocoque-ctl credential set slack_app_token
+# (prompts for token value)
+monocoque-ctl credential set slack_bot_token
+# (prompts for token value)
+```
+
+**Option B: Environment variables (fallback)**
+
+```bash
+export SLACK_APP_TOKEN="xapp-1-..."
+export SLACK_BOT_TOKEN="xoxb-..."
+```
+
+### 3. Create the global configuration
 
 Create `config.toml` in the project root (or `~/.config/monocoque/config.toml`):
 
 ```toml
-workspace_root = "/path/to/your/project"
+# Default workspace root for the primary stdio agent (optional).
+# Each spawned session can override this with its own workspace root.
+default_workspace_root = "/path/to/your/project"
 http_port = 3000
 ipc_name = "monocoque-agent-rem"
 
 [slack]
-app_token = "xapp-1-..."
-bot_token = "xoxb-..."
+# Tokens are loaded from OS keychain (service: monocoque-agent-rem).
+# If not found in keychain, falls back to SLACK_APP_TOKEN / SLACK_BOT_TOKEN env vars.
+# Do NOT put tokens in this file.
 channel_id = "C0123456789"
 authorized_user_ids = ["U0123456789"]
 
@@ -61,6 +85,7 @@ cli = "claude"
 cli_args = []
 
 max_concurrent_sessions = 3
+retention_days = 30
 
 [commands]
 status = "git status"
@@ -70,9 +95,9 @@ test = "cargo test"
 clippy = "cargo clippy"
 ```
 
-### 3. (Optional) Create workspace auto-approve policy
+### 4. (Optional) Create workspace auto-approve policy
 
-Create `.monocoque/settings.json` in your workspace root:
+Create `.monocoque/settings.json` in your workspace root (each workspace can have its own policy):
 
 ```json
 {
@@ -93,7 +118,7 @@ Create `.monocoque/settings.json` in your workspace root:
 }
 ```
 
-### 4. Connect your AI agent
+### 5. Connect your AI agent
 
 Add the MCP server to your agent's configuration.
 
@@ -123,7 +148,7 @@ Add the MCP server to your agent's configuration.
 }
 ```
 
-### 5. Verify the connection
+### 6. Verify the connection
 
 Once the agent starts and connects:
 

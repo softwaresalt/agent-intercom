@@ -1,1 +1,1 @@
-//! set_operational_mode tool handler placeholder.
+//! `set_operational_mode` tool handler placeholder.

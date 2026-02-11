@@ -254,6 +254,18 @@
               "created_at": { "type": "string", "format": "date-time" }
             },
             "description": "Most recent checkpoint, or null if none"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Last-reported progress snapshot from the recovered session, or null if none was reported. Allows the agent to determine which tasks were completed and which remain.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "status": { "type": "string", "enum": ["done", "in_progress", "pending"] }
+              },
+              "required": ["label", "status"]
+            }
           }
         },
         "required": ["status"]
@@ -317,13 +329,32 @@
     },
 
     "heartbeat": {
-      "description": "Lightweight liveness signal. Resets the stall detection timer during long-running local operations. Returns immediately with no side effects beyond timer reset.",
+      "description": "Lightweight liveness signal. Resets the stall detection timer during long-running local operations. Optionally accepts a structured progress snapshot (ordered list of todo items with labels and statuses) that the server stores on the session record for enriching stall alerts, nudge messages, and crash recovery. Returns immediately.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "status_message": {
             "type": "string",
             "description": "Optional status update logged to the operator (e.g., 'Processing large codebase...')"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Optional ordered list of todo items. When provided, replaces any previously stored snapshot on the session. When omitted, existing snapshot is preserved.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Human-readable task description"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["done", "in_progress", "pending"],
+                  "description": "Current status of the task"
+                }
+              },
+              "required": ["label", "status"]
+            }
           }
         }
       },
