@@ -46,8 +46,7 @@ pub fn spawn_retention_task(
 }
 
 async fn purge(db: &Database, retention_days: u32) -> Result<()> {
-    let cutoff = Utc::now()
-        - chrono::Duration::days(i64::from(retention_days));
+    let cutoff = Utc::now() - chrono::Duration::days(i64::from(retention_days));
     let cutoff_str = cutoff.to_rfc3339();
 
     // Delete children first to maintain referential integrity.
@@ -63,9 +62,7 @@ async fn purge(db: &Database, retention_days: u32) -> Result<()> {
              (SELECT VALUE id FROM session \
               WHERE status = 'terminated' AND terminated_at < $cutoff)"
         );
-        db.query(&query)
-            .bind(("cutoff", &cutoff_str))
-            .await?;
+        db.query(&query).bind(("cutoff", &cutoff_str)).await?;
     }
 
     // Delete expired sessions.

@@ -177,10 +177,8 @@ impl GlobalConfig {
     /// Returns `AppError::Config` if neither keychain nor env vars provide
     /// the required tokens.
     pub async fn load_credentials(&mut self) -> Result<()> {
-        self.slack.app_token =
-            load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
-        self.slack.bot_token =
-            load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
+        self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
+        self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
         Ok(())
     }
 
@@ -225,9 +223,7 @@ impl GlobalConfig {
         let canonical_root = self
             .default_workspace_root
             .canonicalize()
-            .map_err(|err| {
-                AppError::Config(format!("default_workspace_root invalid: {err}"))
-            })?;
+            .map_err(|err| AppError::Config(format!("default_workspace_root invalid: {err}")))?;
         self.default_workspace_root = canonical_root;
 
         Ok(())
@@ -240,8 +236,7 @@ async fn load_credential(keyring_key: &str, env_key: &str) -> Result<String> {
 
     // Try OS keychain first via spawn_blocking (keyring is synchronous I/O).
     let keychain_result = tokio::task::spawn_blocking(move || {
-        keyring::Entry::new("monocoque-agent-rem", &key)
-            .and_then(|entry| entry.get_password())
+        keyring::Entry::new("monocoque-agent-rem", &key).and_then(|entry| entry.get_password())
     })
     .await
     .map_err(|err| AppError::Config(format!("keychain task panicked: {err}")))?;

@@ -8,17 +8,16 @@ fn config_for_tests() -> GlobalConfig {
     let temp = tempfile::tempdir().expect("tempdir");
     let toml = format!(
         r#"
-default_workspace_root = "{root}"
+default_workspace_root = '{root}'
 http_port = 3000
 ipc_name = "monocoque-agent-rem"
 max_concurrent_sessions = 2
 host_cli = "claude"
 host_cli_args = ["--stdio"]
+authorized_user_ids = ["U123", "U456"]
 
 [slack]
 channel_id = "C123"
-
-authorized_user_ids = ["U123", "U456"]
 
 [timeouts]
 approval_seconds = 3600

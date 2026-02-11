@@ -10,7 +10,8 @@ fn allows_path_inside_workspace() {
 
     let validated = validate_workspace_path(root, candidate).expect("path valid");
 
-    assert!(validated.starts_with(root));
+    let canonical_root = root.canonicalize().expect("canonicalize root");
+    assert!(validated.starts_with(&canonical_root));
     assert!(validated.ends_with(Path::new("src/lib.rs")));
 }
 
@@ -44,7 +45,8 @@ fn allows_relative_subdirectory() {
 
     let validated = validate_workspace_path(root, candidate).expect("path valid");
 
-    assert!(validated.starts_with(root));
+    let canonical_root = root.canonicalize().expect("canonicalize root");
+    assert!(validated.starts_with(&canonical_root));
     assert!(validated.ends_with("src/utils/helpers.rs"));
 }
 
@@ -56,16 +58,17 @@ fn allows_dot_segment() {
 
     let validated = validate_workspace_path(root, candidate).expect("path valid");
 
-    assert!(validated.starts_with(root));
+    let canonical_root = root.canonicalize().expect("canonicalize root");
+    assert!(validated.starts_with(&canonical_root));
 }
 
 #[test]
 fn rejects_workspace_root_boundary() {
+    // A path that enters a subdirectory then traverses past the workspace root.
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    // Absolute path outside the workspace
-    let result = validate_workspace_path(root, "/etc/passwd");
+    let result = validate_workspace_path(root, "subdir/../../escape.txt");
 
     assert!(result.is_err());
 }
@@ -104,10 +107,7 @@ fn path_safety_allows_non_existent_file() {
 
 #[test]
 fn path_safety_rejects_invalid_workspace() {
-    let result = path_safety::validate_path(
-        Path::new("/nonexistent/workspace"),
-        "file.rs",
-    );
+    let result = path_safety::validate_path(Path::new("/nonexistent/workspace"), "file.rs");
 
     assert!(result.is_err());
 }

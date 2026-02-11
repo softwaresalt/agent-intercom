@@ -4,11 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use slack_morphism::prelude::{
-    SlackApiChatPostMessageRequest, SlackApiChatUpdateRequest,
-    SlackApiConversationsHistoryRequest, SlackApiFilesComplete,
-    SlackApiFilesCompleteUploadExternalRequest, SlackApiFilesGetUploadUrlExternalRequest,
-    SlackApiToken, SlackApiTokenType,
-    SlackApiTokenValue, SlackApiViewsOpenRequest, SlackBlock, SlackChannelId, SlackClient,
+    SlackApiChatPostMessageRequest, SlackApiChatUpdateRequest, SlackApiConversationsHistoryRequest,
+    SlackApiFilesComplete, SlackApiFilesCompleteUploadExternalRequest,
+    SlackApiFilesGetUploadUrlExternalRequest, SlackApiToken, SlackApiTokenType, SlackApiTokenValue,
+    SlackApiViewsOpenRequest, SlackBlock, SlackChannelId, SlackClient,
     SlackClientEventsListenerEnvironment, SlackClientHyperHttpsConnector, SlackClientSession,
     SlackClientSocketModeConfig, SlackClientSocketModeListener, SlackHistoryMessage,
     SlackMessageContent, SlackSocketModeListenerCallbacks, SlackTriggerId, SlackTs, SlackView,
@@ -16,6 +15,7 @@ use slack_morphism::prelude::{
 use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::{error, info, warn};
 
+use crate::mcp::handler::AppState;
 use crate::slack::{commands, events};
 use crate::{config::SlackConfig, AppError, Result};
 
@@ -90,7 +90,10 @@ impl SlackService {
     /// # Errors
     ///
     /// Returns `AppError::Slack` if the HTTPS connector cannot be created.
-    pub fn start(config: &SlackConfig) -> Result<(Self, SlackRuntime)> {
+    pub fn start(
+        config: &SlackConfig,
+        app_state: Option<Arc<AppState>>,
+    ) -> Result<(Self, SlackRuntime)> {
         let connector = SlackClientHyperHttpsConnector::new()
             .map_err(|err| AppError::Slack(format!("failed to init slack connector: {err}")))?;
         let client = Arc::new(SlackClient::new(connector));
@@ -111,7 +114,7 @@ impl SlackService {
 
         let (queue_tx, queue_rx) = mpsc::channel(QUEUE_CAPACITY);
         let queue_task = Self::spawn_worker(client.clone(), bot_token.clone(), queue_rx);
-        let socket_task = Self::spawn_socket_mode(&client, app_token.clone());
+        let socket_task = Self::spawn_socket_mode(&client, app_token.clone(), app_state);
 
         info!("slack service started with buffered queue and socket mode");
 
@@ -177,15 +180,20 @@ impl SlackService {
     fn spawn_socket_mode(
         client: &Arc<SlackClient<SlackClientHyperHttpsConnector>>,
         app_token: SlackApiToken,
+        app_state: Option<Arc<AppState>>,
     ) -> JoinHandle<()> {
-        let listener_env = Arc::new(
-            SlackClientEventsListenerEnvironment::new(Arc::clone(client)).with_error_handler(
-                |err, _client, _state| {
-                    error!(?err, "socket mode error");
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                },
-            ),
-        );
+        let mut listener_env = SlackClientEventsListenerEnvironment::new(Arc::clone(client))
+            .with_error_handler(|err, _client, _state| {
+                error!(?err, "socket mode error");
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            });
+
+        // Inject shared AppState so interaction callbacks can access it.
+        if let Some(state) = app_state {
+            listener_env = listener_env.with_user_state(state);
+        }
+        let listener_env = Arc::new(listener_env);
+
         let callbacks = SlackSocketModeListenerCallbacks::new()
             .with_hello_events(|event, _client, _state| async move {
                 info!(?event, "socket hello");
@@ -299,10 +307,8 @@ impl SlackService {
         let session = self.http_session();
 
         // Step 1: Get upload URL.
-        let url_request = SlackApiFilesGetUploadUrlExternalRequest::new(
-            filename.into(),
-            content.len(),
-        );
+        let url_request =
+            SlackApiFilesGetUploadUrlExternalRequest::new(filename.into(), content.len());
         let url_response = session
             .get_upload_url_external(&url_request)
             .await
@@ -322,16 +328,13 @@ impl SlackService {
             id: url_response.file_id,
             title: Some(filename.into()),
         };
-        let mut complete_request =
-            SlackApiFilesCompleteUploadExternalRequest::new(vec![file_ref]);
+        let mut complete_request = SlackApiFilesCompleteUploadExternalRequest::new(vec![file_ref]);
         complete_request.channel_id = Some(channel);
         complete_request.thread_ts = thread_ts;
         session
             .files_complete_upload_external(&complete_request)
             .await
-            .map_err(|err| {
-                AppError::Slack(format!("failed to complete upload: {err}"))
-            })?;
+            .map_err(|err| AppError::Slack(format!("failed to complete upload: {err}")))?;
 
         Ok(())
     }
@@ -341,11 +344,7 @@ impl SlackService {
     /// # Errors
     ///
     /// Returns `AppError::Slack` if the API call fails.
-    pub async fn open_modal(
-        &self,
-        trigger_id: SlackTriggerId,
-        view: SlackView,
-    ) -> Result<()> {
+    pub async fn open_modal(&self, trigger_id: SlackTriggerId, view: SlackView) -> Result<()> {
         let request = SlackApiViewsOpenRequest::new(trigger_id, view);
         self.http_session()
             .views_open(&request)

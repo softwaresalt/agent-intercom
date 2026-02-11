@@ -29,7 +29,7 @@ impl ApprovalRepo {
     /// Returns `AppError::Db` if the database insert fails.
     pub async fn create(&self, request: &ApprovalRequest) -> Result<ApprovalRequest> {
         self.db
-            .create(("approval_request", request.id.clone()))
+            .create(("approval_request", request.id.as_str()))
             .content(request)
             .await?
             .ok_or_else(|| AppError::Db("failed to create approval request".into()))
@@ -41,8 +41,7 @@ impl ApprovalRepo {
     ///
     /// Returns `AppError::NotFound` if the request does not exist.
     pub async fn get_by_id(&self, id: &str) -> Result<ApprovalRequest> {
-        let request: Option<ApprovalRequest> =
-            self.db.select(("approval_request", id)).await?;
+        let request: Option<ApprovalRequest> = self.db.select(("approval_request", id)).await?;
         request.ok_or_else(|| AppError::NotFound("approval request not found".into()))
     }
 
@@ -73,11 +72,7 @@ impl ApprovalRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the update fails.
-    pub async fn update_status(
-        &self,
-        id: &str,
-        status: ApprovalStatus,
-    ) -> Result<ApprovalRequest> {
+    pub async fn update_status(&self, id: &str, status: ApprovalStatus) -> Result<ApprovalRequest> {
         let mut current = self.get_by_id(id).await?;
         current.status = status;
         self.db
@@ -124,6 +119,8 @@ impl ApprovalRepo {
             .db
             .query("SELECT * FROM approval_request WHERE status = 'pending'")
             .await?;
-        response.take::<Vec<ApprovalRequest>>(0).map_err(AppError::from)
+        response
+            .take::<Vec<ApprovalRequest>>(0)
+            .map_err(AppError::from)
     }
 }

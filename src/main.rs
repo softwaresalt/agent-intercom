@@ -9,9 +9,10 @@ use tracing::{error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
 use monocoque_agent_rem::config::GlobalConfig;
-use monocoque_agent_rem::mcp::handler::AppState;
+use monocoque_agent_rem::mcp::handler::{AppState, PendingApprovals};
 use monocoque_agent_rem::mcp::{sse, transport};
 use monocoque_agent_rem::persistence::{db, retention};
+use monocoque_agent_rem::slack::client::SlackService;
 use monocoque_agent_rem::{AppError, Result};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
@@ -71,18 +72,34 @@ async fn run(args: Cli) -> Result<()> {
 
     // ── Start retention service ──────────────────────────
     let ct = CancellationToken::new();
-    let retention_handle = retention::spawn_retention_task(
-        Arc::clone(&db),
-        config.retention_days,
-        ct.clone(),
-    );
+    let retention_handle =
+        retention::spawn_retention_task(Arc::clone(&db), config.retention_days, ct.clone());
     info!("retention service started");
 
     // ── Build shared application state ──────────────────
+    let pending_approvals: PendingApprovals = PendingApprovals::default();
+
+    // Start Slack client if configured.
+    let (slack_service, _slack_runtime) = if config.slack.bot_token.is_empty() {
+        info!("slack not configured; running in local-only mode");
+        (None, None)
+    } else {
+        // Build a preliminary AppState without slack so we can pass it.
+        // The socket mode callbacks will receive AppState via user state injection.
+        // We start slack first without app_state, then rebuild with the Arc.
+        let (svc, runtime) = SlackService::start(&config.slack, None).map_err(|err| {
+            error!(%err, "slack service start failed");
+            err
+        })?;
+        info!("slack service started");
+        (Some(Arc::new(svc)), Some(runtime))
+    };
+
     let state = Arc::new(AppState {
         config: Arc::clone(&config),
         db,
-        slack: None, // Slack client wiring deferred to user-story phases
+        slack: slack_service,
+        pending_approvals,
     });
 
     // ── Start transports ────────────────────────────────
@@ -121,9 +138,8 @@ async fn shutdown_signal() {
 
     #[cfg(unix)]
     {
-        let mut sigterm =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("SIGTERM handler");
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler");
         tokio::select! {
             _ = ctrl_c => {}
             _ = sigterm.recv() => {}

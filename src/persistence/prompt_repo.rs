@@ -25,12 +25,9 @@ impl PromptRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the database insert fails.
-    pub async fn create(
-        &self,
-        prompt: &ContinuationPrompt,
-    ) -> Result<ContinuationPrompt> {
+    pub async fn create(&self, prompt: &ContinuationPrompt) -> Result<ContinuationPrompt> {
         self.db
-            .create(("continuation_prompt", prompt.id.clone()))
+            .create(("continuation_prompt", prompt.id.as_str()))
             .content(prompt)
             .await?
             .ok_or_else(|| AppError::Db("failed to create continuation prompt".into()))

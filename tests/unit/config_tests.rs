@@ -3,18 +3,17 @@ use monocoque_agent_rem::{config::GlobalConfig, AppError};
 fn sample_toml(workspace: &str) -> String {
     format!(
         r#"
-default_workspace_root = "{workspace}"
+default_workspace_root = '{workspace}'
 http_port = 3000
 ipc_name = "monocoque-agent-rem"
 max_concurrent_sessions = 2
 host_cli = "claude"
 host_cli_args = ["--stdio"]
 retention_days = 14
+authorized_user_ids = ["U123", "U456"]
 
 [slack]
 channel_id = "C123"
-
-authorized_user_ids = ["U123", "U456"]
 
 [timeouts]
 approval_seconds = 3600
@@ -37,16 +36,15 @@ status = "git status"
 fn minimal_toml(workspace: &str) -> String {
     format!(
         r#"
-default_workspace_root = "{workspace}"
+default_workspace_root = '{workspace}'
 http_port = 3000
 ipc_name = "monocoque-agent-rem"
 max_concurrent_sessions = 1
 host_cli = "claude"
+authorized_user_ids = ["U123"]
 
 [slack]
 channel_id = "C123"
-
-authorized_user_ids = ["U123"]
 
 [timeouts]
 approval_seconds = 3600
@@ -74,7 +72,8 @@ fn parses_valid_config() {
     assert_eq!(config.ipc_name, "monocoque-agent-rem");
     assert_eq!(config.authorized_user_ids.len(), 2);
     assert!(config.commands.contains_key("status"));
-    assert_eq!(config.default_workspace_root(), temp.path());
+    let expected_root = temp.path().canonicalize().expect("canonicalize temp path");
+    assert_eq!(config.default_workspace_root(), expected_root);
     assert_eq!(config.retention_days, 14);
 }
 
@@ -112,11 +111,10 @@ http_port = 3000
 ipc_name = "test"
 max_concurrent_sessions = 1
 host_cli = "claude"
+authorized_user_ids = ["U123"]
 
 [slack]
 channel_id = "C123"
-
-authorized_user_ids = ["U123"]
 
 [timeouts]
 approval_seconds = 3600
@@ -140,7 +138,7 @@ fn rejects_missing_slack_section() {
     let temp = tempfile::tempdir().expect("tempdir");
     let toml = format!(
         r#"
-default_workspace_root = "{}"
+default_workspace_root = '{}'
 http_port = 3000
 ipc_name = "test"
 max_concurrent_sessions = 1
@@ -172,16 +170,15 @@ fn rejects_invalid_field_type() {
     let temp = tempfile::tempdir().expect("tempdir");
     let toml = format!(
         r#"
-default_workspace_root = "{}"
+default_workspace_root = '{}'
 http_port = "not-a-number"
 ipc_name = "test"
 max_concurrent_sessions = 1
 host_cli = "claude"
+authorized_user_ids = ["U123"]
 
 [slack]
 channel_id = "C123"
-
-authorized_user_ids = ["U123"]
 
 [timeouts]
 approval_seconds = 3600
@@ -221,7 +218,9 @@ fn allows_authorized_user() {
     let toml = sample_toml(temp.path().to_str().expect("utf8 path"));
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
 
-    config.ensure_authorized("U123").expect("user should be authorized");
+    config
+        .ensure_authorized("U123")
+        .expect("user should be authorized");
 }
 
 #[test]

@@ -27,7 +27,7 @@ impl StallAlertRepo {
     /// Returns `AppError::Db` if the database insert fails.
     pub async fn create(&self, alert: &StallAlert) -> Result<StallAlert> {
         self.db
-            .create(("stall_alert", alert.id.clone()))
+            .create(("stall_alert", alert.id.as_str()))
             .content(alert)
             .await?
             .ok_or_else(|| AppError::Db("failed to create stall alert".into()))
@@ -38,10 +38,7 @@ impl StallAlertRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the query fails.
-    pub async fn get_active_for_session(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<StallAlert>> {
+    pub async fn get_active_for_session(&self, session_id: &str) -> Result<Option<StallAlert>> {
         let mut response = self
             .db
             .query(
@@ -61,11 +58,7 @@ impl StallAlertRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the update fails.
-    pub async fn update_status(
-        &self,
-        id: &str,
-        status: StallAlertStatus,
-    ) -> Result<StallAlert> {
+    pub async fn update_status(&self, id: &str, status: StallAlertStatus) -> Result<StallAlert> {
         let mut current: StallAlert = self
             .db
             .select(("stall_alert", id))

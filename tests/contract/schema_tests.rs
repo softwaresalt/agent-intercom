@@ -12,16 +12,15 @@ fn config_for_tests() -> GlobalConfig {
     let temp = tempfile::tempdir().expect("tempdir");
     let toml = format!(
         r#"
-default_workspace_root = "{root}"
+default_workspace_root = '{root}'
 http_port = 3000
 ipc_name = "test"
 max_concurrent_sessions = 1
 host_cli = "claude"
+authorized_user_ids = ["U123"]
 
 [slack]
 channel_id = "C123"
-
-authorized_user_ids = ["U123"]
 
 [timeouts]
 approval_seconds = 3600
@@ -48,7 +47,13 @@ async fn schema_creates_five_tables() {
     let db = Arc::new(db);
 
     // Attempt to query each table — should succeed without error.
-    let tables = ["session", "approval_request", "checkpoint", "continuation_prompt", "stall_alert"];
+    let tables = [
+        "session",
+        "approval_request",
+        "checkpoint",
+        "continuation_prompt",
+        "stall_alert",
+    ];
 
     for table in tables {
         let query = format!("SELECT * FROM {table} LIMIT 1");
@@ -108,5 +113,8 @@ async fn approval_request_table_accepts_valid_record() {
         )
         .await;
 
-    assert!(result.is_ok(), "valid approval_request should be insertable");
+    assert!(
+        result.is_ok(),
+        "valid approval_request should be insertable"
+    );
 }

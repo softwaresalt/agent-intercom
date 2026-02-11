@@ -17,17 +17,14 @@ pub fn severity_section(level: &str, message: &str) -> SlackBlock {
         "error" => "\u{274c}",
         _ => "\u{2139}\u{fe0f}",
     };
-    SlackBlock::Section(SlackSectionBlock::new().with_text(
-        SlackBlockText::MarkDown(format!("{prefix} {message}").into()),
-    ))
+    SlackBlock::Section(SlackSectionBlock::new().with_text(SlackBlockText::MarkDown(
+        format!("{prefix} {message}").into(),
+    )))
 }
 
 /// Build an actions block with the given buttons.
 #[must_use]
-pub fn action_buttons(
-    block_id: &str,
-    buttons: &[(&str, &str, &str)],
-) -> SlackBlock {
+pub fn action_buttons(block_id: &str, buttons: &[(&str, &str, &str)]) -> SlackBlock {
     let elements: Vec<SlackActionBlockElement> = buttons
         .iter()
         .map(|(action_id, text, value)| {
@@ -41,8 +38,7 @@ pub fn action_buttons(
         })
         .collect();
     SlackBlock::Actions(
-        SlackActionsBlock::new(elements)
-            .with_block_id(SlackBlockId(block_id.into())),
+        SlackActionsBlock::new(elements).with_block_id(SlackBlockId(block_id.into())),
     )
 }
 
@@ -87,10 +83,7 @@ pub fn nudge_buttons(alert_id: &str) -> SlackBlock {
 /// Build a plain text section block.
 #[must_use]
 pub fn text_section(text: &str) -> SlackBlock {
-    SlackBlock::Section(
-        SlackSectionBlock::new()
-            .with_text(SlackBlockText::MarkDown(text.into())),
-    )
+    SlackBlock::Section(SlackSectionBlock::new().with_text(SlackBlockText::MarkDown(text.into())))
 }
 
 /// Build a diff rendering section. Inline for <20 lines, marked as code block.
@@ -98,7 +91,6 @@ pub fn text_section(text: &str) -> SlackBlock {
 pub fn diff_section(diff: &str) -> SlackBlock {
     let content = format!("```\n{diff}\n```");
     SlackBlock::Section(
-        SlackSectionBlock::new()
-            .with_text(SlackBlockText::MarkDown(content.into())),
+        SlackSectionBlock::new().with_text(SlackBlockText::MarkDown(content.into())),
     )
 }

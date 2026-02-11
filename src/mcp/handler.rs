@@ -1,5 +1,6 @@
 //! MCP server handler, shared application state, and tool router.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -13,10 +14,23 @@ use rmcp::model::{
 use rmcp::service::{RequestContext, RoleServer};
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
+use tokio::sync::{oneshot, Mutex};
 use tracing::info_span;
 
 use crate::config::GlobalConfig;
 use crate::slack::client::SlackService;
+
+/// Response payload delivered through a pending approval oneshot channel.
+#[derive(Debug, Clone)]
+pub struct ApprovalResponse {
+    /// Operator decision: `approved`, `rejected`, or `timeout`.
+    pub status: String,
+    /// Optional rejection reason.
+    pub reason: Option<String>,
+}
+
+/// Thread-safe map of pending approval `oneshot` senders keyed by `request_id`.
+pub type PendingApprovals = Arc<Mutex<HashMap<String, oneshot::Sender<ApprovalResponse>>>>;
 
 /// Shared application state accessible by all MCP tool handlers.
 pub struct AppState {
@@ -26,6 +40,8 @@ pub struct AppState {
     pub db: Arc<Surreal<Db>>,
     /// Slack client service (absent in local-only mode).
     pub slack: Option<Arc<SlackService>>,
+    /// Pending approval request senders keyed by `request_id`.
+    pub pending_approvals: PendingApprovals,
 }
 
 /// MCP server implementation that exposes the nine monocoque-agent-rem tools.
@@ -50,14 +66,24 @@ impl AgentRemServer {
         let mut router = ToolRouter::new();
 
         for tool in Self::all_tools() {
-            router.add_route(ToolRoute::new_dyn(tool, |_context| {
-                Box::pin(async {
-                    Err(rmcp::ErrorData::internal_error(
-                        "tool not implemented",
-                        None,
-                    ))
-                })
-            }));
+            let name = tool.name.to_string();
+            match name.as_str() {
+                "ask_approval" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::ask_approval::handle(context))
+                    }));
+                }
+                _ => {
+                    router.add_route(ToolRoute::new_dyn(tool, |_context| {
+                        Box::pin(async {
+                            Err(rmcp::ErrorData::internal_error(
+                                "tool not implemented",
+                                None,
+                            ))
+                        })
+                    }));
+                }
+            }
         }
 
         router
@@ -185,8 +211,7 @@ impl AgentRemServer {
             Tool {
                 name: "set_operational_mode".into(),
                 description: Some(
-                    "Switch between remote, local, and hybrid operational modes at runtime."
-                        .into(),
+                    "Switch between remote, local, and hybrid operational modes at runtime.".into(),
                 ),
                 input_schema: Self::schema(serde_json::json!({
                     "type": "object",

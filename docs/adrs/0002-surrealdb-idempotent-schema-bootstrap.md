@@ -1,6 +1,6 @@
-# ADR-0002: SurrealDB Schema with IF NOT EXISTS for Idempotent Bootstrap
+# ADR-0002: SurrealDB Idempotent Schema Bootstrap
 
-**Status**: Accepted
+**Status**: Accepted (amended Phase 3)
 **Date**: 2026-02-11
 **Phase**: 2 (Foundational), Task T017
 
@@ -10,9 +10,13 @@ The embedded SurrealDB schema must be applied on every server startup to ensure 
 
 ## Decision
 
-Moved all DDL into a dedicated `persistence/schema.rs` module. Every statement uses `DEFINE ... IF NOT EXISTS` making re-execution safe across restarts. Added `ASSERT $value IN [...]` constraints on enum-backed string fields (`status`, `mode`, `risk_level`, `prompt_type`, `StallAlertStatus`) to enforce valid values at the database level, not just at the Rust type level.
+Moved all DDL into a dedicated `persistence/schema.rs` module. Added `ASSERT $value IN [...]` constraints on enum-backed string fields (`status`, `mode`, `risk_level`, `prompt_type`, `StallAlertStatus`) to enforce valid values at the database level, not just at the Rust type level.
 
 The schema covers all five SCHEMAFULL tables: `session`, `approval_request`, `checkpoint`, `continuation_prompt`, `stall_alert`. New fields added in Phase 2 (`workspace_root`, `terminated_at`, `progress_snapshot`) are included.
+
+### Amendment (Phase 3)
+
+Removed `IF NOT EXISTS` clauses from all `DEFINE TABLE` / `DEFINE FIELD` statements. SurrealDB 1.5 does not support `IF NOT EXISTS` on `DEFINE` statements — that syntax was introduced in 2.x. SurrealDB 1.x `DEFINE` is already idempotent: re-defining an existing table or field overwrites the definition without error, achieving the same practical result.
 
 ## Consequences
 
@@ -22,5 +26,5 @@ The schema covers all five SCHEMAFULL tables: `session`, `approval_request`, `ch
 - Schema is centralized in one module, easy to review and extend.
 
 **Negative**:
-- `IF NOT EXISTS` means field type changes require manual migration (won't auto-alter existing fields).
+- SurrealDB 1.x `DEFINE` overwrites existing definitions, so field type changes take effect immediately (no "skip if exists" guard).
 - Future schema migrations will need a versioning strategy beyond this initial bootstrap.

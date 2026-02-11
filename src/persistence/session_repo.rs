@@ -30,7 +30,7 @@ impl SessionRepo {
     /// Returns `AppError::Db` if the database insert fails.
     pub async fn create(&self, session: &Session) -> Result<Session> {
         self.db
-            .create(("session", session.id.clone()))
+            .create(("session", session.id.as_str()))
             .content(session)
             .await?
             .ok_or_else(|| AppError::Db("failed to create session".into()))
@@ -62,7 +62,7 @@ impl SessionRepo {
 
         self.db
             .update(("session", id))
-            .content(current)
+            .content(&current)
             .await?
             .ok_or_else(|| AppError::Db("failed to update session status".into()))
     }
@@ -83,7 +83,7 @@ impl SessionRepo {
 
         self.db
             .update(("session", id))
-            .content(current)
+            .content(&current)
             .await?
             .ok_or_else(|| AppError::Db("failed to update session activity".into()))
     }
@@ -116,7 +116,7 @@ impl SessionRepo {
         current.updated_at = Utc::now();
         self.db
             .update(("session", id))
-            .content(current)
+            .content(&current)
             .await?
             .ok_or_else(|| AppError::Db("failed to update progress snapshot".into()))
     }
@@ -126,11 +126,7 @@ impl SessionRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the transition is invalid or persistence fails.
-    pub async fn set_terminated(
-        &self,
-        id: &str,
-        status: SessionStatus,
-    ) -> Result<Session> {
+    pub async fn set_terminated(&self, id: &str, status: SessionStatus) -> Result<Session> {
         let mut current = self.get_by_id(id).await?;
         if !current.can_transition_to(status) {
             return Err(AppError::Db("invalid terminal status transition".into()));
@@ -140,7 +136,7 @@ impl SessionRepo {
         current.updated_at = Utc::now();
         self.db
             .update(("session", id))
-            .content(current)
+            .content(&current)
             .await?
             .ok_or_else(|| AppError::Db("failed to set session terminated".into()))
     }

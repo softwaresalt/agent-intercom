@@ -39,6 +39,11 @@ pub enum SessionMode {
 #[serde(rename_all = "snake_case")]
 pub struct Session {
     /// Unique record identifier.
+    #[serde(
+        skip_serializing,
+        default,
+        deserialize_with = "super::deserialize_surreal_id"
+    )]
     pub id: String,
     /// Owning Slack user ID; immutable after creation.
     pub owner_user_id: String,

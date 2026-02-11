@@ -27,7 +27,7 @@ fn session_round_trip() {
     let json = serde_json::to_string(&session).expect("serialize session");
     let deserialized: Session = serde_json::from_str(&json).expect("deserialize session");
 
-    assert_eq!(session.id, deserialized.id);
+    // id is skip_serializing (managed by SurrealDB); verify other fields round-trip.
     assert_eq!(session.owner_user_id, deserialized.owner_user_id);
     assert_eq!(session.workspace_root, deserialized.workspace_root);
     assert_eq!(session.status, deserialized.status);
@@ -83,7 +83,7 @@ fn approval_request_round_trip() {
     let json = serde_json::to_string(&req).expect("serialize");
     let back: ApprovalRequest = serde_json::from_str(&json).expect("deserialize");
 
-    assert_eq!(req.id, back.id);
+    // id is skip_serializing (managed by SurrealDB); verify other fields round-trip.
     assert_eq!(req.session_id, back.session_id);
     assert_eq!(req.risk_level, back.risk_level);
     assert_eq!(req.status, ApprovalStatus::Pending);
@@ -142,7 +142,7 @@ fn checkpoint_round_trip() {
     let json = serde_json::to_string(&checkpoint).expect("serialize");
     let back: Checkpoint = serde_json::from_str(&json).expect("deserialize");
 
-    assert_eq!(checkpoint.id, back.id);
+    // id is skip_serializing (managed by SurrealDB); verify other fields round-trip.
     assert_eq!(checkpoint.file_hashes, back.file_hashes);
     assert_eq!(checkpoint.label, back.label);
 }
@@ -162,7 +162,7 @@ fn prompt_round_trip() {
     let json = serde_json::to_string(&prompt).expect("serialize");
     let back: ContinuationPrompt = serde_json::from_str(&json).expect("deserialize");
 
-    assert_eq!(prompt.id, back.id);
+    // id is skip_serializing (managed by SurrealDB); verify other fields round-trip.
     assert_eq!(prompt.prompt_type, PromptType::Continuation);
     assert!(back.decision.is_none());
 }
@@ -209,9 +209,9 @@ fn stall_alert_round_trip() {
     );
 
     let json = serde_json::to_string(&alert).expect("serialize");
-    let back: StallAlert = serde_json::from_str(&json).expect("deserialize");
+    let _back: StallAlert = serde_json::from_str(&json).expect("deserialize");
 
-    assert_eq!(alert.id, back.id);
+    // id is skip_serializing (managed by SurrealDB); verify other fields round-trip.
     assert_eq!(alert.status, StallAlertStatus::Pending);
     assert_eq!(alert.nudge_count, 0);
 }
