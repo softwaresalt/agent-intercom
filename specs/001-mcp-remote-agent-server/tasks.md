@@ -32,7 +32,7 @@ tests/         # contract/, integration/, unit/
 - [X] T001 Add `keyring = "3"` dependency to `Cargo.toml` workspace dependencies and package dependencies for OS keychain credential loading (FR-036)
 - [X] T002 [P] Create shared error type enum `AppError` with variants for config, persistence, slack, mcp, diff, policy, ipc, and path violation errors in `src/errors.rs`; implement `std::fmt::Display` and `std::error::Error`
 - [X] T003 [P] Initialize tracing subscriber with `env-filter` and `fmt` features in `src/main.rs`; configure JSON output via `--log-format json` CLI flag using `clap` (FR-037)
-- [ ] T100 [P] Add `#![forbid(unsafe_code)]` attribute to `src/lib.rs` to enforce memory safety at the workspace level per Constitution Principle I (Safety-First Rust)
+- [X] T100 [P] Add `#![forbid(unsafe_code)]` attribute to `src/lib.rs` to enforce memory safety at the workspace level per Constitution Principle I (Safety-First Rust)
 - [X] T004 Verify project compiles with `cargo build` and passes `cargo clippy`
 
 **Checkpoint**: Project compiles, tracing initialized, error types defined
