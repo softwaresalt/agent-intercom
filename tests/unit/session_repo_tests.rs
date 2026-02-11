@@ -8,7 +8,7 @@ fn config_for_tests() -> GlobalConfig {
     let temp = tempfile::tempdir().expect("tempdir");
     let toml = format!(
         r#"
-workspace_root = "{root}"
+default_workspace_root = "{root}"
 http_port = 3000
 ipc_name = "monocoque-agent-rem"
 max_concurrent_sessions = 2
@@ -16,8 +16,6 @@ host_cli = "claude"
 host_cli_args = ["--stdio"]
 
 [slack]
-app_token = "xapp-1"
-bot_token = "xoxb-1"
 channel_id = "C123"
 
 authorized_user_ids = ["U123", "U456"]
@@ -49,7 +47,12 @@ async fn create_and_update_session() {
     let db = db::connect(&config, true).await.expect("db connect");
     let repo = SessionRepo::new(Arc::new(db));
 
-    let session = Session::new("U123".into(), Some("hello".into()), SessionMode::Remote);
+    let session = Session::new(
+        "U123".into(),
+        "/test/workspace".into(),
+        Some("hello".into()),
+        SessionMode::Remote,
+    );
     let created = repo.create(&session).await.expect("create session");
     assert_eq!(created.owner_user_id, "U123");
 

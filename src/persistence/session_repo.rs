@@ -101,6 +101,50 @@ impl SessionRepo {
         response.take::<Vec<Session>>(0).map_err(AppError::from)
     }
 
+    /// Update the progress snapshot on a session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn update_progress_snapshot(
+        &self,
+        id: &str,
+        snapshot: Option<Vec<crate::models::progress::ProgressItem>>,
+    ) -> Result<Session> {
+        let mut current = self.get_by_id(id).await?;
+        current.progress_snapshot = snapshot;
+        current.updated_at = Utc::now();
+        self.db
+            .update(("session", id))
+            .content(current)
+            .await?
+            .ok_or_else(|| AppError::Db("failed to update progress snapshot".into()))
+    }
+
+    /// Terminate a session, setting status and `terminated_at`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the transition is invalid or persistence fails.
+    pub async fn set_terminated(
+        &self,
+        id: &str,
+        status: SessionStatus,
+    ) -> Result<Session> {
+        let mut current = self.get_by_id(id).await?;
+        if !current.can_transition_to(status) {
+            return Err(AppError::Db("invalid terminal status transition".into()));
+        }
+        current.status = status;
+        current.terminated_at = Some(Utc::now());
+        current.updated_at = Utc::now();
+        self.db
+            .update(("session", id))
+            .content(current)
+            .await?
+            .ok_or_else(|| AppError::Db("failed to set session terminated".into()))
+    }
+
     /// Count active sessions (status == active).
     ///
     /// # Errors

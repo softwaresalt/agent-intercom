@@ -4,11 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use slack_morphism::prelude::{
-    SlackApiChatPostMessageRequest, SlackApiConversationsHistoryRequest, SlackApiToken,
-    SlackApiTokenType, SlackApiTokenValue, SlackBlock, SlackChannelId, SlackClient,
+    SlackApiChatPostMessageRequest, SlackApiChatUpdateRequest,
+    SlackApiConversationsHistoryRequest, SlackApiFilesComplete,
+    SlackApiFilesCompleteUploadExternalRequest, SlackApiFilesGetUploadUrlExternalRequest,
+    SlackApiToken, SlackApiTokenType,
+    SlackApiTokenValue, SlackApiViewsOpenRequest, SlackBlock, SlackChannelId, SlackClient,
     SlackClientEventsListenerEnvironment, SlackClientHyperHttpsConnector, SlackClientSession,
     SlackClientSocketModeConfig, SlackClientSocketModeListener, SlackHistoryMessage,
-    SlackMessageContent, SlackSocketModeListenerCallbacks, SlackTs,
+    SlackMessageContent, SlackSocketModeListenerCallbacks, SlackTriggerId, SlackTs, SlackView,
 };
 use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::{error, info, warn};
@@ -248,5 +251,106 @@ impl SlackService {
             .await
             .map(|response| response.messages)
             .map_err(|err| AppError::Slack(format!("failed to read history: {err}")))
+    }
+
+    /// Update an existing Slack message (e.g., replace buttons with static text).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Slack` if the Slack API call fails.
+    pub async fn update_message(
+        &self,
+        channel: SlackChannelId,
+        ts: SlackTs,
+        blocks: Vec<SlackBlock>,
+    ) -> Result<()> {
+        let request = SlackApiChatUpdateRequest::new(
+            channel,
+            SlackMessageContent {
+                text: None,
+                blocks: Some(blocks),
+                attachments: None,
+                upload: None,
+                files: None,
+                reactions: None,
+                metadata: None,
+            },
+            ts,
+        );
+        self.http_session()
+            .chat_update(&request)
+            .await
+            .map_err(|err| AppError::Slack(format!("failed to update message: {err}")))?;
+        Ok(())
+    }
+
+    /// Upload a file to a Slack channel using the external upload flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Slack` if the upload fails.
+    pub async fn upload_file(
+        &self,
+        channel: SlackChannelId,
+        filename: &str,
+        content: &str,
+        thread_ts: Option<SlackTs>,
+    ) -> Result<()> {
+        let session = self.http_session();
+
+        // Step 1: Get upload URL.
+        let url_request = SlackApiFilesGetUploadUrlExternalRequest::new(
+            filename.into(),
+            content.len(),
+        );
+        let url_response = session
+            .get_upload_url_external(&url_request)
+            .await
+            .map_err(|err| AppError::Slack(format!("failed to get upload url: {err}")))?;
+
+        // Step 2: Upload content to the URL.
+        let http_client = reqwest::Client::new();
+        http_client
+            .post(url_response.upload_url.0.to_string())
+            .body(content.to_owned())
+            .send()
+            .await
+            .map_err(|err| AppError::Slack(format!("failed to upload file: {err}")))?;
+
+        // Step 3: Complete the upload.
+        let file_ref = SlackApiFilesComplete {
+            id: url_response.file_id,
+            title: Some(filename.into()),
+        };
+        let mut complete_request =
+            SlackApiFilesCompleteUploadExternalRequest::new(vec![file_ref]);
+        complete_request.channel_id = Some(channel);
+        complete_request.thread_ts = thread_ts;
+        session
+            .files_complete_upload_external(&complete_request)
+            .await
+            .map_err(|err| {
+                AppError::Slack(format!("failed to complete upload: {err}"))
+            })?;
+
+        Ok(())
+    }
+
+    /// Open a Slack modal dialog.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Slack` if the API call fails.
+    pub async fn open_modal(
+        &self,
+        trigger_id: SlackTriggerId,
+        view: SlackView,
+    ) -> Result<()> {
+        let request = SlackApiViewsOpenRequest::new(trigger_id, view);
+        self.http_session()
+            .views_open(&request)
+            .await
+            .map_err(|err| AppError::Slack(format!("failed to open modal: {err}")))?;
+        Ok(())
     }
 }

@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::progress::ProgressItem;
+
 /// Lifecycle status for an agent session.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -40,6 +42,8 @@ pub struct Session {
     pub id: String,
     /// Owning Slack user ID; immutable after creation.
     pub owner_user_id: String,
+    /// Absolute path to the workspace directory for this session.
+    pub workspace_root: String,
     /// Current lifecycle status.
     pub status: SessionStatus,
     /// Optional initial prompt/instruction.
@@ -56,16 +60,26 @@ pub struct Session {
     pub nudge_count: u32,
     /// Whether stall detection is currently paused.
     pub stall_paused: bool,
+    /// Timestamp when the session was terminated.
+    pub terminated_at: Option<DateTime<Utc>>,
+    /// Last-reported progress snapshot from the agent.
+    pub progress_snapshot: Option<Vec<ProgressItem>>,
 }
 
 impl Session {
     /// Construct a new session with defaults and generated identifier.
     #[must_use]
-    pub fn new(owner_user_id: String, prompt: Option<String>, mode: SessionMode) -> Self {
+    pub fn new(
+        owner_user_id: String,
+        workspace_root: String,
+        prompt: Option<String>,
+        mode: SessionMode,
+    ) -> Self {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4().to_string(),
             owner_user_id,
+            workspace_root,
             status: SessionStatus::Created,
             prompt,
             mode,
@@ -74,6 +88,8 @@ impl Session {
             last_tool: None,
             nudge_count: 0,
             stall_paused: false,
+            terminated_at: None,
+            progress_snapshot: None,
         }
     }
 

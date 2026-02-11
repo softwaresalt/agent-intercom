@@ -59,6 +59,11 @@
         "Move-Item": true,
         "New-Item": true,
         "Test-Path": true,
-        "echo": true
+        "/^powershell -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json -RequireTasks -IncludeTasks 2>&1 \\| Out-String$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "echo": true,
+        "mkdir": true
     }
 }

@@ -3,6 +3,7 @@
 pub mod approval;
 pub mod checkpoint;
 pub mod policy;
+pub mod progress;
 pub mod prompt;
 pub mod session;
 pub mod stall;
