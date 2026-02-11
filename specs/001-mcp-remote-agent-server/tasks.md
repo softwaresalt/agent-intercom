@@ -3,7 +3,7 @@
 **Input**: Design documents from `specs/001-mcp-remote-agent-server/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/
 
-**Tests**: Not explicitly requested — test tasks omitted. Run `cargo test` / `cargo clippy` after each phase.
+**Tests**: Test tasks included per Constitution Principle III (Test-First Development). Run `cargo test` / `cargo clippy` after each phase.
 
 **Organization**: Tasks grouped by user story (10 stories from spec.md, priority P1→P3).
 
@@ -32,6 +32,7 @@ tests/         # contract/, integration/, unit/
 - [X] T001 Add `keyring = "3"` dependency to `Cargo.toml` workspace dependencies and package dependencies for OS keychain credential loading (FR-036)
 - [X] T002 [P] Create shared error type enum `AppError` with variants for config, persistence, slack, mcp, diff, policy, ipc, and path violation errors in `src/errors.rs`; implement `std::fmt::Display` and `std::error::Error`
 - [X] T003 [P] Initialize tracing subscriber with `env-filter` and `fmt` features in `src/main.rs`; configure JSON output via `--log-format json` CLI flag using `clap` (FR-037)
+- [ ] T100 [P] Add `#![forbid(unsafe_code)]` attribute to `src/lib.rs` to enforce memory safety at the workspace level per Constitution Principle I (Safety-First Rust)
 - [X] T004 Verify project compiles with `cargo build` and passes `cargo clippy`
 
 **Checkpoint**: Project compiles, tracing initialized, error types defined
@@ -44,6 +45,13 @@ tests/         # contract/, integration/, unit/
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
+### Tests (Constitution Principle III)
+
+- [ ] T101 [P] Write unit tests for `GlobalConfig` TOML deserialization in `tests/unit/config_tests.rs`: valid complete config, missing required fields, invalid field types, default value population, credential env var fallback (FR-036)
+- [ ] T102 [P] Write unit tests for all domain model `Serialize`/`Deserialize` round-trips in `tests/unit/model_tests.rs`: Session (all status transitions), ApprovalRequest (all status values), Checkpoint, ContinuationPrompt (all prompt types and decisions), StallAlert (all status values), ProgressItem (all statuses); verify enum variant serialization matches data-model.md
+- [ ] T103 [P] Write unit tests for path validation in `tests/unit/path_validation_tests.rs`: valid resolved path, `..` traversal rejection, symlink escape rejection, workspace root boundary enforcement, relative path resolution (FR-006)
+- [ ] T104 Write contract tests for SurrealDB schema in `tests/contract/schema_tests.rs`: verify table creation, field constraints, and `ASSERT` rules match data-model.md definitions
+
 ### Configuration & Credentials
 
 - [ ] T005 Implement `GlobalConfig` struct and TOML deserialization in `src/config.rs` per data-model.md GlobalConfig entity; include `default_workspace_root`, `slack` (channel_id, authorized_user_ids), `timeouts`, `stall`, `commands`, `http_port`, `ipc_name`, `retention_days`, `max_concurrent_sessions`, `host_cli`, `host_cli_args` fields
@@ -52,7 +60,7 @@ tests/         # contract/, integration/, unit/
 
 ### Domain Models
 
-- [ ] T008 [P] Implement `Session` struct in `src/models/session.rs` per data-model.md: `session_id`, `owner_user_id`, `workspace_root`, `status` (enum: Created, Active, Paused, Terminated, Interrupted), `prompt`, `mode` (enum: Remote, Local, Hybrid), `created_at`, `updated_at`, `terminated_at`, `last_tool`, `nudge_count`, `stall_paused`, `progress_snapshot` (Option<Vec<ProgressItem>>); derive `Serialize`/`Deserialize`
+- [ ] T008 Implement `Session` struct in `src/models/session.rs` per data-model.md: `session_id`, `owner_user_id`, `workspace_root`, `status` (enum: Created, Active, Paused, Terminated, Interrupted), `prompt`, `mode` (enum: Remote, Local, Hybrid), `created_at`, `updated_at`, `terminated_at`, `last_tool`, `nudge_count`, `stall_paused`, `progress_snapshot` (Option<Vec<ProgressItem>>); derive `Serialize`/`Deserialize`. **Depends on T014** (ProgressItem type)
 - [ ] T009 [P] Implement `ApprovalRequest` struct in `src/models/approval.rs` per data-model.md: `request_id`, `session_id`, `title`, `description`, `diff_content`, `file_path`, `risk_level` (enum: Low, High, Critical), `status` (enum: Pending, Approved, Rejected, Expired, Consumed, Interrupted), `original_hash`, `slack_ts`, `created_at`, `consumed_at`; derive `Serialize`/`Deserialize`
 - [ ] T010 [P] Implement `Checkpoint` struct in `src/models/checkpoint.rs` per data-model.md: `checkpoint_id`, `session_id`, `label`, `session_state` (serde_json::Value), `file_hashes` (HashMap<String, String>), `workspace_root`, `progress_snapshot`, `created_at`; derive `Serialize`/`Deserialize`
 - [ ] T011 [P] Implement `ContinuationPrompt` struct in `src/models/prompt.rs` per data-model.md: `prompt_id`, `session_id`, `prompt_text`, `prompt_type` (enum: Continuation, Clarification, ErrorRecovery, ResourceWarning), `elapsed_seconds`, `actions_taken`, `decision` (enum: Continue, Refine, Stop), `instruction`, `slack_ts`, `created_at`; derive `Serialize`/`Deserialize`
@@ -78,7 +86,8 @@ tests/         # contract/, integration/, unit/
 - [ ] T025 Implement Slack Socket Mode client wrapper in `src/slack/client.rs`: connect using `slack-morphism` `SlackSocketModeClientsManager` with app_token; handle reconnection; expose methods `post_message`, `update_message`, `upload_file`, `open_modal`; implement rate-limit queue with exponential backoff (FR-020)
 - [ ] T026 [P] Implement Slack Block Kit message builders in `src/slack/blocks.rs`: helper functions for building `rich_text_preformatted` blocks (small diffs), file upload payloads (large diffs), `actions` blocks with buttons (Accept/Reject, Continue/Refine/Stop, Nudge/Stop), severity-formatted log messages (info ℹ️, success ✅, warning ⚠️, error ❌)
 - [ ] T027 [P] Implement interaction handler dispatch in `src/slack/interactions.rs`: receive button press and modal submission payloads from Socket Mode events; dispatch to appropriate handler by `action_id`; verify `user.id` matches session owner (FR-013); replace buttons with static status text after first action (FR-022)
-- [ ] T028 Create `src/slack/mod.rs` re-exporting client, blocks, interactions
+- [ ] T028 Create `src/slack/mod.rs` re-exporting client, blocks, interactions, handlers
+- [ ] T128 Create `src/slack/handlers/mod.rs` re-exporting approval, nudge, prompt handler submodules
 
 ### MCP Server Foundation
 
@@ -94,7 +103,7 @@ tests/         # contract/, integration/, unit/
 
 ### Server Bootstrap
 
-- [ ] T035 Implement server bootstrap in `src/main.rs`: load config (T005-T007), initialize DB and run schema (T016-T017), start retention service (T023), connect Slack client (T025), create `AgentRemServer` with shared state, start stdio transport (T031), start SSE transport with axum (T032), register Slack interaction handler (T027), set up graceful shutdown handler for SIGTERM/SIGINT that persists in-flight state and notifies Slack (FR-021)
+- [ ] T035 Implement server bootstrap in `src/main.rs`: load config (T005-T007), initialize DB and run schema (T016-T017), start retention service (T023), connect Slack client (T025), create `AgentRemServer` with shared state, start stdio transport (T031), start SSE transport with axum (T032), register Slack interaction handler (T027), register SIGTERM/SIGINT signal handler that triggers graceful shutdown (shutdown persistence logic in T081)
 - [ ] T036 Update `src/lib.rs` to re-export all public modules: config, errors, models, persistence, slack, mcp, diff, policy, orchestrator, ipc
 - [ ] T037 Verify full compilation with `cargo build` and `cargo clippy` pass cleanly
 
@@ -107,6 +116,11 @@ tests/         # contract/, integration/, unit/
 **Goal**: Agent submits code proposals for remote approval via Slack; operator reviews diffs and taps Accept/Reject from mobile
 
 **Independent Test**: Start server, connect agent, invoke `ask_approval` with a sample diff, verify diff appears in Slack with actionable buttons, tap Accept, verify agent receives approved response
+
+### Tests (Constitution Principle III)
+
+- [ ] T105 Write contract tests for `ask_approval` tool in `tests/contract/ask_approval_tests.rs`: validate input schema (required fields, enum values, optional fields) and output schema (`status` enum, `request_id` presence, optional `reason`) per mcp-tools.json contract
+- [ ] T106 Write integration test for approval flow in `tests/integration/approval_flow_tests.rs`: submit approval request → verify DB record created → simulate Accept → verify oneshot resolves with `approved` status → verify DB updated; repeat for Reject and timeout paths
 
 ### Implementation for User Story 1
 
@@ -126,6 +140,12 @@ tests/         # contract/, integration/, unit/
 
 **Independent Test**: Submit diff via `ask_approval`, approve it, invoke `accept_diff` with the `request_id`, verify file written to disk with correct content
 
+### Tests (Constitution Principle III)
+
+- [ ] T107 Write unit tests for diff application in `tests/unit/diff_tests.rs`: full-file write (new file, overwrite), unified diff patch (clean apply, failed apply), atomic write via tempfile, parent directory creation
+- [ ] T108 Write contract tests for `accept_diff` tool in `tests/contract/accept_diff_tests.rs`: validate input/output schemas per mcp-tools.json; test `not_approved`, `already_consumed`, `path_violation`, `patch_conflict` error codes
+- [ ] T109 Write integration test for approve→apply pipeline in `tests/integration/diff_apply_tests.rs`: submit diff → approve → apply → verify file on disk; test hash mismatch conflict detection with file mutation between proposal and application
+
 ### Implementation for User Story 2
 
 - [ ] T043 [US2] Implement file writing utility in `src/diff/writer.rs`: `write_full_file(path, content, workspace_root) -> Result<WriteSummary>` that validates path, creates parent directories if needed, writes to `tempfile::NamedTempFile` in the same directory, then `persist()` for atomic rename; return `{path, bytes_written}`
@@ -142,6 +162,12 @@ tests/         # contract/, integration/, unit/
 **Goal**: Server detects when agent goes silent, alerts operator via Slack, and nudges agent to resume
 
 **Independent Test**: Connect agent, make several tool calls, simulate silence (no calls for threshold period), verify stall alert in Slack, tap Nudge, verify agent receives notification
+
+### Tests (Constitution Principle III)
+
+- [ ] T110 Write unit tests for stall detection in `tests/unit/stall_detector_tests.rs`: timer fires after threshold, `reset()` prevents firing, `pause()`/`resume()` toggle, consecutive nudge counting, self-recovery detection clears alert
+- [ ] T111 Write contract tests for `heartbeat` tool in `tests/contract/heartbeat_tests.rs`: validate input/output schemas per mcp-tools.json; test with status_message only, with valid progress_snapshot, with malformed snapshot (must reject), with omitted snapshot (must preserve existing)
+- [ ] T112 Write integration test for nudge flow in `tests/integration/nudge_flow_tests.rs`: agent makes tool calls → goes silent → verify stall alert created → simulate nudge → verify `monocoque/nudge` notification delivered with progress snapshot summary
 
 ### Implementation for User Story 4
 
@@ -164,6 +190,10 @@ tests/         # contract/, integration/, unit/
 
 **Independent Test**: Invoke `remote_log` with messages at info/success/warning/error levels, verify each appears in Slack with correct formatting
 
+### Tests (Constitution Principle III)
+
+- [ ] T113 Write contract tests for `remote_log` tool in `tests/contract/remote_log_tests.rs`: validate input/output schemas per mcp-tools.json; verify all severity levels (info, success, warning, error) produce correct Block Kit formatting
+
 ### Implementation for User Story 3
 
 - [ ] T055 [US3] Implement `remote_log` MCP tool handler in `src/mcp/tools/remote_log.rs`: accept `message`, `level`, `thread_ts` per mcp-tools.json contract; format message using Block Kit severity builders from `src/slack/blocks.rs` (info ℹ️, success ✅, warning ⚠️, error ❌); post to Slack channel (or thread if `thread_ts` provided); do NOT block agent — queue message via Slack client's rate-limit queue; return `{posted, ts}` per contract
@@ -178,6 +208,11 @@ tests/         # contract/, integration/, unit/
 **Goal**: Agent-generated continuation prompts forwarded to Slack with Continue/Refine/Stop buttons
 
 **Independent Test**: Invoke `forward_prompt` with a continuation prompt, verify it appears in Slack with three buttons, tap Continue, verify agent receives decision
+
+### Tests (Constitution Principle III)
+
+- [ ] T114 Write contract tests for `forward_prompt` tool in `tests/contract/forward_prompt_tests.rs`: validate input/output schemas per mcp-tools.json; test all `prompt_type` values and `decision` enum values
+- [ ] T115 Write integration test for prompt→decision flow in `tests/integration/prompt_flow_tests.rs`: forward prompt → verify DB record → simulate Continue → verify oneshot resolves; repeat for Refine (with instruction) and Stop; test auto-timeout returns `continue`
 
 ### Implementation for User Story 5
 
@@ -195,6 +230,12 @@ tests/         # contract/, integration/, unit/
 **Goal**: Workspace policy file auto-approves pre-trusted operations, reducing Slack notification noise
 
 **Independent Test**: Create `.monocoque/settings.json` with "cargo test" auto-approved, invoke `check_auto_approve`, verify returns `auto_approved: true`
+
+### Tests (Constitution Principle III)
+
+- [ ] T116 Write unit tests for policy loader in `tests/unit/policy_tests.rs`: valid policy file parsing, malformed file fallback to deny-all, commands not in global allowlist rejected (FR-011), missing policy file returns deny-all
+- [ ] T117 Write unit tests for policy evaluator in `tests/unit/policy_evaluator_tests.rs`: command matching, tool matching, file pattern glob matching, risk_level_threshold enforcement, global config supersedes workspace config
+- [ ] T118 Write contract tests for `check_auto_approve` tool in `tests/contract/check_auto_approve_tests.rs`: validate input/output schemas per mcp-tools.json
 
 ### Implementation for User Story 6
 
@@ -214,6 +255,11 @@ tests/         # contract/, integration/, unit/
 **Goal**: Operator starts, pauses, resumes, terminates, checkpoints, and restores sessions from Slack
 
 **Independent Test**: Issue `session-start` via Slack, verify agent spawns; pause and resume; create checkpoint; restore checkpoint
+
+### Tests (Constitution Principle III)
+
+- [ ] T119 Write integration test for session lifecycle in `tests/integration/session_lifecycle_tests.rs`: start → active → pause → resume → checkpoint (verify file hashes stored) → terminate; verify `max_concurrent_sessions` enforcement (FR-023); verify owner-only access (FR-013)
+- [ ] T120 Write unit tests for checkpoint hash comparison in `tests/unit/checkpoint_tests.rs`: create checkpoint with file hashes → mutate files → restore → verify divergence warning includes correct file list
 
 ### Implementation for User Story 7
 
@@ -237,6 +283,10 @@ tests/         # contract/, integration/, unit/
 
 **Independent Test**: Issue `list-files` via Slack, verify directory tree; issue `show-file`, verify file contents; run a registered command
 
+### Tests (Constitution Principle III)
+
+- [ ] T121 Write unit tests for command execution safety in `tests/unit/command_exec_tests.rs`: allowed command passes, disallowed command rejected (FR-014), path validation for list-files/show-file stays within workspace root
+
 ### Implementation for User Story 8
 
 - [ ] T076 [US8] Implement `list-files` command handler in `src/slack/commands.rs`: accept optional path and `--depth N` flag; list directory contents from session's workspace_root; validate path stays within workspace root (FR-006); format as tree and post to Slack
@@ -254,10 +304,15 @@ tests/         # contract/, integration/, unit/
 
 **Independent Test**: Submit approval, kill server, restart, invoke `recover_state`, verify pending request returned
 
+### Tests (Constitution Principle III)
+
+- [ ] T122 Write contract tests for `recover_state` tool in `tests/contract/recover_state_tests.rs`: validate input/output schemas per mcp-tools.json; test `recovered` and `clean` status paths; verify progress_snapshot included in response
+- [ ] T123 Write integration test for crash recovery in `tests/integration/crash_recovery_tests.rs`: create session with pending approval → simulate shutdown (mark Interrupted) → restart → invoke `recover_state` → verify pending request returned with original data and progress snapshot (SC-004)
+
 ### Implementation for User Story 9
 
 - [ ] T080 [US9] Implement `recover_state` MCP tool handler in `src/mcp/tools/recover_state.rs`: accept optional `session_id` per mcp-tools.json contract; if provided, load specific session; otherwise find most recently active session; collect pending approval requests and prompts; include last checkpoint info; include `progress_snapshot` from session record; return `{status: recovered|clean, session_id, pending_requests, last_checkpoint, progress_snapshot}` per contract
-- [ ] T081 [US9] Implement graceful shutdown handler in `src/main.rs`: on SIGTERM/SIGINT, mark all pending requests as Interrupted in DB, post final notification to Slack, terminate spawned agent processes with 5s grace period, flush and close DB connection (FR-021)
+- [ ] T081 [US9] Implement shutdown state persistence logic called by the graceful shutdown handler (T035) in `src/main.rs`: mark all pending approval requests and prompts as Interrupted in DB; mark all active/paused sessions as Interrupted with `terminated_at` set; post final notification to Slack; terminate spawned agent processes with 5s grace period; flush and close DB connection (FR-021)
 - [ ] T082 [US9] Add Slack reconnection on startup: on server start, check for sessions with status=Interrupted, re-post any pending approval requests that were in-flight to Slack (edge case: Slack WebSocket drop mid-approval)
 - [ ] T083 [US9] Add tracing spans to recovery: span covering recovery query with session_id, pending_count attributes
 
@@ -271,9 +326,14 @@ tests/         # contract/, integration/, unit/
 
 **Independent Test**: Set mode to local, verify Slack suppressed; set to remote, verify Slack active; set to hybrid, verify both channels active
 
+### Tests (Constitution Principle III)
+
+- [ ] T124 Write contract tests for `set_operational_mode` and `wait_for_instruction` tools in `tests/contract/mode_tests.rs`: validate input/output schemas per mcp-tools.json; verify all mode enum values
+- [ ] T125 Write unit tests for mode-aware routing in `tests/unit/mode_routing_tests.rs`: remote mode posts to Slack only, local mode routes to IPC only, hybrid mode posts to both
+
 ### Implementation for User Story 10
 
-- [ ] T084 [US10] Implement `set_operational_mode` MCP tool handler in `src/mcp/tools/set_mode.rs`: accept `mode` per mcp-tools.json contract; update session's mode in DB; persist across restarts; return `{previous_mode, current_mode}` per contract
+- [ ] T084 [US10] Implement `set_operational_mode` MCP tool handler in `src/mcp/tools/set_operational_mode.rs`: accept `mode` per mcp-tools.json contract; update session's mode in DB; persist across restarts; return `{previous_mode, current_mode}` per contract
 - [ ] T085 [US10] Implement mode-aware message routing in `src/slack/client.rs`: before posting any Slack message, check session's current mode; if `local` mode, suppress Slack post and route to IPC channel; if `hybrid`, post to both; if `remote` (default), Slack only
 - [ ] T086 [US10] Implement `wait_for_instruction` MCP tool handler in `src/mcp/tools/wait_for_instruction.rs`: accept `message` and `timeout_seconds` per mcp-tools.json contract; post waiting status to Slack; block on resume signal from Slack or IPC; return `{status: resumed|timeout, instruction}` per contract
 - [ ] T087 [US10] Implement IPC server in `src/ipc/server.rs`: listen on named pipe (Windows) or Unix domain socket (Linux/macOS) using `interprocess::local_socket`; accept local approve/reject/resume commands from `monocoque-ctl`; route to appropriate handler (FR-016)
@@ -289,9 +349,13 @@ tests/         # contract/, integration/, unit/
 
 **Goal**: Expose Slack channel history as an MCP resource for agent context
 
+### Tests (Constitution Principle III)
+
+- [ ] T126 Write contract tests for `slack://channel/{id}/recent` resource in `tests/contract/resource_tests.rs`: validate output schema per mcp-resources.json; test channel ID validation against config
+
 ### Implementation
 
-- [ ] T091 Implement `slack://channel/{id}/recent` MCP resource handler in `src/mcp/resources/channel_history.rs`: read recent messages from configured Slack channel using `conversations.history` API; return `{messages, has_more}` per mcp-resources.json contract; validate `id` matches `config.slack.channel_id` (FR-018)
+- [ ] T091 Implement `slack://channel/{id}/recent` MCP resource handler in `src/mcp/resources/slack_channel.rs`: read recent messages from configured Slack channel using `conversations.history` API; return `{messages, has_more}` per mcp-resources.json contract; validate `id` matches `config.slack.channel_id` (FR-018)
 - [ ] T092 Wire resource handler into `AgentRemServer::read_resource` in `src/mcp/handler.rs`
 
 **Checkpoint**: Agent can read operator instructions from Slack channel

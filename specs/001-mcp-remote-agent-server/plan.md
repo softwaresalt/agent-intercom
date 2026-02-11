@@ -26,9 +26,18 @@ Build an MCP server that provides remote I/O capabilities to local AI agents via
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-The project constitution is an uncustomized template with placeholder principles. No specific gates or constraints are defined. All design decisions are governed by the feature spec and clarifications.
+Validated against `constitution.md` v1.0.0 (6 principles, ratified 2026-02-10).
 
-**Gate status**: PASS (no violations possible against template placeholders)
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Safety-First Rust | PASS | Rust stable edition 2021; `#![forbid(unsafe_code)]` enforced in `src/lib.rs` (T100); Clippy pedantic with `unwrap_used`/`expect_used` deny configured; all errors use `Result`/`AppError` pattern (T002) |
+| II. MCP Protocol Fidelity | PASS | `rmcp` 0.5 SDK; all tools unconditionally visible (FR-032/T029); `monocoque/nudge` via standard notification mechanism (FR-027/T050) |
+| III. Test-First Development | PASS | Test tasks precede implementation tasks in every phase; contract tests validate MCP tool schemas; integration tests validate cross-module flows; unit tests validate isolated logic |
+| IV. Security Boundary Enforcement | PASS | Path validation via `validate_path` (T034/FR-006); command allowlist (FR-014/T078); OS keychain credentials (FR-036/T006); session owner binding (FR-013/T027, T067) |
+| V. Structured Observability | PASS | Tracing spans in every phase via `tracing-subscriber` (FR-037); JSON + human-readable modes (T003); spans cover tool calls, Slack interactions, stall events, session lifecycle |
+| VI. Single-Binary Simplicity | PASS | Two binaries (`monocoque-agent-rem` + `monocoque-ctl`); SurrealDB embedded sole persistence; workspace dependencies in `Cargo.toml`; all dependencies justified by concrete requirements |
+
+**Gate status**: PASS — all 6 principles satisfied. No violations to document.
 
 ## Project Structure
 
@@ -57,6 +66,7 @@ src/
 ├── models/              # Domain types (Session, ApprovalRequest, Checkpoint, etc.)
 ├── mcp/                 # MCP server handler, tool implementations
 ├── slack/               # Slack Socket Mode client, Block Kit rendering, interactions
+│   └── handlers/        # Slack interaction handlers (approval, nudge, prompt)
 ├── persistence/         # SurrealDB layer (schema, queries, retention purge)
 ├── diff/                # Diff parsing, application, file safety
 ├── policy/              # Workspace policy loading, hot-reload, auto-approve evaluation
@@ -76,4 +86,4 @@ tests/
 
 ## Complexity Tracking
 
-No constitution violations to justify.
+No constitution violations identified. All design decisions comply with the 6 constitution principles. If violations are discovered during implementation, they MUST be documented here with the specific principle violated, the justification, and the simpler alternative that was rejected.
