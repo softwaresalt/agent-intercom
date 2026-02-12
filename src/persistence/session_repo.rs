@@ -149,7 +149,7 @@ impl SessionRepo {
     pub async fn count_active(&self) -> Result<u64> {
         let mut response = self
             .db
-            .query("SELECT count() AS count FROM session WHERE status = 'active'")
+            .query("SELECT count() AS count FROM session WHERE status = 'active' GROUP ALL")
             .await?;
         let count_row: Option<CountRow> = response.take(0)?;
         count_row

@@ -258,20 +258,20 @@ tests/         # contract/, integration/, unit/
 
 ### Tests (Constitution Principle III)
 
-- [ ] T119 Write integration test for session lifecycle in `tests/integration/session_lifecycle_tests.rs`: start → active → pause → resume → checkpoint (verify file hashes stored) → terminate; verify `max_concurrent_sessions` enforcement (FR-023); verify owner-only access (FR-013)
-- [ ] T120 Write unit tests for checkpoint hash comparison in `tests/unit/checkpoint_tests.rs`: create checkpoint with file hashes → mutate files → restore → verify divergence warning includes correct file list
+- [x] T119 Write integration test for session lifecycle in `tests/integration/session_lifecycle_tests.rs`: start → active → pause → resume → checkpoint (verify file hashes stored) → terminate; verify `max_concurrent_sessions` enforcement (FR-023); verify owner-only access (FR-013)
+- [x] T120 Write unit tests for checkpoint hash comparison in `tests/unit/checkpoint_tests.rs`: create checkpoint with file hashes → mutate files → restore → verify divergence warning includes correct file list
 
 ### Implementation for User Story 7
 
-- [ ] T067 [US7] Implement slash command dispatcher in `src/slack/commands.rs`: parse `/monocoque <command> [args]` from Slack slash command events; dispatch to handler by command name per mcp-resources.json slashCommands contract; verify user is in `authorized_user_ids` (FR-013); for session-scoped commands, verify user is session owner
-- [ ] T068 [US7] Implement agent process spawner in `src/orchestrator/spawner.rs`: `spawn_session(prompt, workspace_root, config) -> Result<Session>` using `tokio::process::Command` with `kill_on_drop(true)`; set `MONOCOQUE_WORKSPACE_ROOT` env var; pass `--config` and SSE endpoint URL to host CLI; create Session record in DB with status=Created; enforce `max_concurrent_sessions` limit (FR-023)
-- [ ] T069 [US7] Implement session lifecycle commands in `src/orchestrator/session_manager.rs`: `pause_session` (set status=Paused, stop processing tool calls), `resume_session` (set status=Active), `terminate_session` (set status=Terminated, set terminated_at, send SIGTERM to child process with 5s grace, force kill if needed, post notification to Slack) (FR-012, FR-021)
-- [ ] T070 [US7] Implement checkpoint creation in `src/orchestrator/checkpoint_manager.rs`: `create_checkpoint(session_id, label)` — snapshot session state, compute SHA-256 hashes of workspace files, capture progress_snapshot, store Checkpoint record in DB, post confirmation to Slack (FR-024)
-- [ ] T071 [US7] Implement checkpoint restore in `src/orchestrator/checkpoint_manager.rs`: `restore_checkpoint(checkpoint_id)` — load checkpoint, compare `file_hashes` against current files, warn operator of divergences via Slack with file list, wait for confirmation, restore session state, include progress_snapshot in restore response (FR-024)
-- [ ] T072 [US7] Implement `sessions` and `session-checkpoints` list commands in `src/slack/commands.rs`: query DB for active sessions or checkpoints, format and post to Slack
-- [ ] T073 [US7] Implement `help` command in `src/slack/commands.rs`: list all available slash commands grouped by category per mcp-resources.json (FR-019)
-- [ ] T074 [US7] Create `src/orchestrator/mod.rs` re-exporting spawner, session_manager, checkpoint_manager, stall_detector
-- [ ] T075 [US7] Add tracing spans to session lifecycle: spans for spawn, pause, resume, terminate, checkpoint-create, checkpoint-restore
+- [x] T067 [US7] Implement slash command dispatcher in `src/slack/commands.rs`: parse `/monocoque <command> [args]` from Slack slash command events; dispatch to handler by command name per mcp-resources.json slashCommands contract; verify user is in `authorized_user_ids` (FR-013); for session-scoped commands, verify user is session owner
+- [x] T068 [US7] Implement agent process spawner in `src/orchestrator/spawner.rs`: `spawn_session(prompt, workspace_root, config) -> Result<Session>` using `tokio::process::Command` with `kill_on_drop(true)`; set `MONOCOQUE_WORKSPACE_ROOT` env var; pass `--config` and SSE endpoint URL to host CLI; create Session record in DB with status=Created; enforce `max_concurrent_sessions` limit (FR-023)
+- [x] T069 [US7] Implement session lifecycle commands in `src/orchestrator/session_manager.rs`: `pause_session` (set status=Paused, stop processing tool calls), `resume_session` (set status=Active), `terminate_session` (set status=Terminated, set terminated_at, send SIGTERM to child process with 5s grace, force kill if needed, post notification to Slack) (FR-012, FR-021)
+- [x] T070 [US7] Implement checkpoint creation in `src/orchestrator/checkpoint_manager.rs`: `create_checkpoint(session_id, label)` — snapshot session state, compute SHA-256 hashes of workspace files, capture progress_snapshot, store Checkpoint record in DB, post confirmation to Slack (FR-024)
+- [x] T071 [US7] Implement checkpoint restore in `src/orchestrator/checkpoint_manager.rs`: `restore_checkpoint(checkpoint_id)` — load checkpoint, compare `file_hashes` against current files, warn operator of divergences via Slack with file list, wait for confirmation, restore session state, include progress_snapshot in restore response (FR-024)
+- [x] T072 [US7] Implement `sessions` and `session-checkpoints` list commands in `src/slack/commands.rs`: query DB for active sessions or checkpoints, format and post to Slack
+- [x] T073 [US7] Implement `help` command in `src/slack/commands.rs`: list all available slash commands grouped by category per mcp-resources.json (FR-019)
+- [x] T074 [US7] Create `src/orchestrator/mod.rs` re-exporting spawner, session_manager, checkpoint_manager, stall_detector
+- [x] T075 [US7] Add tracing spans to session lifecycle: spans for spawn, pause, resume, terminate, checkpoint-create, checkpoint-restore
 
 **Checkpoint**: Full session orchestration operational from Slack
 

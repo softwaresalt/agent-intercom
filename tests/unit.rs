@@ -1,4 +1,5 @@
 mod unit {
+    mod checkpoint_tests;
     mod config_tests;
     mod diff_tests;
     mod model_tests;
