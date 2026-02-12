@@ -351,12 +351,12 @@ tests/         # contract/, integration/, unit/
 
 ### Tests (Constitution Principle III)
 
-- [ ] T126 Write contract tests for `slack://channel/{id}/recent` resource in `tests/contract/resource_tests.rs`: validate output schema per mcp-resources.json; test channel ID validation against config
+- [X] T126 Write contract tests for `slack://channel/{id}/recent` resource in `tests/contract/resource_tests.rs`: validate output schema per mcp-resources.json; test channel ID validation against config
 
 ### Implementation
 
-- [ ] T091 Implement `slack://channel/{id}/recent` MCP resource handler in `src/mcp/resources/slack_channel.rs`: read recent messages from configured Slack channel using `conversations.history` API; return `{messages, has_more}` per mcp-resources.json contract; validate `id` matches `config.slack.channel_id` (FR-018)
-- [ ] T092 Wire resource handler into `AgentRemServer::read_resource` in `src/mcp/handler.rs`
+- [X] T091 Implement `slack://channel/{id}/recent` MCP resource handler in `src/mcp/resources/slack_channel.rs`: read recent messages from configured Slack channel using `conversations.history` API; return `{messages, has_more}` per mcp-resources.json contract; validate `id` matches `config.slack.channel_id` (FR-018)
+- [X] T092 Wire resource handler into `AgentRemServer::read_resource` in `src/mcp/handler.rs`
 
 **Checkpoint**: Agent can read operator instructions from Slack channel
 

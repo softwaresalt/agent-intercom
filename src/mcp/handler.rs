@@ -9,7 +9,8 @@ use rmcp::handler::server::{
     ServerHandler,
 };
 use rmcp::model::{
-    CallToolRequestParam, CallToolResult, ListToolsResult, PaginatedRequestParam, Tool,
+    CallToolRequestParam, CallToolResult, ListResourceTemplatesResult, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam, ReadResourceResult, Tool,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use surrealdb::engine::local::Db;
@@ -392,5 +393,42 @@ impl ServerHandler for AgentRemServer {
         let tools = Self::all_tools();
 
         std::future::ready(Ok(ListToolsResult::with_all_items(tools)))
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListResourcesResult, rmcp::ErrorData>> + Send + '_ {
+        let channel_id = self.state.config.slack.channel_id.clone();
+        std::future::ready(Ok(crate::mcp::resources::slack_channel::list_resources(
+            &channel_id,
+        )))
+    }
+
+    fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListResourceTemplatesResult, rmcp::ErrorData>> + Send + '_
+    {
+        std::future::ready(Ok(
+            crate::mcp::resources::slack_channel::resource_templates(),
+        ))
+    }
+
+    fn read_resource(
+        &self,
+        request: ReadResourceRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ReadResourceResult, rmcp::ErrorData>> + Send + '_ {
+        let state = Arc::clone(&self.state);
+        async move {
+            crate::mcp::resources::slack_channel::read_resource(&request, &state)
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(format!("resource read failed: {err}"), None)
+                })
+        }
     }
 }

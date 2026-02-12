@@ -7,5 +7,6 @@ mod contract {
     mod mode_tests;
     mod recover_state_tests;
     mod remote_log_tests;
+    mod resource_tests;
     mod schema_tests;
 }

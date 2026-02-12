@@ -263,6 +263,20 @@ impl SlackService {
         channel: SlackChannelId,
         limit: u16,
     ) -> Result<Vec<SlackHistoryMessage>> {
+        let (messages, _has_more) = self.fetch_history_with_more(channel, limit).await?;
+        Ok(messages)
+    }
+
+    /// Fetch recent channel history including the `has_more` pagination flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Slack` if the Slack API call fails.
+    pub async fn fetch_history_with_more(
+        &self,
+        channel: SlackChannelId,
+        limit: u16,
+    ) -> Result<(Vec<SlackHistoryMessage>, bool)> {
         let request = SlackApiConversationsHistoryRequest {
             channel: Some(channel),
             cursor: None,
@@ -276,7 +290,10 @@ impl SlackService {
         self.http_session()
             .conversations_history(&request)
             .await
-            .map(|response| response.messages)
+            .map(|response| {
+                let has_more = response.has_more.unwrap_or(false);
+                (response.messages, has_more)
+            })
             .map_err(|err| AppError::Slack(format!("failed to read history: {err}")))
     }
 
