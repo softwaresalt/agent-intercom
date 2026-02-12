@@ -39,11 +39,23 @@ pub struct PromptResponse {
     pub instruction: Option<String>,
 }
 
+/// Response payload delivered through a pending wait-for-instruction oneshot channel.
+#[derive(Debug, Clone)]
+pub struct WaitResponse {
+    /// Outcome: `resumed` or `timeout`.
+    pub status: String,
+    /// Optional instruction text from the operator.
+    pub instruction: Option<String>,
+}
+
 /// Thread-safe map of pending approval `oneshot` senders keyed by `request_id`.
 pub type PendingApprovals = Arc<Mutex<HashMap<String, oneshot::Sender<ApprovalResponse>>>>;
 
 /// Thread-safe map of pending prompt `oneshot` senders keyed by `prompt_id`.
 pub type PendingPrompts = Arc<Mutex<HashMap<String, oneshot::Sender<PromptResponse>>>>;
+
+/// Thread-safe map of pending wait-for-instruction `oneshot` senders keyed by `session_id`.
+pub type PendingWaits = Arc<Mutex<HashMap<String, oneshot::Sender<WaitResponse>>>>;
 
 /// Thread-safe map of per-session stall detector handles keyed by `session_id`.
 pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
@@ -60,6 +72,8 @@ pub struct AppState {
     pub pending_approvals: PendingApprovals,
     /// Pending continuation prompt senders keyed by `prompt_id`.
     pub pending_prompts: PendingPrompts,
+    /// Pending wait-for-instruction senders keyed by `session_id`.
+    pub pending_waits: PendingWaits,
     /// Per-session stall detector handles keyed by `session_id`.
     pub stall_detectors: Option<StallDetectors>,
 }
@@ -121,6 +135,16 @@ impl AgentRemServer {
                 "recover_state" => {
                     router.add_route(ToolRoute::new_dyn(tool, |context| {
                         Box::pin(crate::mcp::tools::recover_state::handle(context))
+                    }));
+                }
+                "set_operational_mode" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::set_operational_mode::handle(context))
+                    }));
+                }
+                "wait_for_instruction" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::wait_for_instruction::handle(context))
                     }));
                 }
                 _ => {

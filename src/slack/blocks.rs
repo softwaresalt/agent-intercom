@@ -80,6 +80,23 @@ pub fn nudge_buttons(alert_id: &str) -> SlackBlock {
     )
 }
 
+/// Build wait-for-instruction action buttons (Resume / Resume with Instructions / Stop).
+#[must_use]
+pub fn wait_buttons(session_id: &str) -> SlackBlock {
+    action_buttons(
+        &format!("wait_{session_id}"),
+        &[
+            ("wait_resume", "Resume", session_id),
+            (
+                "wait_resume_instruct",
+                "Resume with Instructions",
+                session_id,
+            ),
+            ("wait_stop", "Stop Session", session_id),
+        ],
+    )
+}
+
 /// Build a plain text section block.
 #[must_use]
 pub fn text_section(text: &str) -> SlackBlock {

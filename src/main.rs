@@ -10,7 +10,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 use monocoque_agent_rem::config::GlobalConfig;
 use monocoque_agent_rem::mcp::handler::{
-    AppState, PendingApprovals, PendingPrompts, StallDetectors,
+    AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
 use monocoque_agent_rem::mcp::{sse, transport};
 use monocoque_agent_rem::persistence::{db, retention};
@@ -81,6 +81,7 @@ async fn run(args: Cli) -> Result<()> {
     // ── Build shared application state ──────────────────
     let pending_approvals: PendingApprovals = PendingApprovals::default();
     let pending_prompts: PendingPrompts = PendingPrompts::default();
+    let pending_waits: PendingWaits = PendingWaits::default();
 
     // Start Slack client if configured.
     let (slack_service, _slack_runtime) = if config.slack.bot_token.is_empty() {
@@ -104,6 +105,7 @@ async fn run(args: Cli) -> Result<()> {
         slack: slack_service,
         pending_approvals,
         pending_prompts,
+        pending_waits,
         stall_detectors: Some(StallDetectors::default()),
     });
 

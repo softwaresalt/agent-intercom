@@ -1,8 +1,8 @@
 //! Contract tests for `heartbeat` tool (T111).
 //!
 //! Validates input/output schemas per mcp-tools.json contract:
-//! - status_message only
-//! - valid progress_snapshot
+//! - `status_message` only
+//! - valid `progress_snapshot`
 //! - malformed snapshot (must reject)
 //! - omitted snapshot (must preserve existing)
 
@@ -95,7 +95,7 @@ fn output_schema_structure_is_valid() {
     assert!(output.get("stall_detection_enabled").is_some());
 }
 
-/// Validate that no progress_snapshot field means the existing one should be preserved.
+/// Validate that no `progress_snapshot` field means the existing one should be preserved.
 #[test]
 fn omitted_snapshot_preserves_existing() {
     // When we deserialize heartbeat input without `progress_snapshot`, it should be None.

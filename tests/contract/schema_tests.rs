@@ -1,4 +1,4 @@
-//! Contract tests for SurrealDB schema (T104).
+//! Contract tests for `SurrealDB` schema (T104).
 //!
 //! Verify that table creation, field definitions, and ASSERT constraints
 //! match the data-model.md specification.

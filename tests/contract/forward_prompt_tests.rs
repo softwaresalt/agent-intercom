@@ -9,7 +9,7 @@ use serde_json::json;
 /// The tool name as registered in the MCP server.
 const TOOL_NAME: &str = "forward_prompt";
 
-/// Valid prompt_type enum values per contract.
+/// Valid `prompt_type` enum values per contract.
 const VALID_PROMPT_TYPES: &[&str] = &[
     "continuation",
     "clarification",

@@ -3,6 +3,7 @@ mod unit {
     mod command_exec_tests;
     mod config_tests;
     mod diff_tests;
+    mod mode_routing_tests;
     mod model_tests;
     mod path_validation_tests;
     mod policy_evaluator_tests;

@@ -3,3 +3,4 @@
 pub mod approval;
 pub mod nudge;
 pub mod prompt;
+pub mod wait;

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::models::session::{Session, SessionStatus};
+use crate::models::session::{Session, SessionMode, SessionStatus};
 use crate::{AppError, Result};
 
 use super::db::Database;
@@ -198,6 +198,22 @@ impl SessionRepo {
             .query("SELECT * FROM session WHERE status = 'active' OR status = 'paused'")
             .await?;
         response.take::<Vec<Session>>(0).map_err(AppError::from)
+    }
+
+    /// Update the operational mode for a session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn update_mode(&self, id: &str, mode: SessionMode) -> Result<Session> {
+        let mut current = self.get_by_id(id).await?;
+        current.mode = mode;
+        current.updated_at = Utc::now();
+        self.db
+            .update(("session", id))
+            .content(&current)
+            .await?
+            .ok_or_else(|| AppError::Db("failed to update session mode".into()))
     }
 }
 

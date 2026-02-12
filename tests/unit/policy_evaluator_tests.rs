@@ -109,7 +109,7 @@ fn write_file_pattern_matches() {
         result
             .matched_rule
             .as_ref()
-            .map_or(false, |r| r.starts_with("file_pattern:")),
+            .is_some_and(|r| r.starts_with("file_pattern:")),
         "expected file_pattern rule, got {:?}",
         result.matched_rule
     );

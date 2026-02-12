@@ -328,18 +328,18 @@ tests/         # contract/, integration/, unit/
 
 ### Tests (Constitution Principle III)
 
-- [ ] T124 Write contract tests for `set_operational_mode` and `wait_for_instruction` tools in `tests/contract/mode_tests.rs`: validate input/output schemas per mcp-tools.json; verify all mode enum values
-- [ ] T125 Write unit tests for mode-aware routing in `tests/unit/mode_routing_tests.rs`: remote mode posts to Slack only, local mode routes to IPC only, hybrid mode posts to both
+- [X] T124 Write contract tests for `set_operational_mode` and `wait_for_instruction` tools in `tests/contract/mode_tests.rs`: validate input/output schemas per mcp-tools.json; verify all mode enum values
+- [X] T125 Write unit tests for mode-aware routing in `tests/unit/mode_routing_tests.rs`: remote mode posts to Slack only, local mode routes to IPC only, hybrid mode posts to both
 
 ### Implementation for User Story 10
 
-- [ ] T084 [US10] Implement `set_operational_mode` MCP tool handler in `src/mcp/tools/set_operational_mode.rs`: accept `mode` per mcp-tools.json contract; update session's mode in DB; persist across restarts; return `{previous_mode, current_mode}` per contract
-- [ ] T085 [US10] Implement mode-aware message routing in `src/slack/client.rs`: before posting any Slack message, check session's current mode; if `local` mode, suppress Slack post and route to IPC channel; if `hybrid`, post to both; if `remote` (default), Slack only
-- [ ] T086 [US10] Implement `wait_for_instruction` MCP tool handler in `src/mcp/tools/wait_for_instruction.rs`: accept `message` and `timeout_seconds` per mcp-tools.json contract; post waiting status to Slack; block on resume signal from Slack or IPC; return `{status: resumed|timeout, instruction}` per contract
-- [ ] T087 [US10] Implement IPC server in `src/ipc/server.rs`: listen on named pipe (Windows) or Unix domain socket (Linux/macOS) using `interprocess::local_socket`; accept local approve/reject/resume commands from `monocoque-ctl`; route to appropriate handler (FR-016)
-- [ ] T088 [US10] Implement `monocoque-ctl` CLI in `ctl/main.rs`: connect to IPC socket; implement `list`, `approve <id>`, `reject <id> [--reason]`, `resume [instruction]`, `mode <remote|local|hybrid>`, `credential set <key>` subcommands using `clap`
-- [ ] T089 [US10] Create `src/ipc/mod.rs` re-exporting server
-- [ ] T090 [US10] Add tracing spans to mode switching and IPC operations
+- [X] T084 [US10] Implement `set_operational_mode` MCP tool handler in `src/mcp/tools/set_operational_mode.rs`: accept `mode` per mcp-tools.json contract; update session's mode in DB; persist across restarts; return `{previous_mode, current_mode}` per contract
+- [X] T085 [US10] Implement mode-aware message routing in `src/slack/client.rs`: before posting any Slack message, check session's current mode; if `local` mode, suppress Slack post and route to IPC channel; if `hybrid`, post to both; if `remote` (default), Slack only
+- [X] T086 [US10] Implement `wait_for_instruction` MCP tool handler in `src/mcp/tools/wait_for_instruction.rs`: accept `message` and `timeout_seconds` per mcp-tools.json contract; post waiting status to Slack; block on resume signal from Slack or IPC; return `{status: resumed|timeout, instruction}` per contract
+- [X] T087 [US10] Implement IPC server in `src/ipc/server.rs`: listen on named pipe (Windows) or Unix domain socket (Linux/macOS) using `interprocess::local_socket`; accept local approve/reject/resume commands from `monocoque-ctl`; route to appropriate handler (FR-016)
+- [X] T088 [US10] Implement `monocoque-ctl` CLI in `ctl/main.rs`: connect to IPC socket; implement `list`, `approve <id>`, `reject <id> [--reason]`, `resume [instruction]`, `mode <remote|local|hybrid>`, `credential set <key>` subcommands using `clap`
+- [X] T089 [US10] Create `src/ipc/mod.rs` re-exporting server
+- [X] T090 [US10] Add tracing spans to mode switching and IPC operations
 
 **Checkpoint**: Full mode switching and local override operational
 

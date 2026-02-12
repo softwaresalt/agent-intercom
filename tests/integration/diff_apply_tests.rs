@@ -50,7 +50,7 @@ default_nudge_message = "continue"
     GlobalConfig::from_toml_str(&toml).expect("valid config")
 }
 
-/// Compute SHA-256 hash of file contents, or "new_file" if absent.
+/// Compute SHA-256 hash of file contents, or "`new_file`" if absent.
 fn file_hash(path: &std::path::Path) -> String {
     match fs::read(path) {
         Ok(contents) => {

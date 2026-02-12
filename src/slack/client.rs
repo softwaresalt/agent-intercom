@@ -16,6 +16,7 @@ use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::{error, info, warn};
 
 use crate::mcp::handler::AppState;
+use crate::models::session::SessionMode;
 use crate::slack::{commands, events};
 use crate::{config::SlackConfig, AppError, Result};
 
@@ -370,4 +371,18 @@ impl SlackService {
             .map_err(|err| AppError::Slack(format!("failed to open modal: {err}")))?;
         Ok(())
     }
+}
+
+// ── Mode-aware routing helpers ───────────────────────────────────────
+
+/// Whether a message should be posted to Slack for the given mode.
+#[must_use]
+pub fn should_post_to_slack(mode: SessionMode) -> bool {
+    matches!(mode, SessionMode::Remote | SessionMode::Hybrid)
+}
+
+/// Whether a message should be routed to IPC for the given mode.
+#[must_use]
+pub fn should_post_to_ipc(mode: SessionMode) -> bool {
+    matches!(mode, SessionMode::Local | SessionMode::Hybrid)
 }

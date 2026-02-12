@@ -32,7 +32,7 @@ fn test_detector(
 
 #[tokio::test]
 async fn timer_fires_after_threshold() {
-    let (detector, mut rx, _ct) = test_detector("s1", 1, 60, 3);
+    let (detector, mut rx, cancel_token) = test_detector("s1", 1, 60, 3);
     let handle = detector.spawn();
 
     // Wait for the inactivity threshold to elapse.
@@ -46,7 +46,7 @@ async fn timer_fires_after_threshold() {
         "expected Stalled event, got {event:?}"
     );
 
-    _ct.cancel();
+    cancel_token.cancel();
     drop(handle);
 }
 

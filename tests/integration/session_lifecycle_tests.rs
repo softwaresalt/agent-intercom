@@ -245,7 +245,7 @@ async fn checkpoint_restore_detects_divergence() {
     let mut diverged: Vec<String> = fetched
         .file_hashes
         .iter()
-        .filter(|(file, hash)| current_hashes.get(*file).map_or(true, |h| h != *hash))
+        .filter(|(file, hash)| current_hashes.get(*file) != Some(*hash))
         .map(|(file, _)| file.clone())
         .collect();
     diverged.sort();
