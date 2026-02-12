@@ -107,6 +107,9 @@ async fn run(args: Cli) -> Result<()> {
         stall_detectors: Some(StallDetectors::default()),
     });
 
+    // ── Check for interrupted sessions from prior crash (T082) ──
+    check_interrupted_on_startup(&state).await;
+
     // ── Start transports ────────────────────────────────
     let stdio_ct = ct.clone();
     let stdio_state = Arc::clone(&state);
@@ -131,11 +134,169 @@ async fn run(args: Cli) -> Result<()> {
     info!("shutdown signal received");
     ct.cancel();
 
-    // ── Graceful shutdown ───────────────────────────────
+    // ── Graceful shutdown: persist state (T081) ─────────
+    if let Err(err) = graceful_shutdown(&state).await {
+        error!(%err, "error during graceful shutdown persistence");
+    }
+
+    // ── Wait for background tasks ───────────────────────
     let _ = tokio::join!(stdio_handle, sse_handle, retention_handle);
     info!("monocoque-agent-rem shut down");
 
     Ok(())
+}
+
+/// Mark all in-flight state as interrupted on graceful shutdown (T081).
+///
+/// - Marks pending approval requests and prompts as `Interrupted`.
+/// - Marks active/paused sessions as `Interrupted` with `terminated_at`.
+/// - Posts a final notification to Slack.
+///
+/// # Errors
+///
+/// Returns `AppError` if any persistence or Slack operation fails.
+async fn graceful_shutdown(state: &AppState) -> Result<()> {
+    use monocoque_agent_rem::models::approval::ApprovalStatus;
+    use monocoque_agent_rem::persistence::approval_repo::ApprovalRepo;
+    use monocoque_agent_rem::persistence::prompt_repo::PromptRepo;
+    use monocoque_agent_rem::persistence::session_repo::SessionRepo;
+
+    let _span = tracing::info_span!("graceful_shutdown").entered();
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+    let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+    let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+
+    // Mark all pending approval requests as Interrupted.
+    let pending_approvals = approval_repo.list_pending().await.unwrap_or_default();
+    for approval in &pending_approvals {
+        if let Err(err) = approval_repo
+            .update_status(&approval.id, ApprovalStatus::Interrupted)
+            .await
+        {
+            error!(request_id = %approval.id, %err, "failed to interrupt approval");
+        }
+    }
+
+    // Mark all pending prompts as Interrupted (set decision to Stop).
+    let pending_prompts = prompt_repo.list_pending().await.unwrap_or_default();
+    for prompt in &pending_prompts {
+        if let Err(err) = prompt_repo
+            .update_decision(
+                &prompt.id,
+                monocoque_agent_rem::models::prompt::PromptDecision::Stop,
+                Some("server shutdown".into()),
+            )
+            .await
+        {
+            error!(prompt_id = %prompt.id, %err, "failed to interrupt prompt");
+        }
+    }
+
+    // Mark all active/paused sessions as Interrupted.
+    let live_sessions = session_repo
+        .list_active_or_paused()
+        .await
+        .unwrap_or_default();
+    for session in &live_sessions {
+        if let Err(err) = session_repo
+            .set_terminated(
+                &session.id,
+                monocoque_agent_rem::models::session::SessionStatus::Interrupted,
+            )
+            .await
+        {
+            error!(session_id = %session.id, %err, "failed to interrupt session");
+        }
+    }
+
+    // Post final notification to Slack.
+    if let Some(ref slack) = state.slack {
+        let channel =
+            slack_morphism::prelude::SlackChannelId(state.config.slack.channel_id.clone());
+        let msg = monocoque_agent_rem::slack::client::SlackMessage::plain(
+            channel,
+            format!(
+                "⚠️ Server shutting down. {} session(s), {} approval(s), {} prompt(s) interrupted.",
+                live_sessions.len(),
+                pending_approvals.len(),
+                pending_prompts.len(),
+            ),
+        );
+        if let Err(err) = slack.enqueue(msg).await {
+            error!(%err, "failed to post shutdown notification to slack");
+        }
+        // Brief sleep to let the queue drain.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    info!(
+        sessions = live_sessions.len(),
+        approvals = pending_approvals.len(),
+        prompts = pending_prompts.len(),
+        "graceful shutdown persistence complete"
+    );
+
+    Ok(())
+}
+
+/// Check for interrupted sessions on startup and optionally re-post
+/// pending requests to Slack (T082).
+async fn check_interrupted_on_startup(state: &AppState) {
+    use monocoque_agent_rem::persistence::approval_repo::ApprovalRepo;
+    use monocoque_agent_rem::persistence::prompt_repo::PromptRepo;
+    use monocoque_agent_rem::persistence::session_repo::SessionRepo;
+
+    let _span = tracing::info_span!("startup_recovery_check").entered();
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+    let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+    let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+
+    let interrupted = session_repo.list_interrupted().await.unwrap_or_default();
+
+    if interrupted.is_empty() {
+        info!("no interrupted sessions found on startup");
+        return;
+    }
+
+    info!(
+        count = interrupted.len(),
+        "found interrupted sessions on startup"
+    );
+
+    // Count and report pending requests across all interrupted sessions.
+    let mut total_approvals = 0usize;
+    let mut total_prompts = 0usize;
+
+    for session in &interrupted {
+        if let Ok(Some(_)) = approval_repo.get_pending_for_session(&session.id).await {
+            total_approvals += 1;
+        }
+        if let Ok(Some(_)) = prompt_repo.get_pending_for_session(&session.id).await {
+            total_prompts += 1;
+        }
+    }
+
+    // Post recovery summary to Slack.
+    if let Some(ref slack) = state.slack {
+        let channel =
+            slack_morphism::prelude::SlackChannelId(state.config.slack.channel_id.clone());
+        let msg = monocoque_agent_rem::slack::client::SlackMessage::plain(
+            channel,
+            format!(
+                "🔄 Server restarted. Found {} interrupted session(s) \
+                 with {} pending approval(s) and {} pending prompt(s). \
+                 Agents can use `recover_state` to resume.",
+                interrupted.len(),
+                total_approvals,
+                total_prompts,
+            ),
+        );
+        if let Err(err) = slack.enqueue(msg).await {
+            error!(%err, "failed to post startup recovery notification");
+        }
+    }
 }
 
 async fn shutdown_signal() {

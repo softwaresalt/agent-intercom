@@ -156,6 +156,49 @@ impl SessionRepo {
             .map(|row| row.count)
             .ok_or_else(|| AppError::Db("failed to count sessions".into()))
     }
+
+    /// Retrieve the most recently interrupted session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn get_most_recent_interrupted(&self) -> Result<Option<Session>> {
+        let mut response = self
+            .db
+            .query(
+                "SELECT * FROM session WHERE status = 'interrupted' \
+                 ORDER BY updated_at DESC LIMIT 1",
+            )
+            .await?;
+        let sessions: Vec<Session> = response.take(0)?;
+        Ok(sessions.into_iter().next())
+    }
+
+    /// List all sessions with status `interrupted`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn list_interrupted(&self) -> Result<Vec<Session>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM session WHERE status = 'interrupted'")
+            .await?;
+        response.take::<Vec<Session>>(0).map_err(AppError::from)
+    }
+
+    /// List all sessions with status `active` or `paused`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn list_active_or_paused(&self) -> Result<Vec<Session>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM session WHERE status = 'active' OR status = 'paused'")
+            .await?;
+        response.take::<Vec<Session>>(0).map_err(AppError::from)
+    }
 }
 
 #[derive(Debug, Deserialize)]

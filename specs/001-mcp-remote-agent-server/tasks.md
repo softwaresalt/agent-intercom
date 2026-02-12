@@ -306,15 +306,15 @@ tests/         # contract/, integration/, unit/
 
 ### Tests (Constitution Principle III)
 
-- [ ] T122 Write contract tests for `recover_state` tool in `tests/contract/recover_state_tests.rs`: validate input/output schemas per mcp-tools.json; test `recovered` and `clean` status paths; verify progress_snapshot included in response
-- [ ] T123 Write integration test for crash recovery in `tests/integration/crash_recovery_tests.rs`: create session with pending approval → simulate shutdown (mark Interrupted) → restart → invoke `recover_state` → verify pending request returned with original data and progress snapshot (SC-004)
+- [X] T122 Write contract tests for `recover_state` tool in `tests/contract/recover_state_tests.rs`: validate input/output schemas per mcp-tools.json; test `recovered` and `clean` status paths; verify progress_snapshot included in response
+- [X] T123 Write integration test for crash recovery in `tests/integration/crash_recovery_tests.rs`: create session with pending approval → simulate shutdown (mark Interrupted) → restart → invoke `recover_state` → verify pending request returned with original data and progress snapshot (SC-004)
 
 ### Implementation for User Story 9
 
-- [ ] T080 [US9] Implement `recover_state` MCP tool handler in `src/mcp/tools/recover_state.rs`: accept optional `session_id` per mcp-tools.json contract; if provided, load specific session; otherwise find most recently active session; collect pending approval requests and prompts; include last checkpoint info; include `progress_snapshot` from session record; return `{status: recovered|clean, session_id, pending_requests, last_checkpoint, progress_snapshot}` per contract
-- [ ] T081 [US9] Implement shutdown state persistence logic called by the graceful shutdown handler (T035) in `src/main.rs`: mark all pending approval requests and prompts as Interrupted in DB; mark all active/paused sessions as Interrupted with `terminated_at` set; post final notification to Slack; terminate spawned agent processes with 5s grace period; flush and close DB connection (FR-021)
-- [ ] T082 [US9] Add Slack reconnection on startup: on server start, check for sessions with status=Interrupted, re-post any pending approval requests that were in-flight to Slack (edge case: Slack WebSocket drop mid-approval)
-- [ ] T083 [US9] Add tracing spans to recovery: span covering recovery query with session_id, pending_count attributes
+- [X] T080 [US9] Implement `recover_state` MCP tool handler in `src/mcp/tools/recover_state.rs`: accept optional `session_id` per mcp-tools.json contract; if provided, load specific session; otherwise find most recently active session; collect pending approval requests and prompts; include last checkpoint info; include `progress_snapshot` from session record; return `{status: recovered|clean, session_id, pending_requests, last_checkpoint, progress_snapshot}` per contract
+- [X] T081 [US9] Implement shutdown state persistence logic called by the graceful shutdown handler (T035) in `src/main.rs`: mark all pending approval requests and prompts as Interrupted in DB; mark all active/paused sessions as Interrupted with `terminated_at` set; post final notification to Slack; terminate spawned agent processes with 5s grace period; flush and close DB connection (FR-021)
+- [X] T082 [US9] Add Slack reconnection on startup: on server start, check for sessions with status=Interrupted, re-post any pending approval requests that were in-flight to Slack (edge case: Slack WebSocket drop mid-approval)
+- [X] T083 [US9] Add tracing spans to recovery: span covering recovery query with session_id, pending_count attributes
 
 **Checkpoint**: Crash recovery operational — no data loss on server restart
 

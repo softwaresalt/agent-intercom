@@ -86,4 +86,19 @@ impl PromptRepo {
             .await?
             .ok_or_else(|| AppError::Db("failed to update prompt decision".into()))
     }
+
+    /// List all pending prompts (no decision yet) across sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn list_pending(&self) -> Result<Vec<ContinuationPrompt>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM continuation_prompt WHERE decision IS NONE")
+            .await?;
+        response
+            .take::<Vec<ContinuationPrompt>>(0)
+            .map_err(AppError::from)
+    }
 }
