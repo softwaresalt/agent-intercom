@@ -1,11 +1,13 @@
-//! Diff utilities and path safety.
+//! Diff utilities, path safety, and file writing.
 
 use std::path::{Path, PathBuf};
 
 use crate::Result;
 
 pub mod applicator;
+pub mod patcher;
 pub mod path_safety;
+pub mod writer;
 
 /// Validate that `candidate` resides within `workspace_root`, returning an absolute normalized path.
 ///

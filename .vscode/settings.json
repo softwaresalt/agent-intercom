@@ -9,7 +9,6 @@
     "chat.tools.terminal.autoApprove": {
         ".specify/scripts/bash/": true,
         ".specify/scripts/powershell/": true,
-
         "/^cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
             "approve": true,
             "matchCommandLine": true
@@ -18,12 +17,10 @@
             "approve": true,
             "matchCommandLine": true
         },
-
         "/^git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
             "approve": true,
             "matchCommandLine": true
         },
-
         "/^(Out-File|Set-Content|Add-Content|Get-Content|Get-ChildItem|Copy-Item|Move-Item|New-Item|Test-Path)(\\s[^;|&`]*)?$/": {
             "approve": true,
             "matchCommandLine": true
@@ -32,16 +29,15 @@
             "approve": true,
             "matchCommandLine": true
         },
-
-        "/^powershell -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json -RequireTasks -IncludeTasks 2>&1 \\| Out-String$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "/^powershell -ExecutionPolicy Bypass -File \"\\.specify/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks 2>\\$null; if \\(\\$LASTEXITCODE -ne 0\\) \\{ Write-Host \"Prerequisites script not found or failed; continuing\\.\" \\}$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
         "/^cmd /c \"cargo (test|check|clippy|fmt|build|doc|bench)(\\s[^;|&`]*)?\"(\\s*[;&|]+\\s*echo\\s.*)?$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^pwsh -File \"lib/hve-core/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^pwsh -File \"\\.specify/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$/": {
             "approve": true,
             "matchCommandLine": true
         }

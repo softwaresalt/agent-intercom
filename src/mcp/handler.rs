@@ -73,6 +73,11 @@ impl AgentRemServer {
                         Box::pin(crate::mcp::tools::ask_approval::handle(context))
                     }));
                 }
+                "accept_diff" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::accept_diff::handle(context))
+                    }));
+                }
                 _ => {
                     router.add_route(ToolRoute::new_dyn(tool, |_context| {
                         Box::pin(async {
