@@ -89,6 +89,11 @@ impl AgentRemServer {
                         Box::pin(crate::mcp::tools::heartbeat::handle(context))
                     }));
                 }
+                "remote_log" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::remote_log::handle(context))
+                    }));
+                }
                 _ => {
                     router.add_route(ToolRoute::new_dyn(tool, |_context| {
                         Box::pin(async {

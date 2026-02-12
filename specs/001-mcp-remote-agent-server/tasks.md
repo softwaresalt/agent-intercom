@@ -192,12 +192,12 @@ tests/         # contract/, integration/, unit/
 
 ### Tests (Constitution Principle III)
 
-- [ ] T113 Write contract tests for `remote_log` tool in `tests/contract/remote_log_tests.rs`: validate input/output schemas per mcp-tools.json; verify all severity levels (info, success, warning, error) produce correct Block Kit formatting
+- [X] T113 Write contract tests for `remote_log` tool in `tests/contract/remote_log_tests.rs`: validate input/output schemas per mcp-tools.json; verify all severity levels (info, success, warning, error) produce correct Block Kit formatting
 
 ### Implementation for User Story 3
 
-- [ ] T055 [US3] Implement `remote_log` MCP tool handler in `src/mcp/tools/remote_log.rs`: accept `message`, `level`, `thread_ts` per mcp-tools.json contract; format message using Block Kit severity builders from `src/slack/blocks.rs` (info ℹ️, success ✅, warning ⚠️, error ❌); post to Slack channel (or thread if `thread_ts` provided); do NOT block agent — queue message via Slack client's rate-limit queue; return `{posted, ts}` per contract
-- [ ] T056 [US3] Add tracing span to `remote_log` tool: span with `level`, `thread_ts` attributes; log post result
+- [X] T055 [US3] Implement `remote_log` MCP tool handler in `src/mcp/tools/remote_log.rs`: accept `message`, `level`, `thread_ts` per mcp-tools.json contract; format message using Block Kit severity builders from `src/slack/blocks.rs` (info ℹ️, success ✅, warning ⚠️, error ❌); post to Slack channel (or thread if `thread_ts` provided); do NOT block agent — queue message via Slack client's rate-limit queue; return `{posted, ts}` per contract
+- [X] T056 [US3] Add tracing span to `remote_log` tool: span with `level`, `thread_ts` attributes; log post result
 
 **Checkpoint**: Agent can send visible progress updates to Slack
 

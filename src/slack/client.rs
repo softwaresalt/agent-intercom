@@ -143,6 +143,24 @@ impl SlackService {
             .map_err(|err| AppError::Slack(format!("failed to enqueue slack message: {err}")))
     }
 
+    /// Post a message directly and return the Slack message timestamp.
+    ///
+    /// Unlike [`enqueue`], this bypasses the background queue so that
+    /// the caller can capture the message `ts` for threading.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Slack` if the Slack API call fails.
+    pub async fn post_message_direct(&self, message: SlackMessage) -> Result<SlackTs> {
+        let request = message.into_request();
+        let session = self.http_session();
+        let response = session
+            .chat_post_message(&request)
+            .await
+            .map_err(|err| AppError::Slack(format!("failed to post message: {err}")))?;
+        Ok(response.ts)
+    }
+
     fn spawn_worker(
         client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
         token: SlackApiToken,
