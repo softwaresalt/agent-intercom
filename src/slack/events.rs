@@ -68,7 +68,21 @@ pub async fn handle_interaction(
                             );
                         }
                     } else if action_id.starts_with("prompt_") {
-                        info!(action_id, "prompt action received");
+                        if let Some(ref app) = app_state {
+                            if let Err(err) = handlers::prompt::handle_prompt_action(
+                                action,
+                                &user_id,
+                                block_event.channel.as_ref(),
+                                block_event.message.as_ref(),
+                                app,
+                            )
+                            .await
+                            {
+                                warn!(%err, action_id, "prompt action failed");
+                            }
+                        } else {
+                            warn!(action_id, "app state not available; cannot process prompt");
+                        }
                     } else if action_id.starts_with("stall_") {
                         if let Some(ref app) = app_state {
                             if let Err(err) = handlers::nudge::handle_nudge_action(

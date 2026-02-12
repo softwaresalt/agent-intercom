@@ -30,8 +30,20 @@ pub struct ApprovalResponse {
     pub reason: Option<String>,
 }
 
+/// Response payload delivered through a pending prompt oneshot channel.
+#[derive(Debug, Clone)]
+pub struct PromptResponse {
+    /// Operator decision: `continue`, `refine`, or `stop`.
+    pub decision: String,
+    /// Revised instruction text (present only when decision is `refine`).
+    pub instruction: Option<String>,
+}
+
 /// Thread-safe map of pending approval `oneshot` senders keyed by `request_id`.
 pub type PendingApprovals = Arc<Mutex<HashMap<String, oneshot::Sender<ApprovalResponse>>>>;
+
+/// Thread-safe map of pending prompt `oneshot` senders keyed by `prompt_id`.
+pub type PendingPrompts = Arc<Mutex<HashMap<String, oneshot::Sender<PromptResponse>>>>;
 
 /// Thread-safe map of per-session stall detector handles keyed by `session_id`.
 pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
@@ -46,6 +58,8 @@ pub struct AppState {
     pub slack: Option<Arc<SlackService>>,
     /// Pending approval request senders keyed by `request_id`.
     pub pending_approvals: PendingApprovals,
+    /// Pending continuation prompt senders keyed by `prompt_id`.
+    pub pending_prompts: PendingPrompts,
     /// Per-session stall detector handles keyed by `session_id`.
     pub stall_detectors: Option<StallDetectors>,
 }
@@ -92,6 +106,11 @@ impl AgentRemServer {
                 "remote_log" => {
                     router.add_route(ToolRoute::new_dyn(tool, |context| {
                         Box::pin(crate::mcp::tools::remote_log::handle(context))
+                    }));
+                }
+                "forward_prompt" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::forward_prompt::handle(context))
                     }));
                 }
                 _ => {
