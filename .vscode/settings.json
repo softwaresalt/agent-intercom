@@ -33,11 +33,11 @@
             "approve": true,
             "matchCommandLine": true
         },
-        "/^pwsh -File \"lib/hve-core/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$/": {
+        "/^pwsh -File \"lib/hve-core/scripts/powershell/check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks$/": {
             "approve": true,
             "matchCommandLine": true
         },
-        "/^pwsh -File \"\\.specify/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$/": {
+        "/^pwsh -File \"\\.specify/scripts/powershell/check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks$/": {
             "approve": true,
             "matchCommandLine": true
         }

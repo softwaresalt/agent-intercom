@@ -31,6 +31,9 @@ DEFINE FIELD last_tool ON TABLE session TYPE option<string>;
 DEFINE FIELD nudge_count ON TABLE session TYPE int;
 DEFINE FIELD stall_paused ON TABLE session TYPE bool;
 DEFINE FIELD progress_snapshot ON TABLE session TYPE option<array>;
+DEFINE FIELD progress_snapshot.* ON TABLE session TYPE object;
+DEFINE FIELD progress_snapshot.*.label ON TABLE session TYPE string;
+DEFINE FIELD progress_snapshot.*.status ON TABLE session TYPE string;
 
 DEFINE TABLE approval_request SCHEMAFULL;
 DEFINE FIELD session_id ON TABLE approval_request TYPE string;
@@ -54,6 +57,9 @@ DEFINE FIELD session_state ON TABLE checkpoint TYPE object;
 DEFINE FIELD file_hashes ON TABLE checkpoint TYPE object;
 DEFINE FIELD workspace_root ON TABLE checkpoint TYPE string;
 DEFINE FIELD progress_snapshot ON TABLE checkpoint TYPE option<array>;
+DEFINE FIELD progress_snapshot.* ON TABLE checkpoint TYPE object;
+DEFINE FIELD progress_snapshot.*.label ON TABLE checkpoint TYPE string;
+DEFINE FIELD progress_snapshot.*.status ON TABLE checkpoint TYPE string;
 DEFINE FIELD created_at ON TABLE checkpoint;
 
 DEFINE TABLE continuation_prompt SCHEMAFULL;
@@ -78,6 +84,9 @@ DEFINE FIELD status ON TABLE stall_alert TYPE string
     ASSERT $value IN ['pending', 'nudged', 'self_recovered', 'escalated', 'dismissed'];
 DEFINE FIELD nudge_message ON TABLE stall_alert TYPE option<string>;
 DEFINE FIELD progress_snapshot ON TABLE stall_alert TYPE option<array>;
+DEFINE FIELD progress_snapshot.* ON TABLE stall_alert TYPE object;
+DEFINE FIELD progress_snapshot.*.label ON TABLE stall_alert TYPE string;
+DEFINE FIELD progress_snapshot.*.status ON TABLE stall_alert TYPE string;
 DEFINE FIELD slack_ts ON TABLE stall_alert TYPE option<string>;
 DEFINE FIELD created_at ON TABLE stall_alert;
 ";

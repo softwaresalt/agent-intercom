@@ -15,9 +15,10 @@ use rmcp::service::{RequestContext, RoleServer};
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
 use tokio::sync::{oneshot, Mutex};
-use tracing::info_span;
+use tracing::{info, info_span};
 
 use crate::config::GlobalConfig;
+use crate::orchestrator::stall_detector::StallDetectorHandle;
 use crate::slack::client::SlackService;
 
 /// Response payload delivered through a pending approval oneshot channel.
@@ -32,6 +33,9 @@ pub struct ApprovalResponse {
 /// Thread-safe map of pending approval `oneshot` senders keyed by `request_id`.
 pub type PendingApprovals = Arc<Mutex<HashMap<String, oneshot::Sender<ApprovalResponse>>>>;
 
+/// Thread-safe map of per-session stall detector handles keyed by `session_id`.
+pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
+
 /// Shared application state accessible by all MCP tool handlers.
 pub struct AppState {
     /// Global configuration.
@@ -42,6 +46,8 @@ pub struct AppState {
     pub slack: Option<Arc<SlackService>>,
     /// Pending approval request senders keyed by `request_id`.
     pub pending_approvals: PendingApprovals,
+    /// Per-session stall detector handles keyed by `session_id`.
+    pub stall_detectors: Option<StallDetectors>,
 }
 
 /// MCP server implementation that exposes the nine monocoque-agent-rem tools.
@@ -76,6 +82,11 @@ impl AgentRemServer {
                 "accept_diff" => {
                     router.add_route(ToolRoute::new_dyn(tool, |context| {
                         Box::pin(crate::mcp::tools::accept_diff::handle(context))
+                    }));
+                }
+                "heartbeat" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::heartbeat::handle(context))
                     }));
                 }
                 _ => {
@@ -283,12 +294,35 @@ impl ServerHandler for AgentRemServer {
         context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<CallToolResult, rmcp::ErrorData>> + Send + '_ {
         let router = Self::tool_router();
-        let _span = info_span!("call_tool", tool = %request.name).entered();
+        let tool_name = request.name.to_string();
+        let _span = info_span!("call_tool", tool = %tool_name).entered();
+
+        // Reset stall timer on every tool call (T053).
+        let state = Arc::clone(&self.state);
 
         async move {
-            router
+            // Reset stall detector for all active sessions on any tool call.
+            if let Some(ref detectors) = state.stall_detectors {
+                let guards = detectors.lock().await;
+                for handle in guards.values() {
+                    handle.reset();
+                }
+            }
+
+            let result = router
                 .call(ToolCallContext::new(self, request, context))
-                .await
+                .await;
+
+            // Reset again after tool completion.
+            if let Some(ref detectors) = state.stall_detectors {
+                let guards = detectors.lock().await;
+                for handle in guards.values() {
+                    handle.reset();
+                }
+            }
+
+            info!(tool = %tool_name, "tool call completed");
+            result
         }
     }
 

@@ -4,4 +4,5 @@ mod unit {
     mod model_tests;
     mod path_validation_tests;
     mod session_repo_tests;
+    mod stall_detector_tests;
 }

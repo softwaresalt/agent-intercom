@@ -9,7 +9,7 @@ use tracing::{error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
 use monocoque_agent_rem::config::GlobalConfig;
-use monocoque_agent_rem::mcp::handler::{AppState, PendingApprovals};
+use monocoque_agent_rem::mcp::handler::{AppState, PendingApprovals, StallDetectors};
 use monocoque_agent_rem::mcp::{sse, transport};
 use monocoque_agent_rem::persistence::{db, retention};
 use monocoque_agent_rem::slack::client::SlackService;
@@ -100,6 +100,7 @@ async fn run(args: Cli) -> Result<()> {
         db,
         slack: slack_service,
         pending_approvals,
+        stall_detectors: Some(StallDetectors::default()),
     });
 
     // ── Start transports ────────────────────────────────
