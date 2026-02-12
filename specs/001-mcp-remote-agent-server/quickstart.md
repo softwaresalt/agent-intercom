@@ -80,9 +80,8 @@ escalation_threshold_seconds = 120
 max_retries = 3
 default_nudge_message = "Continue working on the current task. Pick up where you left off."
 
-[host]
-cli = "claude"
-cli_args = []
+host_cli = "claude"
+host_cli_args = []
 
 max_concurrent_sessions = 3
 retention_days = 30

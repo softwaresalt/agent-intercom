@@ -366,12 +366,12 @@ tests/         # contract/, integration/, unit/
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T093 [P] Add authorization guard for all Slack interactions in `src/slack/interactions.rs`: verify user is in `authorized_user_ids` for all button presses and slash commands; silently ignore unauthorized users and log security event (FR-013, SC-009)
-- [ ] T094 [P] Add double-submission prevention across all interactive messages in `src/slack/interactions.rs`: after first button action on any message (approval, prompt, stall alert), immediately call `chat.update` to replace buttons with static status text (FR-022)
-- [ ] T095 [P] Add Slack reconnection handling in `src/slack/client.rs`: use `SlackSocketModeClientsManager` reconnection hooks; on reconnect, re-post any pending interactive messages that may have been lost (SC-003)
-- [ ] T096 Verify end-to-end workflow: run server, connect agent, submit approval → approve → apply diff → send log → trigger stall → nudge → recover; validate all acceptance scenarios
-- [ ] T097 Run `cargo clippy -- -D warnings` and `cargo test` to verify no regressions
-- [ ] T098 Validate quickstart.md: follow setup steps from `specs/001-mcp-remote-agent-server/quickstart.md` end-to-end and verify accuracy
+- [X] T093 [P] Add authorization guard for all Slack interactions in `src/slack/interactions.rs`: verify user is in `authorized_user_ids` for all button presses and slash commands; silently ignore unauthorized users and log security event (FR-013, SC-009)
+- [X] T094 [P] Add double-submission prevention across all interactive messages in `src/slack/interactions.rs`: after first button action on any message (approval, prompt, stall alert), immediately call `chat.update` to replace buttons with static status text (FR-022)
+- [X] T095 [P] Add Slack reconnection handling in `src/slack/client.rs`: use `SlackSocketModeClientsManager` reconnection hooks; on reconnect, re-post any pending interactive messages that may have been lost (SC-003)
+- [X] T096 Verify end-to-end workflow: run server, connect agent, submit approval → approve → apply diff → send log → trigger stall → nudge → recover; validate all acceptance scenarios
+- [X] T097 Run `cargo clippy -- -D warnings` and `cargo test` to verify no regressions
+- [X] T098 Validate quickstart.md: follow setup steps from `specs/001-mcp-remote-agent-server/quickstart.md` end-to-end and verify accuracy
 
 ---
 

@@ -1,4 +1,8 @@
 //! Slack Socket Mode client with a small buffered send queue.
+//!
+//! Includes reconnection handling (T095 / SC-003): on each WebSocket
+//! hello event the client re-posts any pending interactive messages
+//! (approvals, prompts) that may have been lost during a disconnect.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -214,8 +218,17 @@ impl SlackService {
         let listener_env = Arc::new(listener_env);
 
         let callbacks = SlackSocketModeListenerCallbacks::new()
-            .with_hello_events(|event, _client, _state| async move {
-                info!(?event, "socket hello");
+            .with_hello_events(|event, _client, state| async move {
+                // T095: On each hello (including reconnections), re-post
+                // any pending interactive messages that may have been lost.
+                info!(?event, "socket hello (connection established)");
+                let app: Option<Arc<AppState>> = {
+                    let guard = state.read().await;
+                    guard.get_user_state::<Arc<AppState>>().cloned()
+                };
+                if let Some(app) = app {
+                    repost_pending_messages(&app).await;
+                }
             })
             .with_command_events(commands::handle_command)
             .with_interaction_events(events::handle_interaction)
@@ -387,6 +400,101 @@ impl SlackService {
             .await
             .map_err(|err| AppError::Slack(format!("failed to open modal: {err}")))?;
         Ok(())
+    }
+}
+
+// ── Reconnection: re-post pending interactive messages (T095) ────────
+
+/// Re-post pending approvals and prompts after a Socket Mode reconnection.
+///
+/// When the WebSocket drops and reconnects, any interactive messages that
+/// were in-flight may not be delivered. This function queries the DB for
+/// pending records and re-posts their interactive messages to Slack so
+/// the operator can still act on them.
+async fn repost_pending_messages(state: &AppState) {
+    use crate::persistence::approval_repo::ApprovalRepo;
+    use crate::persistence::prompt_repo::PromptRepo;
+    use crate::slack::blocks;
+
+    let Some(ref slack) = state.slack else { return };
+
+    let channel = SlackChannelId(state.config.slack.channel_id.clone());
+
+    // Re-post pending approval requests.
+    let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+    match approval_repo.list_pending().await {
+        Ok(pending) if !pending.is_empty() => {
+            info!(
+                count = pending.len(),
+                "re-posting pending approval requests after reconnect"
+            );
+            for req in pending {
+                let diff_preview = if req.diff_content.lines().count() < 20 {
+                    format!("```\n{}\n```", req.diff_content)
+                } else {
+                    format!("_(large diff, {} lines)_", req.diff_content.lines().count())
+                };
+                let text = format!(
+                    "\u{1f504} *Re-posted after reconnect*\n\
+                     *Approval:* {}\n\
+                     *File:* `{}`\n\
+                     *Risk:* {:?}\n\n{}",
+                    req.title, req.file_path, req.risk_level, diff_preview
+                );
+                let msg_blocks = vec![
+                    blocks::text_section(&text),
+                    blocks::approval_buttons(&req.id),
+                ];
+                let message = SlackMessage {
+                    channel: channel.clone(),
+                    text: Some(format!("[Re-posted] Approval: {}", req.title)),
+                    blocks: Some(msg_blocks),
+                    thread_ts: None,
+                };
+                if let Err(err) = slack.enqueue(message).await {
+                    warn!(%err, request_id = %req.id, "failed to re-post approval");
+                }
+            }
+        }
+        Ok(_) => { /* no pending approvals */ }
+        Err(err) => {
+            warn!(%err, "failed to query pending approvals for reconnect re-post");
+        }
+    }
+
+    // Re-post pending continuation prompts.
+    let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+    match prompt_repo.list_pending().await {
+        Ok(pending) if !pending.is_empty() => {
+            info!(
+                count = pending.len(),
+                "re-posting pending prompts after reconnect"
+            );
+            for prompt in pending {
+                let text = format!(
+                    "\u{1f504} *Re-posted after reconnect*\n\
+                     *Prompt:* {:?}\n\n{}",
+                    prompt.prompt_type, prompt.prompt_text
+                );
+                let msg_blocks = vec![
+                    blocks::text_section(&text),
+                    blocks::prompt_buttons(&prompt.id),
+                ];
+                let message = SlackMessage {
+                    channel: channel.clone(),
+                    text: Some(format!("[Re-posted] Prompt: {:?}", prompt.prompt_type)),
+                    blocks: Some(msg_blocks),
+                    thread_ts: None,
+                };
+                if let Err(err) = slack.enqueue(message).await {
+                    warn!(%err, prompt_id = %prompt.id, "failed to re-post prompt");
+                }
+            }
+        }
+        Ok(_) => { /* no pending prompts */ }
+        Err(err) => {
+            warn!(%err, "failed to query pending prompts for reconnect re-post");
+        }
     }
 }
 
