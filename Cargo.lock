@@ -2617,6 +2617,7 @@ dependencies = [
  "chrono",
  "clap",
  "diffy",
+ "glob",
  "interprocess",
  "keyring",
  "notify",

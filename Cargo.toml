@@ -67,6 +67,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 tokio-util = { version = "0.7.18", features = ["rt"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+glob = "0.3"
 
 [[bin]]
 name = "monocoque-agent-rem"

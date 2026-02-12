@@ -113,6 +113,11 @@ impl AgentRemServer {
                         Box::pin(crate::mcp::tools::forward_prompt::handle(context))
                     }));
                 }
+                "check_auto_approve" => {
+                    router.add_route(ToolRoute::new_dyn(tool, |context| {
+                        Box::pin(crate::mcp::tools::check_auto_approve::handle(context))
+                    }));
+                }
                 _ => {
                     router.add_route(ToolRoute::new_dyn(tool, |_context| {
                         Box::pin(async {
