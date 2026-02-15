@@ -12,10 +12,10 @@ use std::time::Duration;
 
 use tokio::sync::oneshot;
 
-use monocoque_agent_rem::config::GlobalConfig;
-use monocoque_agent_rem::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
-use monocoque_agent_rem::persistence::db;
-use monocoque_agent_rem::persistence::prompt_repo::PromptRepo;
+use monocoque_agent_rc::config::GlobalConfig;
+use monocoque_agent_rc::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
+use monocoque_agent_rc::persistence::db;
+use monocoque_agent_rc::persistence::prompt_repo::PromptRepo;
 
 /// Build a minimal test configuration with in-memory DB.
 fn test_config() -> GlobalConfig {

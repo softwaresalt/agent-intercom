@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MCP Remote Agent Server — Resource Contracts",
-  "description": "MCP resource definitions exposed by the monocoque-agent-rem server. Resources provide read-only context to connected agents.",
+  "description": "MCP resource definitions exposed by the monocoque-agent-rc server. Resources provide read-only context to connected agents.",
 
   "resources": {
     "slack://channel/{id}/recent": {

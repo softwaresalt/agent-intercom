@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use monocoque_agent_rem::policy::loader::PolicyLoader;
+use monocoque_agent_rc::policy::loader::PolicyLoader;
 
 /// Helper: write a policy JSON file under `workspace_root/.monocoque/settings.json`.
 fn write_policy(workspace_root: &Path, json: &str) {

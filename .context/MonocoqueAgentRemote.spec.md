@@ -1,4 +1,4 @@
-# **Monocoque Agent Remote (monocoque-agent-rem)**
+# **Monocoque Agent Remote (monocoque-agent-rc)**
 
 ## **Technical Specification & Architecture**
 
@@ -14,7 +14,7 @@
 
 ## **1\. Executive Synopsis**
 
-The software entity herein designated as **Monocoque Agent Remote** (monocoque-agent-rem) is constituted as a standalone server implementation of the Model Context Protocol (MCP). The primary objective of this apparatus is the provision of "Remote Input/Output" capabilities to local Artificial Intelligence agents, encompassing but not limited to Claude Code, the GitHub Copilot Command Line Interface (CLI), Cursor, and Visual Studio Code.
+The software entity herein designated as **Monocoque Agent Remote** (monocoque-agent-rc) is constituted as a standalone server implementation of the Model Context Protocol (MCP). The primary objective of this apparatus is the provision of "Remote Input/Output" capabilities to local Artificial Intelligence agents, encompassing but not limited to Claude Code, the GitHub Copilot Command Line Interface (CLI), Cursor, and Visual Studio Code.
 
 Through the local execution of this server, an AI agent is endowed with the capacity to establish an asynchronous, bi-directional communication channel with a remote operator via the Slack platform. In standard operational paradigms, an agentic workflow is tethered to the physical console, requiring synchronous human intervention for the approval of file modifications or the execution of terminal commands. This system decouples that dependency. Rather than the terminal remaining in a blocked state whilst awaiting local input, the agent is enabled to transmit diffs, requests, and inquiries to a designated Slack channel, subsequently awaiting approval in an asynchronous manner. This architecture effectively permits the "Shadow Agent" workflow, wherein the computational heavy lifting occurs on a secure, local machine, while the orchestration and oversight are conducted remotely.
 
@@ -32,7 +32,7 @@ The system is predicated upon the standard MCP Client/Host architecture, signifi
 
 graph TD  
     subgraph "Local Workstation"  
-        IDE\[Agentic IDE / CLI\] \--\>|Stdio / SSE| MCP\[monocoque-agent-rem (Rust)\]  
+        IDE\[Agentic IDE / CLI\] \--\>|Stdio / SSE| MCP\[monocoque-agent-rc (Rust)\]  
         IDE \-- "Calls Tool: ask\_approval(diff)" \--\> MCP  
         IDE \-- "Calls Tool: forward\_prompt(text)" \--\> MCP  
           
@@ -78,7 +78,7 @@ The project shall leverage the Rust ecosystem to ensure memory safety, type safe
 | slack-mrh or slack-rust | The handling of Slack Socket Mode and the construction of Block Kit JSON. These libraries facilitate the maintenance of a persistent WebSocket connection, obviating the need for inbound firewall ports or public IP addresses. |
 | tokio | The asynchronous runtime selected for the simultaneous handling of WebSocket heartbeats, MCP request loops, and IPC task polling. Its "work-stealing" scheduler ensures minimal latency. |
 | interprocess or tokio-uds | Local socket/pipe communication (Local Override). This enables the implementation of the monocoque-ctl side-channel without resorting to file-based locking mechanisms. |
-| surrealdb | The embedded multi-model database for the persistence of session state and configuration. SurrealDB is selected for its actively maintained ecosystem, native async/await Rust SDK, built-in query language (SurrealQL), and ability to run in embedded mode (`surreal::engine::local::RocksDb` or `surreal::engine::local::Mem`) without requiring an external server process. Its document-graph hybrid model simplifies session-to-checkpoint relationship queries. This aligns with the SurrealDB usage in the existing monocoque agent project. **Licensing note:** The SurrealDB Rust SDK is Apache-2.0 licensed; the embedded engine is Business Source License 1.1 (BSL). This is acceptable for this project because monocoque-agent-rem is distributed as standalone developer tooling (an MCP server extension), not as a library embedded into downstream products. End users install and run the binary locally for individual productivity — no user redistributes the engine or offers it as a database service. The BSL restriction (prohibiting use as a competing database product) is categorically inapplicable to this use case. |
+| surrealdb | The embedded multi-model database for the persistence of session state and configuration. SurrealDB is selected for its actively maintained ecosystem, native async/await Rust SDK, built-in query language (SurrealQL), and ability to run in embedded mode (`surreal::engine::local::RocksDb` or `surreal::engine::local::Mem`) without requiring an external server process. Its document-graph hybrid model simplifies session-to-checkpoint relationship queries. This aligns with the SurrealDB usage in the existing monocoque agent project. **Licensing note:** The SurrealDB Rust SDK is Apache-2.0 licensed; the embedded engine is Business Source License 1.1 (BSL). This is acceptable for this project because monocoque-agent-rc is distributed as standalone developer tooling (an MCP server extension), not as a library embedded into downstream products. End users install and run the binary locally for individual productivity — no user redistributes the engine or offers it as a database service. The BSL restriction (prohibiting use as a competing database product) is categorically inapplicable to this use case. |
 | serde / serde\_json | The de facto standard for serialization and deserialization in Rust, essential for parsing MCP payloads and Slack API responses. |
 | anyhow | Error handling. Provides a robust mechanism for propagating context-rich error messages up the stack. |
 | walkdir / glob | Utilized for efficient file system traversal in list-files. walkdir is preferred for its recursive capabilities and iterator-based interface. |

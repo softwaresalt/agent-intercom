@@ -197,7 +197,7 @@ fn output_progress_snapshot_is_optional_array() {
 
 #[test]
 fn output_progress_snapshot_validates_item_statuses() {
-    use monocoque_agent_rem::models::progress::{ProgressItem, ProgressStatus};
+    use monocoque_agent_rc::models::progress::{ProgressItem, ProgressStatus};
 
     let items = vec![
         ProgressItem {

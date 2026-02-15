@@ -10,16 +10,16 @@ use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use monocoque_agent_rem::models::progress::{ProgressItem, ProgressStatus};
-use monocoque_agent_rem::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rem::models::stall::{StallAlert, StallAlertStatus};
-use monocoque_agent_rem::orchestrator::stall_detector::{StallDetector, StallEvent};
-use monocoque_agent_rem::persistence::db;
-use monocoque_agent_rem::persistence::session_repo::SessionRepo;
-use monocoque_agent_rem::persistence::stall_repo::StallAlertRepo;
+use monocoque_agent_rc::models::progress::{ProgressItem, ProgressStatus};
+use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
+use monocoque_agent_rc::models::stall::{StallAlert, StallAlertStatus};
+use monocoque_agent_rc::orchestrator::stall_detector::{StallDetector, StallEvent};
+use monocoque_agent_rc::persistence::db;
+use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use monocoque_agent_rc::persistence::stall_repo::StallAlertRepo;
 
 /// Create a test config with a temp workspace root.
-fn test_config(dir: &std::path::Path) -> monocoque_agent_rem::config::GlobalConfig {
+fn test_config(dir: &std::path::Path) -> monocoque_agent_rc::config::GlobalConfig {
     let toml_str = format!(
         r#"
 default_workspace_root = "{ws}"
@@ -42,7 +42,7 @@ default_nudge_message = "Please continue"
 "#,
         ws = dir.to_string_lossy().replace('\\', "/")
     );
-    monocoque_agent_rem::config::GlobalConfig::from_toml_str(&toml_str)
+    monocoque_agent_rc::config::GlobalConfig::from_toml_str(&toml_str)
         .expect("test config should parse")
 }
 

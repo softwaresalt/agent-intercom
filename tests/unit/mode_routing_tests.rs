@@ -5,7 +5,7 @@
 //! - Local mode suppresses Slack and routes to IPC
 //! - Hybrid mode posts to both Slack and IPC
 
-use monocoque_agent_rem::models::session::SessionMode;
+use monocoque_agent_rc::models::session::SessionMode;
 
 /// Remote mode should indicate Slack is the channel.
 #[test]

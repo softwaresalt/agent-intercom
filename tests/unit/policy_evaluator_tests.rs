@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
-use monocoque_agent_rem::models::policy::{FilePatterns, WorkspacePolicy};
-use monocoque_agent_rem::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
+use monocoque_agent_rc::models::policy::{FilePatterns, WorkspacePolicy};
+use monocoque_agent_rc::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
 
 /// Helper to build a policy with the given overrides applied to defaults.
 fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> WorkspacePolicy {

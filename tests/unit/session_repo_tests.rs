@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use monocoque_agent_rem::config::GlobalConfig;
-use monocoque_agent_rem::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rem::persistence::{db, session_repo::SessionRepo};
+use monocoque_agent_rc::config::GlobalConfig;
+use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
+use monocoque_agent_rc::persistence::{db, session_repo::SessionRepo};
 
 fn config_for_tests() -> GlobalConfig {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -10,7 +10,7 @@ fn config_for_tests() -> GlobalConfig {
         r#"
 default_workspace_root = '{root}'
 http_port = 3000
-ipc_name = "monocoque-agent-rem"
+ipc_name = "monocoque-agent-rc"
 max_concurrent_sessions = 2
 host_cli = "claude"
 host_cli_args = ["--stdio"]

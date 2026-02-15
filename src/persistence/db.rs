@@ -29,7 +29,7 @@ pub async fn connect(config: &GlobalConfig, use_memory: bool) -> Result<Database
         Surreal::new::<RocksDb>(db_path).await?
     };
 
-    db.use_ns("monocoque").use_db("agent_rem").await?;
+    db.use_ns("monocoque").use_db("agent_rc").await?;
     schema::apply_schema(&db).await?;
     Ok(db)
 }

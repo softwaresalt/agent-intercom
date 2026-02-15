@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use monocoque_agent_rem::slack::commands::{
+use monocoque_agent_rc::slack::commands::{
     file_extension_language, validate_command_alias, validate_listing_path,
 };
 

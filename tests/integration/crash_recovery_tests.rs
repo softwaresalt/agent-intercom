@@ -10,17 +10,17 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rem::config::GlobalConfig;
-use monocoque_agent_rem::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
-use monocoque_agent_rem::models::checkpoint::Checkpoint;
-use monocoque_agent_rem::models::progress::{ProgressItem, ProgressStatus};
-use monocoque_agent_rem::models::prompt::{ContinuationPrompt, PromptType};
-use monocoque_agent_rem::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rem::persistence::approval_repo::ApprovalRepo;
-use monocoque_agent_rem::persistence::checkpoint_repo::CheckpointRepo;
-use monocoque_agent_rem::persistence::db;
-use monocoque_agent_rem::persistence::prompt_repo::PromptRepo;
-use monocoque_agent_rem::persistence::session_repo::SessionRepo;
+use monocoque_agent_rc::config::GlobalConfig;
+use monocoque_agent_rc::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+use monocoque_agent_rc::models::checkpoint::Checkpoint;
+use monocoque_agent_rc::models::progress::{ProgressItem, ProgressStatus};
+use monocoque_agent_rc::models::prompt::{ContinuationPrompt, PromptType};
+use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
+use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
+use monocoque_agent_rc::persistence::checkpoint_repo::CheckpointRepo;
+use monocoque_agent_rc::persistence::db;
+use monocoque_agent_rc::persistence::prompt_repo::PromptRepo;
+use monocoque_agent_rc::persistence::session_repo::SessionRepo;
 
 /// Build a minimal test configuration.
 fn test_config() -> GlobalConfig {

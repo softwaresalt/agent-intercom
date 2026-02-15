@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rem::config::GlobalConfig;
-use monocoque_agent_rem::persistence::db;
+use monocoque_agent_rc::config::GlobalConfig;
+use monocoque_agent_rc::persistence::db;
 
 fn config_for_tests() -> GlobalConfig {
     let temp = tempfile::tempdir().expect("tempdir");

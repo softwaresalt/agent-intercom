@@ -80,8 +80,7 @@ pub async fn handle(
         if let Some(ref slack) = state.slack {
             // Only post to Slack if the new mode still includes Slack.
             if matches!(input.mode, SessionMode::Remote | SessionMode::Hybrid) {
-                let channel =
-                    slack_morphism::prelude::SlackChannelId(channel_id.clone());
+                let channel = slack_morphism::prelude::SlackChannelId(channel_id.clone());
                 let msg = crate::slack::client::SlackMessage {
                     channel,
                     text: Some(format!(

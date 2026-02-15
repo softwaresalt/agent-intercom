@@ -9,12 +9,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use monocoque_agent_rem::config::GlobalConfig;
-use monocoque_agent_rem::models::checkpoint::Checkpoint;
-use monocoque_agent_rem::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rem::persistence::checkpoint_repo::CheckpointRepo;
-use monocoque_agent_rem::persistence::db;
-use monocoque_agent_rem::persistence::session_repo::SessionRepo;
+use monocoque_agent_rc::config::GlobalConfig;
+use monocoque_agent_rc::models::checkpoint::Checkpoint;
+use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
+use monocoque_agent_rc::persistence::checkpoint_repo::CheckpointRepo;
+use monocoque_agent_rc::persistence::db;
+use monocoque_agent_rc::persistence::session_repo::SessionRepo;
 
 /// Build a minimal test configuration with in-memory DB and low concurrency limit.
 fn test_config() -> GlobalConfig {

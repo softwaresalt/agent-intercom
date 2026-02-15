@@ -33,7 +33,7 @@ Templates requiring updates:
 Follow-up TODOs: (none)
 -->
 
-# monocoque-agent-rem Constitution
+# monocoque-agent-rc Constitution
 
 ## Core Principles
 
@@ -117,7 +117,7 @@ issues would require reproducing the exact scenario.
 ### VI. Single-Binary Simplicity
 
 The project MUST produce a single workspace with two binaries
-(`monocoque-agent-rem` and `monocoque-ctl`). Dependencies MUST be
+(`monocoque-agent-rc` and `monocoque-ctl`). Dependencies MUST be
 managed via `Cargo.toml` workspace dependencies. New dependencies
 MUST be justified by a concrete requirement — do not add libraries
 speculatively. Prefer the standard library over external crates
@@ -174,7 +174,7 @@ file copy.
 ## Governance
 
 This constitution supersedes all other development practices for
-the monocoque-agent-rem project. All code reviews and automated
+the monocoque-agent-rc project. All code reviews and automated
 checks MUST verify compliance with these principles.
 
 - **Amendments**: Any change to this constitution MUST be documented

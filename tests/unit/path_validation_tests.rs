@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use monocoque_agent_rem::diff::{path_safety, validate_workspace_path};
+use monocoque_agent_rc::diff::{path_safety, validate_workspace_path};
 
 #[test]
 fn allows_path_inside_workspace() {

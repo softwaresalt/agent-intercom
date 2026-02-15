@@ -79,7 +79,7 @@ pub struct AppState {
     pub stall_detectors: Option<StallDetectors>,
 }
 
-/// MCP server implementation that exposes the nine monocoque-agent-rem tools.
+/// MCP server implementation that exposes the nine monocoque-agent-rc tools.
 pub struct AgentRemServer {
     state: Arc<AppState>,
     /// Per-session Slack channel override supplied via SSE query parameter.

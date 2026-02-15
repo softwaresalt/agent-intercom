@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MCP Remote Agent Server — Tool Contracts",
-  "description": "JSON-RPC tool definitions exposed by the monocoque-agent-rem MCP server. Each tool follows the MCP tool calling convention: the agent sends a tools/call request with the tool name and arguments, and the server returns a result with content blocks.",
+  "description": "JSON-RPC tool definitions exposed by the monocoque-agent-rc MCP server. Each tool follows the MCP tool calling convention: the agent sends a tools/call request with the tool name and arguments, and the server returns a result with content blocks.",
 
   "tools": {
     "ask_approval": {

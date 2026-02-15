@@ -55,7 +55,7 @@ tests/         # contract/, integration/, unit/
 ### Configuration & Credentials
 
 - [X] T005 Implement `GlobalConfig` struct and TOML deserialization in `src/config.rs` per data-model.md GlobalConfig entity; include `default_workspace_root`, `slack` (channel_id, authorized_user_ids), `timeouts`, `stall`, `commands`, `http_port`, `ipc_name`, `retention_days`, `max_concurrent_sessions`, `host_cli`, `host_cli_args` fields
-- [X] T006 Implement credential loading in `src/config.rs`: load `slack_app_token` and `slack_bot_token` from OS keychain (service `monocoque-agent-rem`) using `keyring` crate, falling back to `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` environment variables (FR-036); wrap keychain calls in `tokio::task::spawn_blocking`
+- [X] T006 Implement credential loading in `src/config.rs`: load `slack_app_token` and `slack_bot_token` from OS keychain (service `monocoque-agent-rc`) using `keyring` crate, falling back to `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` environment variables (FR-036); wrap keychain calls in `tokio::task::spawn_blocking`
 - [X] T007 Add CLI argument parsing in `src/main.rs` using `clap`: `--config <path>` (required), `--log-format <text|json>` (default text), `--workspace <path>` (optional override for primary agent workspace root)
 
 ### Domain Models
@@ -71,7 +71,7 @@ tests/         # contract/, integration/, unit/
 
 ### SurrealDB Persistence Layer
 
-- [X] T016 Implement database connection and initialization in `src/persistence/db.rs`: connect to SurrealDB embedded (RocksDB backend from config path, in-memory for tests via feature flag), select namespace `monocoque` and database `agent_rem`
+- [X] T016 Implement database connection and initialization in `src/persistence/db.rs`: connect to SurrealDB embedded (RocksDB backend from config path, in-memory for tests via feature flag), select namespace `monocoque` and database `agent_rc`
 - [X] T017 Implement schema DDL in `src/persistence/schema.rs`: define SCHEMAFULL tables `session`, `approval_request`, `checkpoint`, `continuation_prompt`, `stall_alert` with `DEFINE FIELD` and `ASSERT` constraints per data-model.md; execute on startup with `IF NOT EXISTS` for idempotent migrations
 - [X] T018 [P] Implement `SessionRepo` in `src/persistence/session_repo.rs`: CRUD operations for Session — `create`, `get_by_id`, `list_active`, `update_status`, `update_activity` (sets updated_at + last_tool), `update_progress_snapshot`, `set_terminated`, `count_active_sessions`
 - [X] T019 [P] Implement `ApprovalRepo` in `src/persistence/approval_repo.rs`: CRUD operations for ApprovalRequest — `create`, `get_by_id`, `get_pending_for_session`, `update_status`, `mark_consumed`, `list_pending`
@@ -568,16 +568,16 @@ With multiple developers after Phase 2:
 
 ### Implementation for User Story 13
 
-- [ ] T208 [US13] Rename `Cargo.toml`: update `[package] name` from `monocoque-agent-rem` to `monocoque-agent-rc` and `[[bin]] name` from `monocoque-agent-rem` to `monocoque-agent-rc`
-- [ ] T209 [US13] Rename source code references in `src/`: update `monocoque-agent-rem` and `monocoque_agent_rem` to `monocoque-agent-rc` and `monocoque_agent_rc` across `src/main.rs`, `src/config.rs`, `src/persistence/db.rs`, `src/mcp/handler.rs`, `src/mcp/resources/slack_channel.rs`
-- [ ] T210 [US13] Rename CLI references in `ctl/main.rs`: update `monocoque-agent-rem` / `monocoque_agent_rem` to `monocoque-agent-rc` / `monocoque_agent_rc`
-- [ ] T211 [P] [US13] Rename `config.toml` references: update comments and default values referencing `monocoque-agent-rem` to `monocoque-agent-rc`
-- [ ] T212 [US13] Rename test references in `tests/`: update all `monocoque_agent_rem` crate references to `monocoque_agent_rc` (~75 occurrences across all test files)
-- [ ] T213 [P] [US13] Rename documentation references: update `README.md`, `specs/001-mcp-remote-agent-server/quickstart.md`, all `specs/**/*.md` files, `.specify/memory/constitution.md`, `.github/copilot-instructions.md`, `agent-rem.code-workspace`
-- [ ] T214 [US13] Verify compilation: run `cargo build` and confirm binary is named `monocoque-agent-rc`
-- [ ] T215 [US13] Verify tests: run `cargo test` and confirm all tests pass with renamed crate
-- [ ] T216 [US13] Verify naming consistency: grep the entire workspace for `agent.rem` (regex) and confirm zero matches in non-changelog files (SC-015)
-- [ ] T217 [US13] Run `cargo clippy -- -D warnings` and confirm zero warnings
+- [X] T208 [US13] Rename `Cargo.toml`: update `[package] name` from `monocoque-agent-rem` to `monocoque-agent-rc` and `[[bin]] name` from `monocoque-agent-rem` to `monocoque-agent-rc`
+- [X] T209 [US13] Rename source code references in `src/`: update `monocoque-agent-rem` and `monocoque_agent_rem` to `monocoque-agent-rc` and `monocoque_agent_rc` across `src/main.rs`, `src/config.rs`, `src/persistence/db.rs`, `src/mcp/handler.rs`, `src/mcp/resources/slack_channel.rs`
+- [X] T210 [US13] Rename CLI references in `ctl/main.rs`: update `monocoque-agent-rem` / `monocoque_agent_rem` to `monocoque-agent-rc` / `monocoque_agent_rc`
+- [X] T211 [P] [US13] Rename `config.toml` references: update comments and default values referencing `monocoque-agent-rem` to `monocoque-agent-rc`
+- [X] T212 [US13] Rename test references in `tests/`: update all `monocoque_agent_rem` crate references to `monocoque_agent_rc` (~75 occurrences across all test files)
+- [X] T213 [P] [US13] Rename documentation references: update `README.md`, `specs/001-mcp-remote-agent-server/quickstart.md`, all `specs/**/*.md` files, `.specify/memory/constitution.md`, `.github/copilot-instructions.md`, `agent-rem.code-workspace`
+- [X] T214 [US13] Verify compilation: run `cargo build` and confirm binary is named `monocoque-agent-rc`
+- [X] T215 [US13] Verify tests: run `cargo test` and confirm all tests pass with renamed crate
+- [X] T216 [US13] Verify naming consistency: grep the entire workspace for `agent.rem` (regex) and confirm zero matches in non-changelog files (SC-015)
+- [X] T217 [US13] Run `cargo clippy -- -D warnings` and confirm zero warnings
 
 **Checkpoint**: Full rename complete — binary, crate, keychain, DB, IPC, docs all use `monocoque-agent-rc`. Zero `agent-rem` / `agent_rem` references remain.
 

@@ -54,7 +54,7 @@ fn input_schema_accepts_valid_progress_snapshot() {
 /// Validate that a malformed snapshot (empty label) is detectable.
 #[test]
 fn malformed_snapshot_has_empty_label() {
-    use monocoque_agent_rem::models::progress::{validate_snapshot, ProgressItem, ProgressStatus};
+    use monocoque_agent_rc::models::progress::{validate_snapshot, ProgressItem, ProgressStatus};
 
     let items = vec![
         ProgressItem {
@@ -74,7 +74,7 @@ fn malformed_snapshot_has_empty_label() {
 /// Validate that a malformed snapshot (missing status enum) fails deserialization.
 #[test]
 fn malformed_snapshot_invalid_status_fails_deser() {
-    use monocoque_agent_rem::models::progress::ProgressItem;
+    use monocoque_agent_rc::models::progress::ProgressItem;
 
     let raw = json!({ "label": "task", "status": "bogus" });
     let result: std::result::Result<ProgressItem, _> = serde_json::from_value(raw);

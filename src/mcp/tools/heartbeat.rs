@@ -101,8 +101,7 @@ pub async fn handle(
         // ── Optional: log status_message to Slack ────────────
         if let Some(ref msg) = input.status_message {
             if let Some(ref slack) = state.slack {
-                let channel =
-                    slack_morphism::prelude::SlackChannelId(channel_id.clone());
+                let channel = slack_morphism::prelude::SlackChannelId(channel_id.clone());
                 let slack_msg = crate::slack::client::SlackMessage {
                     channel,
                     text: Some(format!("\u{1f493} {msg}")),

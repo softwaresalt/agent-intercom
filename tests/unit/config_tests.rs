@@ -1,11 +1,11 @@
-use monocoque_agent_rem::{config::GlobalConfig, AppError};
+use monocoque_agent_rc::{config::GlobalConfig, AppError};
 
 fn sample_toml(workspace: &str) -> String {
     format!(
         r#"
 default_workspace_root = '{workspace}'
 http_port = 3000
-ipc_name = "monocoque-agent-rem"
+ipc_name = "monocoque-agent-rc"
 max_concurrent_sessions = 2
 host_cli = "claude"
 host_cli_args = ["--stdio"]
@@ -38,7 +38,7 @@ fn minimal_toml(workspace: &str) -> String {
         r#"
 default_workspace_root = '{workspace}'
 http_port = 3000
-ipc_name = "monocoque-agent-rem"
+ipc_name = "monocoque-agent-rc"
 max_concurrent_sessions = 1
 host_cli = "claude"
 authorized_user_ids = ["U123"]
@@ -69,7 +69,7 @@ fn parses_valid_config() {
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
 
     assert_eq!(config.http_port, 3000);
-    assert_eq!(config.ipc_name, "monocoque-agent-rem");
+    assert_eq!(config.ipc_name, "monocoque-agent-rc");
     assert_eq!(config.authorized_user_ids.len(), 2);
     assert!(config.commands.contains_key("status"));
     let expected_root = temp.path().canonicalize().expect("canonicalize temp path");

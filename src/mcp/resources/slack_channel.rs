@@ -38,7 +38,7 @@ pub const RESOURCE_DESCRIPTION: &str = "Recent chat history from the configured 
 /// # Examples
 ///
 /// ```
-/// use monocoque_agent_rem::mcp::resources::slack_channel::parse_channel_uri;
+/// use monocoque_agent_rc::mcp::resources::slack_channel::parse_channel_uri;
 ///
 /// assert_eq!(parse_channel_uri("slack://channel/C012345/recent"), Some("C012345"));
 /// assert_eq!(parse_channel_uri("http://example.com"), None);

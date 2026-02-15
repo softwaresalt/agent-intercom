@@ -45,7 +45,9 @@
 			"/^pwsh -File \\.specify/scripts/powershell/update-agent-context\\.ps1 -AgentType copilot$/": {
 				"approve": true,
 				"matchCommandLine": true
-			}
+			},
+			"Test-Path": true,
+			"cargo test": true
 		},
 		"powershell.cwd": "monocoque-agent-rem"
 	},

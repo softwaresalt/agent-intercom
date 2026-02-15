@@ -83,27 +83,25 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
     // requests and store it in the inbox while holding the semaphore.
     let inbox_for_mw = Arc::clone(&channel_inbox);
     let sem_for_mw = Arc::clone(&connection_semaphore);
-    let router = router.layer(middleware::from_fn(
-        move |request: Request, next: Next| {
-            let inbox = Arc::clone(&inbox_for_mw);
-            let sem = Arc::clone(&sem_for_mw);
-            async move {
-                let is_sse = request.uri().path() == "/sse";
-                if is_sse {
-                    // Serialise so the inbox value is consumed by exactly
-                    // the factory call that corresponds to this request.
-                    let _permit = sem.acquire().await.expect("semaphore closed");
-                    let channel_id = extract_channel_id(request.uri());
-                    *inbox.lock().expect("inbox lock") = channel_id;
-                    let response: Response = next.run(request).await;
-                    // _permit drops here after the factory has consumed the inbox
-                    response
-                } else {
-                    next.run(request).await
-                }
+    let router = router.layer(middleware::from_fn(move |request: Request, next: Next| {
+        let inbox = Arc::clone(&inbox_for_mw);
+        let sem = Arc::clone(&sem_for_mw);
+        async move {
+            let is_sse = request.uri().path() == "/sse";
+            if is_sse {
+                // Serialise so the inbox value is consumed by exactly
+                // the factory call that corresponds to this request.
+                let _permit = sem.acquire().await.expect("semaphore closed");
+                let channel_id = extract_channel_id(request.uri());
+                *inbox.lock().expect("inbox lock") = channel_id;
+                let response: Response = next.run(request).await;
+                // _permit drops here after the factory has consumed the inbox
+                response
+            } else {
+                next.run(request).await
             }
-        },
-    ));
+        }
+    }));
 
     // Serve HTTP via axum.
     let listener = tokio::net::TcpListener::bind(bind)

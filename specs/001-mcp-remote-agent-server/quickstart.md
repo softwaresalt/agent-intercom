@@ -19,14 +19,14 @@
 ### 1. Clone and build
 
 ```bash
-git clone https://github.com/softwaresalt/monocoque-agent-rem.git
-cd monocoque-agent-rem
+git clone https://github.com/softwaresalt/monocoque-agent-rc.git
+cd monocoque-agent-rc
 cargo build --release
 ```
 
 The build produces two binaries:
 
-- `target/release/monocoque-agent-rem` — the MCP server
+- `target/release/monocoque-agent-rc` — the MCP server
 - `target/release/monocoque-ctl` — the local CLI override tool
 
 ### 2. Store Slack credentials
@@ -59,10 +59,10 @@ Create `config.toml` in the project root (or `~/.config/monocoque/config.toml`):
 # Each spawned session can override this with its own workspace root.
 default_workspace_root = "/path/to/your/project"
 http_port = 3000
-ipc_name = "monocoque-agent-rem"
+ipc_name = "monocoque-agent-rc"
 
 [slack]
-# Tokens are loaded from OS keychain (service: monocoque-agent-rem).
+# Tokens are loaded from OS keychain (service: monocoque-agent-rc).
 # If not found in keychain, falls back to SLACK_APP_TOKEN / SLACK_BOT_TOKEN env vars.
 # Do NOT put tokens in this file.
 channel_id = "C0123456789"
@@ -127,7 +127,7 @@ Add the MCP server to your agent's configuration.
 {
   "mcpServers": {
     "monocoque": {
-      "command": "/path/to/monocoque-agent-rem",
+      "command": "/path/to/monocoque-agent-rc",
       "args": ["--config", "/path/to/config.toml"]
     }
   }
@@ -140,7 +140,7 @@ Add the MCP server to your agent's configuration.
 {
   "servers": {
     "monocoque": {
-      "command": "/path/to/monocoque-agent-rem",
+      "command": "/path/to/monocoque-agent-rc",
       "args": ["--config", "/path/to/config.toml"]
     }
   }

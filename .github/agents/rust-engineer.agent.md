@@ -1,5 +1,5 @@
 ---
-description: Expert Rust software engineer specializing in the monocoque-agent-rem MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
+description: Expert Rust software engineer specializing in the monocoque-agent-rc MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
 tools: ['execute/runInTerminal', 'execute/getTerminalOutput', 'read', 'read/problems', 'edit/createFile', 'edit/editFiles', 'search']
 ---
 
@@ -78,7 +78,7 @@ Consider the user input before proceeding (if not empty).
 
 ## Architecture Awareness
 
-This crate is **monocoque-agent-rem** — a standalone MCP server that provides remote I/O capabilities to local AI agents via Slack. It bridges agentic IDEs (Claude Code, GitHub Copilot CLI, Cursor, VS Code) with a remote operator's Slack mobile app, enabling asynchronous code review/approval, diff application, continuation prompt forwarding, stall detection with auto-nudge, session orchestration, and workspace auto-approve policies.
+This crate is **monocoque-agent-rc** — a standalone MCP server that provides remote I/O capabilities to local AI agents via Slack. It bridges agentic IDEs (Claude Code, GitHub Copilot CLI, Cursor, VS Code) with a remote operator's Slack mobile app, enabling asynchronous code review/approval, diff application, continuation prompt forwarding, stall detection with auto-nudge, session orchestration, and workspace auto-approve policies.
 
 ### Key Architectural Constraints
 
@@ -104,7 +104,7 @@ This crate is **monocoque-agent-rem** — a standalone MCP server that provides 
 
 Two binary targets in a single Cargo workspace:
 
-- `monocoque-agent-rem` (server) — `src/main.rs`
+- `monocoque-agent-rc` (server) — `src/main.rs`
 - `monocoque-ctl` (local CLI) — `ctl/main.rs`
 
 ```text
@@ -229,7 +229,7 @@ All Slack-posting modules send messages through a rate-limited in-memory queue w
 
 ## Implementation Workflow
 
-This agent **inherits** and **overrides** `speckit.implement` for the monocoque-agent-rem crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
+This agent **inherits** and **overrides** `speckit.implement` for the monocoque-agent-rc crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
 
 For ad-hoc questions, fixes, or reviews that do not involve the full task plan, skip to the Supplemental Workflow section at the end.
 

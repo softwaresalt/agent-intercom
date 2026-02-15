@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use monocoque_agent_rem::models::{
+use monocoque_agent_rc::models::{
     approval::{ApprovalRequest, ApprovalStatus, RiskLevel},
     checkpoint::Checkpoint,
     policy::{FilePatterns, WorkspacePolicy},

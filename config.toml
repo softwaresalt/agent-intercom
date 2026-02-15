@@ -1,4 +1,4 @@
-# monocoque-agent-rem configuration
+# monocoque-agent-rc configuration
 #
 # Slack credentials are loaded from environment variables (not this file):
 #   SLACK_BOT_TOKEN  - Bot user OAuth token (xoxb-...)
@@ -6,7 +6,7 @@
 #   SLACK_TEAM_ID    - Slack workspace team ID (T...)
 #
 # Alternatively, store them in the OS keychain under service
-# "monocoque-agent-rem" with keys: slack_bot_token, slack_app_token, slack_team_id
+# "monocoque-agent-rc" with keys: slack_bot_token, slack_app_token, slack_team_id
 #
 # Per-workspace Slack channel override:
 #   Each VS Code workspace can target a different Slack channel by appending
@@ -18,7 +18,7 @@
 
 default_workspace_root = "D:\\Source\\GitHub\\monocoque-agent-rem"
 http_port = 3000
-ipc_name = "monocoque-agent-rem"
+ipc_name = "monocoque-agent-rc"
 max_concurrent_sessions = 3
 host_cli = "claude"
 host_cli_args = ["--stdio"]

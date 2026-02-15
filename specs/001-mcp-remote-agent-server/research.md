@@ -52,7 +52,7 @@
 - `sled` — too low-level; all querying must be built on top.
 - `redb` — MIT licensed, simple KV store, but no query language or relationship modeling.
 
-**License note**: SurrealDB SDK is Apache-2.0; the embedded engine is BSL 1.1. Acceptable for this project because monocoque-agent-rem is standalone developer tooling, not a redistributed library or database service. The BSL restriction (competing database product) is categorically inapplicable.
+**License note**: SurrealDB SDK is Apache-2.0; the embedded engine is BSL 1.1. Acceptable for this project because monocoque-agent-rc is standalone developer tooling, not a redistributed library or database service. The BSL restriction (competing database product) is categorically inapplicable.
 
 **Schema design**:
 
@@ -190,7 +190,7 @@ fn load_credential(service: &str, key: &str, env_var: &str) -> Result<String> {
 }
 ```
 
-**Service name**: `monocoque-agent-rem` (consistent across platforms).
+**Service name**: `monocoque-agent-rc` (consistent across platforms).
 **Account names**: `slack_app_token`, `slack_bot_token`.
 
 **Platform caveats**:

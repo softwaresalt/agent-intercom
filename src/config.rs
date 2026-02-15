@@ -107,7 +107,7 @@ fn default_http_port() -> u16 {
 }
 
 fn default_ipc_name() -> String {
-    "monocoque-agent-rem".into()
+    "monocoque-agent-rc".into()
 }
 
 /// Global configuration parsed from `config.toml`.
@@ -172,7 +172,7 @@ impl GlobalConfig {
 
     /// Load Slack credentials from OS keychain with env-var fallback.
     ///
-    /// Tries the `monocoque-agent-rem` keyring service first, then falls
+    /// Tries the `monocoque-agent-rc` keyring service first, then falls
     /// back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment variables.
     ///
     /// # Errors
@@ -240,7 +240,7 @@ async fn load_credential(keyring_key: &str, env_key: &str) -> Result<String> {
 
     // Try OS keychain first via spawn_blocking (keyring is synchronous I/O).
     let keychain_result = tokio::task::spawn_blocking(move || {
-        keyring::Entry::new("monocoque-agent-rem", &key).and_then(|entry| entry.get_password())
+        keyring::Entry::new("monocoque-agent-rc", &key).and_then(|entry| entry.get_password())
     })
     .await
     .map_err(|err| AppError::Config(format!("keychain task panicked: {err}")))?;
