@@ -232,7 +232,8 @@ fn credential_env_fallback() {
     let toml = sample_toml(temp.path().to_str().expect("utf8 path"));
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
 
-    // Before credential loading, tokens are empty (serde(skip)).
+    // Before credential loading, tokens and team_id are empty (serde(skip)).
     assert!(config.slack.app_token.is_empty());
     assert!(config.slack.bot_token.is_empty());
+    assert!(config.slack.team_id.is_empty());
 }

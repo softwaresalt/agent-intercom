@@ -31,6 +31,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRemServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
+    let channel_id = context.service.effective_channel_id().to_owned();
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: SetModeInput =
@@ -80,7 +81,7 @@ pub async fn handle(
             // Only post to Slack if the new mode still includes Slack.
             if matches!(input.mode, SessionMode::Remote | SessionMode::Hybrid) {
                 let channel =
-                    slack_morphism::prelude::SlackChannelId(state.config.slack.channel_id.clone());
+                    slack_morphism::prelude::SlackChannelId(channel_id.clone());
                 let msg = crate::slack::client::SlackMessage {
                     channel,
                     text: Some(format!(

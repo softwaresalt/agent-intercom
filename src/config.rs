@@ -12,8 +12,8 @@ use crate::{AppError, Result};
 
 /// Nested Slack configuration for Socket Mode connectivity.
 ///
-/// Tokens are loaded at runtime via OS keychain or environment variables,
-/// not from the TOML config file (FR-036).
+/// Tokens and team ID are loaded at runtime via OS keychain or environment
+/// variables, not from the TOML config file (FR-036).
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SlackConfig {
@@ -25,6 +25,9 @@ pub struct SlackConfig {
     /// Bot user token used for posting messages (populated at runtime).
     #[serde(skip)]
     pub bot_token: String,
+    /// Slack workspace team ID (populated at runtime).
+    #[serde(skip)]
+    pub team_id: String,
 }
 
 /// Configurable timeout values (seconds) for blocking tool interactions.
@@ -179,6 +182,7 @@ impl GlobalConfig {
     pub async fn load_credentials(&mut self) -> Result<()> {
         self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
         self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
+        self.slack.team_id = load_credential("slack_team_id", "SLACK_TEAM_ID").await?;
         Ok(())
     }
 

@@ -44,6 +44,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRemServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
+    let channel_id = context.service.effective_channel_id().to_owned();
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: RemoteLogInput =
@@ -82,7 +83,7 @@ pub async fn handle(
 
         // ── Post to Slack ────────────────────────────────────
         let (posted, ts) = if let Some(ref slack) = state.slack {
-            let channel = SlackChannelId(state.config.slack.channel_id.clone());
+            let channel = SlackChannelId(channel_id.clone());
             let thread_ts = input.thread_ts.as_ref().map(|ts| SlackTs(ts.clone()));
 
             let severity_block = blocks::severity_section(&input.level, &input.message);

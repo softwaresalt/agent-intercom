@@ -47,6 +47,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRemServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
+    let channel_id = context.service.effective_channel_id().to_owned();
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: WaitInput =
@@ -75,7 +76,7 @@ pub async fn handle(
 
         // ── Post waiting status to Slack ─────────────────────
         if let Some(ref slack) = state.slack {
-            let channel = SlackChannelId(state.config.slack.channel_id.clone());
+            let channel = SlackChannelId(channel_id.clone());
             let mut message_blocks = vec![blocks::text_section(&format!(
                 "\u{23f8}\u{fe0f} *Agent Waiting*\n{}",
                 &input.message,
@@ -148,7 +149,7 @@ pub async fn handle(
 
                     // Notify Slack of timeout.
                     if let Some(ref slack) = state.slack {
-                        let channel = SlackChannelId(state.config.slack.channel_id.clone());
+                        let channel = SlackChannelId(channel_id.clone());
                         let msg = SlackMessage {
                             channel,
                             text: Some(format!(

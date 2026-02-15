@@ -82,13 +82,39 @@ pub struct AppState {
 /// MCP server implementation that exposes the nine monocoque-agent-rem tools.
 pub struct AgentRemServer {
     state: Arc<AppState>,
+    /// Per-session Slack channel override supplied via SSE query parameter.
+    channel_id_override: Option<String>,
 }
 
 impl AgentRemServer {
     /// Create a new MCP server bound to shared application state.
     #[must_use]
     pub fn new(state: Arc<AppState>) -> Self {
-        Self { state }
+        Self {
+            state,
+            channel_id_override: None,
+        }
+    }
+
+    /// Create a new MCP server with a per-session Slack channel override.
+    #[must_use]
+    pub fn with_channel_override(state: Arc<AppState>, channel_id: Option<String>) -> Self {
+        Self {
+            state,
+            channel_id_override: channel_id,
+        }
+    }
+
+    /// Return the effective Slack channel ID for this session.
+    ///
+    /// If a per-session override was supplied (e.g. via the `channel_id`
+    /// query parameter on the SSE URL), it takes precedence over the
+    /// global `config.slack.channel_id`.
+    #[must_use]
+    pub fn effective_channel_id(&self) -> &str {
+        self.channel_id_override
+            .as_deref()
+            .unwrap_or(&self.state.config.slack.channel_id)
     }
 
     /// Access the shared application state.
@@ -400,7 +426,7 @@ impl ServerHandler for AgentRemServer {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListResourcesResult, rmcp::ErrorData>> + Send + '_ {
-        let channel_id = self.state.config.slack.channel_id.clone();
+        let channel_id = self.effective_channel_id().to_owned();
         std::future::ready(Ok(crate::mcp::resources::slack_channel::list_resources(
             &channel_id,
         )))
@@ -423,12 +449,17 @@ impl ServerHandler for AgentRemServer {
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ReadResourceResult, rmcp::ErrorData>> + Send + '_ {
         let state = Arc::clone(&self.state);
+        let effective_channel = self.effective_channel_id().to_owned();
         async move {
-            crate::mcp::resources::slack_channel::read_resource(&request, &state)
-                .await
-                .map_err(|err| {
-                    rmcp::ErrorData::internal_error(format!("resource read failed: {err}"), None)
-                })
+            crate::mcp::resources::slack_channel::read_resource(
+                &request,
+                &state,
+                &effective_channel,
+            )
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(format!("resource read failed: {err}"), None)
+            })
         }
     }
 }

@@ -55,6 +55,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRemServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
+    let channel_id = context.service.effective_channel_id().to_owned();
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: AskApprovalInput =
@@ -115,7 +116,7 @@ pub async fn handle(
 
         // ── Post to Slack ────────────────────────────────────
         if let Some(ref slack) = state.slack {
-            let channel = SlackChannelId(state.config.slack.channel_id.clone());
+            let channel = SlackChannelId(channel_id.clone());
             let mut message_blocks = build_approval_blocks(
                 &input.title,
                 input.description.as_deref(),
@@ -199,7 +200,7 @@ pub async fn handle(
                     .await;
 
                 if let Some(ref slack) = state.slack {
-                    let channel = SlackChannelId(state.config.slack.channel_id.clone());
+                    let channel = SlackChannelId(channel_id.clone());
                     let msg = SlackMessage {
                         channel,
                         text: Some(format!(

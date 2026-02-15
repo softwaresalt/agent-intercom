@@ -48,6 +48,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRemServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
+    let channel_id = context.service.effective_channel_id().to_owned();
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: ForwardPromptInput = serde_json::from_value(serde_json::Value::Object(args))
@@ -94,7 +95,7 @@ pub async fn handle(
 
         // ── Post to Slack ────────────────────────────────────
         if let Some(ref slack) = state.slack {
-            let channel = SlackChannelId(state.config.slack.channel_id.clone());
+            let channel = SlackChannelId(channel_id.clone());
             let message_blocks = build_prompt_blocks(
                 &input.prompt_text,
                 input.prompt_type,
@@ -159,11 +160,11 @@ pub async fn handle(
                     .await;
 
                 if let Some(ref slack) = state.slack {
-                    let channel = SlackChannelId(state.config.slack.channel_id.clone());
+                    let channel = SlackChannelId(channel_id.clone());
                     let msg = SlackMessage {
                         channel,
                         text: Some(format!(
-                            "\u{23f1}\u{fe0f} Prompt '{}' timed out — auto-continuing",
+                            "\u{23f1}\u{fe0f} Prompt '{}' timed out \u{2014} auto-continuing",
                             truncate_text(&input.prompt_text, 60),
                         )),
                         blocks: Some(vec![blocks::severity_section(

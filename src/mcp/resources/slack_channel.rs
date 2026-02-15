@@ -107,6 +107,7 @@ pub fn list_resources(channel_id: &str) -> ListResourcesResult {
 pub async fn read_resource(
     request: &ReadResourceRequestParam,
     state: &Arc<AppState>,
+    effective_channel: &str,
 ) -> Result<ReadResourceResult> {
     let channel_id = parse_channel_uri(&request.uri).ok_or_else(|| {
         AppError::Config(format!(
@@ -115,10 +116,9 @@ pub async fn read_resource(
         ))
     })?;
 
-    let configured_channel = &state.config.slack.channel_id;
-    if channel_id != configured_channel {
+    if channel_id != effective_channel {
         return Err(AppError::Config(format!(
-            "channel '{channel_id}' does not match configured channel '{configured_channel}'"
+            "channel '{channel_id}' does not match configured channel '{effective_channel}'"
         )));
     }
 

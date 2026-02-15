@@ -14,7 +14,8 @@ use slack_morphism::prelude::{
     SlackApiViewsOpenRequest, SlackBlock, SlackChannelId, SlackClient,
     SlackClientEventsListenerEnvironment, SlackClientHyperHttpsConnector, SlackClientSession,
     SlackClientSocketModeConfig, SlackClientSocketModeListener, SlackHistoryMessage,
-    SlackMessageContent, SlackSocketModeListenerCallbacks, SlackTriggerId, SlackTs, SlackView,
+    SlackMessageContent, SlackSocketModeListenerCallbacks, SlackTeamId, SlackTriggerId, SlackTs,
+    SlackView,
 };
 use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::{error, info, warn};
@@ -102,17 +103,22 @@ impl SlackService {
         let connector = SlackClientHyperHttpsConnector::new()
             .map_err(|err| AppError::Slack(format!("failed to init slack connector: {err}")))?;
         let client = Arc::new(SlackClient::new(connector));
+        let team_id = if config.team_id.is_empty() {
+            None
+        } else {
+            Some(SlackTeamId::new(config.team_id.clone()))
+        };
         let bot_token = SlackApiToken {
             token_value: SlackApiTokenValue(config.bot_token.clone()),
             cookie: None,
-            team_id: None,
+            team_id: team_id.clone(),
             scope: None,
             token_type: Some(SlackApiTokenType::Bot),
         };
         let app_token = SlackApiToken {
             token_value: SlackApiTokenValue(config.app_token.clone()),
             cookie: None,
-            team_id: None,
+            team_id,
             scope: None,
             token_type: Some(SlackApiTokenType::App),
         };

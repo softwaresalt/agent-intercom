@@ -30,7 +30,14 @@
 			"/^powershell -NoLogo -Command \"Select-String -Path 'D:\\\\\\.cargo\\\\registry\\\\src\\\\index\\.crates\\.io-1949cf8c6b5b557f\\\\rmcp-0\\.5\\.0\\\\src\\\\\\*\\*\\\\\\*\\.rs' -Pattern 'struct Initialize'\"$/": {
 				"approve": true,
 				"matchCommandLine": true
-			}
+			},
+			"cargo doc": true,
+			"cargo metadata": true,
+			"Out-File": true,
+			"ForEach-Object": true,
+			"Out-Null": true,
+			"cargo clippy": true,
+			"cargo check": true
 		},
 		"powershell.cwd": "monocoque-agent-rem"
 	},

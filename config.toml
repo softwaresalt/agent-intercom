@@ -1,0 +1,44 @@
+# monocoque-agent-rem configuration
+#
+# Slack credentials are loaded from environment variables (not this file):
+#   SLACK_BOT_TOKEN  - Bot user OAuth token (xoxb-...)
+#   SLACK_APP_TOKEN  - App-level token for Socket Mode (xapp-...)
+#   SLACK_TEAM_ID    - Slack workspace team ID (T...)
+#
+# Alternatively, store them in the OS keychain under service
+# "monocoque-agent-rem" with keys: slack_bot_token, slack_app_token, slack_team_id
+#
+# Per-workspace Slack channel override:
+#   Each VS Code workspace can target a different Slack channel by appending
+#   a `channel_id` query parameter to the SSE URL in .vscode/mcp.json:
+#
+#     "url": "http://127.0.0.1:3000/sse?channel_id=C_WORKSPACE_CHANNEL"
+#
+#   When omitted, the global `slack.channel_id` below is used as the default.
+
+default_workspace_root = "D:\\Source\\GitHub\\monocoque-agent-rem"
+http_port = 3000
+ipc_name = "monocoque-agent-rem"
+max_concurrent_sessions = 3
+host_cli = "claude"
+host_cli_args = ["--stdio"]
+retention_days = 30
+authorized_user_ids = ["U_YOUR_SLACK_USER_ID"]
+
+[slack]
+channel_id = "C_YOUR_CHANNEL_ID"
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = true
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "Continue working on the current task. Pick up where you left off."
+
+[commands]
+status = "git status"
