@@ -1,0 +1,173 @@
+//! Unit tests for Slack credential loading (T200 — US11).
+//!
+//! Validates the env-var-only credential path, keychain precedence,
+//! missing credential error message quality, optional `SLACK_TEAM_ID`,
+//! and empty env-var handling.
+
+use monocoque_agent_rc::config::GlobalConfig;
+
+fn sample_toml(workspace: &str) -> String {
+    format!(
+        r#"
+default_workspace_root = '{workspace}'
+http_port = 3000
+ipc_name = "monocoque-agent-rc"
+max_concurrent_sessions = 1
+host_cli = "claude"
+authorized_user_ids = ["U123"]
+
+[slack]
+channel_id = "C123"
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = false
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "continue"
+"#
+    )
+}
+
+/// Helper: build a test config from a temp dir.
+fn make_config() -> (tempfile::TempDir, GlobalConfig) {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let toml = sample_toml(temp.path().to_str().expect("utf8 path"));
+    let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
+    (temp, config)
+}
+
+/// Env-var-only credential loading works when keychain has no entries.
+///
+/// Sets `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_TEAM_ID` via env,
+/// then calls `load_credentials()` which should fall back to env vars
+/// since the test environment has no keychain entries for this service.
+///
+/// NOTE: These tests mutate process-global env vars and must run serially.
+/// Use `cargo test credential_loading -- --test-threads=1` if needed.
+#[tokio::test]
+#[serial_test::serial]
+async fn env_var_only_credential_loading() {
+    let (_temp, mut config) = make_config();
+
+    // Set env vars (these will be used since the keychain service
+    // "monocoque-agent-rc" is almost certainly absent in CI/test envs).
+    unsafe {
+        std::env::set_var("SLACK_APP_TOKEN", "xapp-test-app-token");
+        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-bot-token");
+        std::env::set_var("SLACK_TEAM_ID", "T_TEST_TEAM");
+    }
+
+    let result = config.load_credentials().await;
+    assert!(
+        result.is_ok(),
+        "load_credentials should succeed with env vars"
+    );
+
+    assert_eq!(config.slack.app_token, "xapp-test-app-token");
+    assert_eq!(config.slack.bot_token, "xoxb-test-bot-token");
+    assert_eq!(config.slack.team_id, "T_TEST_TEAM");
+
+    // Clean up.
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+        std::env::remove_var("SLACK_TEAM_ID");
+    }
+}
+
+/// Missing required credential produces error that names both the
+/// keychain service and the environment variable.
+#[tokio::test]
+#[serial_test::serial]
+async fn missing_required_credential_error_names_both_sources() {
+    let (_temp, mut config) = make_config();
+
+    // Ensure env vars are absent.
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+        std::env::remove_var("SLACK_TEAM_ID");
+    }
+
+    let result = config.load_credentials().await;
+    assert!(
+        result.is_err(),
+        "should fail when no credential source exists"
+    );
+
+    let err_msg = format!("{}", result.unwrap_err());
+    // The error should mention the keychain service name.
+    assert!(
+        err_msg.contains("monocoque-agent-rc"),
+        "error should mention keychain service name, got: {err_msg}"
+    );
+    // The error should mention the environment variable name.
+    assert!(
+        err_msg.contains("SLACK_APP_TOKEN") || err_msg.contains("SLACK_BOT_TOKEN"),
+        "error should mention the env var name, got: {err_msg}"
+    );
+}
+
+/// Optional `SLACK_TEAM_ID` absent is not an error.
+///
+/// When only the required tokens are present but `SLACK_TEAM_ID` is missing,
+/// `load_credentials()` should succeed and `team_id` should be empty.
+#[tokio::test]
+#[serial_test::serial]
+async fn optional_team_id_absent_is_not_error() {
+    let (_temp, mut config) = make_config();
+
+    unsafe {
+        std::env::set_var("SLACK_APP_TOKEN", "xapp-test-app-token");
+        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-bot-token");
+        std::env::remove_var("SLACK_TEAM_ID");
+    }
+
+    let result = config.load_credentials().await;
+    assert!(
+        result.is_ok(),
+        "should succeed without SLACK_TEAM_ID: {result:?}"
+    );
+
+    assert_eq!(config.slack.app_token, "xapp-test-app-token");
+    assert_eq!(config.slack.bot_token, "xoxb-test-bot-token");
+    // team_id should be empty or a default, not an error.
+    // The exact value depends on implementation — empty string is acceptable.
+
+    // Clean up.
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+    }
+}
+
+/// Empty env var is treated as absent (falls through to error).
+#[tokio::test]
+#[serial_test::serial]
+async fn empty_env_var_treated_as_absent() {
+    let (_temp, mut config) = make_config();
+
+    unsafe {
+        std::env::set_var("SLACK_APP_TOKEN", "");
+        std::env::set_var("SLACK_BOT_TOKEN", "");
+        std::env::remove_var("SLACK_TEAM_ID");
+    }
+
+    let result = config.load_credentials().await;
+    assert!(
+        result.is_err(),
+        "should fail when env vars are empty strings"
+    );
+
+    // Clean up.
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+    }
+}

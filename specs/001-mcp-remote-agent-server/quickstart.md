@@ -31,7 +31,15 @@ The build produces two binaries:
 
 ### 2. Store Slack credentials
 
-Credentials are loaded from the OS keychain first, with environment variables as fallback.
+Credentials are loaded from the OS keychain first, with environment variables as fallback. The server checks each source in order and uses the first non-empty value found.
+
+| Credential | Keychain key | Env var | Required |
+|------------|-------------|---------|----------|
+| App-level token (Socket Mode) | `slack_app_token` | `SLACK_APP_TOKEN` | **Yes** |
+| Bot user OAuth token | `slack_bot_token` | `SLACK_BOT_TOKEN` | **Yes** |
+| Workspace team ID | `slack_team_id` | `SLACK_TEAM_ID` | No (optional) |
+
+Keychain service name: `monocoque-agent-rc`
 
 **Option A: OS keychain (recommended)**
 
@@ -41,6 +49,8 @@ monocoque-ctl credential set slack_app_token
 # (prompts for token value)
 monocoque-ctl credential set slack_bot_token
 # (prompts for token value)
+# Optional: store team ID in keychain
+monocoque-ctl credential set slack_team_id
 ```
 
 **Option B: Environment variables (fallback)**
@@ -48,7 +58,11 @@ monocoque-ctl credential set slack_bot_token
 ```bash
 export SLACK_APP_TOKEN="xapp-1-..."
 export SLACK_BOT_TOKEN="xoxb-..."
+# Optional: set team ID
+export SLACK_TEAM_ID="T0123456789"
 ```
+
+> **Note**: If both keychain and env var are set for the same credential, the keychain value takes precedence. Empty values are treated as absent. `SLACK_TEAM_ID` is optional and will not cause an error if missing from both sources.
 
 ### 3. Create the global configuration
 

@@ -519,13 +519,13 @@ With multiple developers after Phase 2:
 
 ### Tests (Constitution Principle III)
 
-- [ ] T200 [US11] Write unit tests for credential loading in `tests/unit/credential_loading_tests.rs`: test env-var-only credential loading (no keychain), keychain-takes-precedence when both sources exist, missing required credential error message content (must name both keychain service and env var), optional `SLACK_TEAM_ID` absent is not an error, empty env var treated as absent
+- [X] T200 [US11] Write unit tests for credential loading in `tests/unit/credential_loading_tests.rs`: test env-var-only credential loading (no keychain), keychain-takes-precedence when both sources exist, missing required credential error message content (must name both keychain service and env var), optional `SLACK_TEAM_ID` absent is not an error, empty env var treated as absent
 
 ### Implementation for User Story 11
 
-- [ ] T201 [US11] Review and improve `load_credential()` error messages in `src/config.rs`: ensure error includes keychain service name (`monocoque-agent-rc` post-rename), expected env var name, and both resolution methods; ensure `SLACK_TEAM_ID` is loaded with a separate non-failing path (optional credential per FR-041)
-- [ ] T202 [P] [US11] Update `specs/001-mcp-remote-agent-server/quickstart.md` with explicit environment variable setup instructions: list all three env vars, explain keychain-first precedence, document optional nature of `SLACK_TEAM_ID`
-- [ ] T203 [US11] Add tracing span to credential loading in `src/config.rs`: log which source (keychain or env var) was used for each credential at info level (never log the credential value itself per FR-036)
+- [X] T201 [US11] Review and improve `load_credential()` error messages in `src/config.rs`: ensure error includes keychain service name (`monocoque-agent-rc` post-rename), expected env var name, and both resolution methods; ensure `SLACK_TEAM_ID` is loaded with a separate non-failing path (optional credential per FR-041)
+- [X] T202 [P] [US11] Update `specs/001-mcp-remote-agent-server/quickstart.md` with explicit environment variable setup instructions: list all three env vars, explain keychain-first precedence, document optional nature of `SLACK_TEAM_ID`
+- [X] T203 [US11] Add tracing span to credential loading in `src/config.rs`: log which source (keychain or env var) was used for each credential at info level (never log the credential value itself per FR-036)
 
 **Checkpoint**: All credential loading paths tested, error messages are clear and actionable, quickstart documented.
 

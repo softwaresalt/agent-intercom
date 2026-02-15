@@ -174,15 +174,19 @@ impl GlobalConfig {
     ///
     /// Tries the `monocoque-agent-rc` keyring service first, then falls
     /// back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment variables.
+    /// `SLACK_TEAM_ID` is optional (FR-041) and will not cause an error if
+    /// absent.
     ///
     /// # Errors
     ///
     /// Returns `AppError::Config` if neither keychain nor env vars provide
-    /// the required tokens.
+    /// the required tokens (`slack_app_token`, `slack_bot_token`).
     pub async fn load_credentials(&mut self) -> Result<()> {
+        let _span = tracing::info_span!("load_credentials").entered();
         self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
         self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
-        self.slack.team_id = load_credential("slack_team_id", "SLACK_TEAM_ID").await?;
+        // SLACK_TEAM_ID is optional per FR-041 — absence is not an error.
+        self.slack.team_id = load_optional_credential("slack_team_id", "SLACK_TEAM_ID").await;
         Ok(())
     }
 
@@ -234,19 +238,38 @@ impl GlobalConfig {
     }
 }
 
+/// Keychain service identifier used for credential storage.
+const KEYCHAIN_SERVICE: &str = "monocoque-agent-rc";
+
 /// Load a single credential from OS keychain with env-var fallback.
+///
+/// Resolution order:
+/// 1. OS keychain service `monocoque-agent-rc`, key `{keyring_key}`
+/// 2. Environment variable `{env_key}`
+///
+/// Empty values from either source are treated as absent.
+///
+/// # Errors
+///
+/// Returns `AppError::Config` with a message naming both the keychain
+/// service and the environment variable so the operator knows exactly
+/// which sources were checked.
 async fn load_credential(keyring_key: &str, env_key: &str) -> Result<String> {
     let key = keyring_key.to_owned();
+    let _span = tracing::info_span!("load_credential", key = keyring_key, env = env_key).entered();
 
     // Try OS keychain first via spawn_blocking (keyring is synchronous I/O).
     let keychain_result = tokio::task::spawn_blocking(move || {
-        keyring::Entry::new("monocoque-agent-rc", &key).and_then(|entry| entry.get_password())
+        keyring::Entry::new(KEYCHAIN_SERVICE, &key).and_then(|entry| entry.get_password())
     })
     .await
     .map_err(|err| AppError::Config(format!("keychain task panicked: {err}")))?;
 
     match keychain_result {
-        Ok(value) if !value.is_empty() => return Ok(value),
+        Ok(value) if !value.is_empty() => {
+            tracing::info!(key = keyring_key, source = "keychain", "credential loaded");
+            return Ok(value);
+        }
         Ok(_) => {
             warn!(key = keyring_key, "keychain entry is empty, trying env var");
         }
@@ -259,10 +282,31 @@ async fn load_credential(keyring_key: &str, env_key: &str) -> Result<String> {
         }
     }
 
-    // Fallback to environment variable.
-    env::var(env_key).map_err(|_| {
-        AppError::Config(format!(
-            "credential {keyring_key} not found in keychain or {env_key} env var"
-        ))
-    })
+    // Fallback to environment variable (empty value treated as absent).
+    match env::var(env_key) {
+        Ok(value) if !value.is_empty() => {
+            tracing::info!(key = keyring_key, source = "env", "credential loaded");
+            Ok(value)
+        }
+        _ => Err(AppError::Config(format!(
+            "credential `{keyring_key}` not found: checked keychain service \
+             `{KEYCHAIN_SERVICE}` and environment variable `{env_key}`"
+        ))),
+    }
+}
+
+/// Load an optional credential — returns an empty string if absent.
+///
+/// Uses the same resolution order as [`load_credential`] but never fails.
+async fn load_optional_credential(keyring_key: &str, env_key: &str) -> String {
+    match load_credential(keyring_key, env_key).await {
+        Ok(value) => value,
+        Err(_) => {
+            tracing::info!(
+                key = keyring_key,
+                "optional credential not found, using empty default"
+            );
+            String::new()
+        }
+    }
 }
