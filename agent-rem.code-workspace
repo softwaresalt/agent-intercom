@@ -37,7 +37,15 @@
 			"ForEach-Object": true,
 			"Out-Null": true,
 			"cargo clippy": true,
-			"cargo check": true
+			"cargo check": true,
+			"/^pwsh -File \\.specify/scripts/powershell/setup-plan\\.ps1 -Json$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
+			"/^pwsh -File \\.specify/scripts/powershell/update-agent-context\\.ps1 -AgentType copilot$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
 		},
 		"powershell.cwd": "monocoque-agent-rem"
 	},

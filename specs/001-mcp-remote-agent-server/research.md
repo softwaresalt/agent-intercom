@@ -260,3 +260,82 @@ DELETE FROM session WHERE id = $id;
 - Diff application (file path, hash match, write result)
 - Policy evaluation (tool/command checked, matched rule, auto-approve decision)
 - Credential loading (source: keychain or env var, key name — never the value)
+
+## 14. Slack Environment Variable Configuration (US11)
+
+**Decision**: Existing `load_credential()` implementation already satisfies FR-038 through FR-041. No new code required — only explicit specification and test coverage.
+
+**Rationale**: The `config.rs` `load_credential()` function already implements the keychain-first, env-var-fallback pattern for `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID`. The `load_credentials()` method calls this for all three credentials. The `SlackConfig` struct already has `#[serde(skip)]` fields for `app_token`, `bot_token`, and `team_id` that are populated at runtime.
+
+**Verification needed**:
+
+- Confirm error messages when credentials are missing are clear and actionable (identify both keychain service name and env var name).
+- Confirm `SLACK_TEAM_ID` is truly optional — current code in `slack/client.rs` handles empty team_id by connecting without workspace scoping.
+- Add dedicated test coverage for the env-var-only path, keychain-takes-precedence path, and missing-credential error message path.
+
+**Alternatives considered**: None — the existing implementation is correct. This user story formalizes it.
+
+## 15. Dynamic Slack Channel Selection via Query String (US12)
+
+**Decision**: Existing `extract_channel_id()` and `channel_id_override` implementation in `src/mcp/sse.rs` and `src/mcp/handler.rs` already satisfies FR-042 through FR-044. No new code required — only explicit specification, config documentation, and test coverage.
+
+**Rationale**: The SSE transport already extracts `channel_id` from the query string, passes it to `AgentRemServer::with_channel_override()`, and the `effective_channel_id()` method returns the override or the default. Each SSE connection gets its own `AgentRemServer` instance, ensuring session isolation. A semaphore-protected inbox pattern prevents race conditions during concurrent connection establishment.
+
+**Verification needed**:
+
+- Confirm the semaphore-inbox pattern correctly handles rapid concurrent SSE connections (each factory call consumes the right channel_id).
+- Add integration test for two concurrent SSE sessions with different channel_ids posting to different channels independently.
+- Confirm stdio transport always uses the default channel (no override mechanism).
+- Document the `?channel_id=` parameter in `quickstart.md` and `config.toml` comments.
+
+**Alternatives considered**: None — the existing implementation is correct. This user story formalizes it.
+
+## 16. Service Rebranding from agent-rem to agent-rc (US13)
+
+**Decision**: Mechanical rename of all occurrences of `agent-rem` / `agent_rem` to `agent-rc` / `agent_rc` across the entire codebase. No migration tooling for old keychain entries or SurrealDB databases.
+
+**Rationale**: The rename is a one-time mechanical change performed before external users adopt the current naming. Providing automatic migration would add complexity for a scenario that only affects internal development (no external users exist yet). The operator re-stores credentials under the new service name; the server creates a fresh database.
+
+**Scope analysis (from codebase grep)**:
+
+| Category | Files affected | Approximate occurrences |
+|----------|---------------|------------------------|
+| Source code (`src/`) | `main.rs`, `config.rs`, `handler.rs`, `db.rs`, `slack_channel.rs` | ~36 |
+| CLI (`ctl/main.rs`) | 1 | ~4 |
+| Tests (`tests/`) | Multiple | ~75 |
+| Cargo.toml | 1 | ~2 (package name, binary name) |
+| config.toml | 1 | ~4 |
+| README.md | 1 | TBD |
+| Spec/plan docs (`specs/`) | Multiple | Many (documentation references) |
+| Constitution | 1 | ~5 |
+| Agent context files | 1 | TBD |
+
+**What changes**:
+
+- Cargo.toml: `name = "monocoque-agent-rc"`, `[[bin]] name = "monocoque-agent-rc"`
+- SurrealDB: namespace stays `monocoque`, database changes from `agent_rem` to `agent_rc`
+- Keychain service: `monocoque-agent-rc` (was `monocoque-agent-rem`)
+- IPC pipe name: `monocoque-agent-rc` (default in config)
+- CLI help text and tracing output
+- All `use monocoque_agent_rem::` imports become `use monocoque_agent_rc::`
+- All test extern crate references
+
+**What does NOT change**:
+
+- `monocoque/nudge` notification method prefix (the `monocoque` namespace is the product, not the binary name)
+- `monocoque-ctl` binary name (it's the control CLI, not the agent binary)
+- `.monocoque/` workspace config directory name
+- `/monocoque` Slack slash command prefix
+- Repository name (that's a separate GitHub operation, out of scope for the code rename)
+
+**Risk assessment**:
+
+- Low risk — all changes are string replacements with no logic changes.
+- Compilation (`cargo build`) serves as the primary verification gate — any missed reference will fail to compile.
+- `SC-015` (grep validation) serves as the final verification gate.
+
+**Alternatives considered**:
+
+- Providing a migration script for keychain and DB — rejected per spec (US13 acceptance scenario 7: "server does NOT automatically migrate keychain entries").
+- Renaming the repository simultaneously — out of scope; can be done independently.
+- Keeping `agent-rem` as an alias — adds confusion; clean break is simpler.

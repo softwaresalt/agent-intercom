@@ -230,9 +230,10 @@ The auto-approve configuration loaded from `.monocoque/settings.json` relative t
 | Field | Type | Description |
 |-------|------|-------------|
 | `default_workspace_root` | `string` | Default workspace root for the primary stdio agent (optional; per-session override takes precedence) |
-| `slack.app_token` | `string` | Slack App-Level Token for Socket Mode — loaded from OS keychain (`monocoque-agent-rem/slack_app_token`) or `SLACK_APP_TOKEN` env var |
-| `slack.bot_token` | `string` | Slack Bot User OAuth Token — loaded from OS keychain (`monocoque-agent-rem/slack_bot_token`) or `SLACK_BOT_TOKEN` env var |
-| `slack.channel_id` | `string` | Target Slack channel ID |
+| `slack.app_token` | `string` | Slack App-Level Token for Socket Mode — loaded from OS keychain (`monocoque-agent-rc/slack_app_token`) or `SLACK_APP_TOKEN` env var (FR-038, FR-039, FR-046) |
+| `slack.bot_token` | `string` | Slack Bot User OAuth Token — loaded from OS keychain (`monocoque-agent-rc/slack_bot_token`) or `SLACK_BOT_TOKEN` env var (FR-038, FR-039, FR-046) |
+| `slack.team_id` | `string` | Slack workspace team ID — loaded from OS keychain (`monocoque-agent-rc/slack_team_id`) or `SLACK_TEAM_ID` env var; optional (FR-041) |
+| `slack.channel_id` | `string` | Default target Slack channel ID. Can be overridden per-session via the `?channel_id=` query parameter on the SSE endpoint (FR-042, FR-043) |
 | `authorized_user_ids` | `string[]` | Slack user IDs permitted to create sessions |
 | `max_concurrent_sessions` | `int` | Maximum concurrent sessions (default: 3) |
 | `host_cli` | `string` | CLI binary for spawning sessions (e.g., `claude`, `gh`) |
@@ -247,7 +248,7 @@ The auto-approve configuration loaded from `.monocoque/settings.json` relative t
 | `stall.default_nudge_message` | `string` | Default nudge continuation message |
 | `commands` | `map<string, string>` | Custom command alias → shell command mapping |
 | `http_port` | `int` | Port for SSE transport (default: 3000) |
-| `ipc_name` | `string` | Named pipe / socket name (default: `monocoque-agent-rem`) |
+| `ipc_name` | `string` | Named pipe / socket name (default: `monocoque-agent-rc`) (FR-048) |
 | `retention_days` | `int` | Days after session termination before data is purged (default: 30) |
 
 ### RegistryCommand (derived from GlobalConfig)

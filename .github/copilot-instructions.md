@@ -1,4 +1,8 @@
-# monocoque-agent-rem Development Guidelines
+---
+description: Shared Monocoque Agent RC development guidelines for custom agents.
+maturity: stable
+---
+# monocoque-agent-rc Development Guidelines
 
 Auto-generated from all feature plans. Last updated: 2026-02-09
 
@@ -86,5 +90,54 @@ cargo fmt && cargo clippy && cargo test
 # Bad: pipe to something other than Out-File/Set-Content/Out-String
 cargo test | Select-String "FAILED" | Remove-Item foo.txt
 ```
+### Full List of Auto-Approve Commands with RegEx
 
+"chat.tools.terminal.autoApprove": {
+    ".specify/scripts/bash/": true,
+    ".specify/scripts/powershell/": true,
+    "/^cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "/^& cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "/^cargo --(help|version|verbose|quiet|release|features)(\\s[^;|&`]*)?$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "/^git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "/^& git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "/^(Out-File|Set-Content|Add-Content|Get-Content|Get-ChildItem|Copy-Item|Move-Item|New-Item|Test-Path)(\\s[^;|&`]*)?$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "/^(echo|dir|mkdir|where\\.exe|vsWhere\\.exe|rustup|rustc|refreshenv)(\\s[^;|&`]*)?$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "/^cmd /c \"cargo (test|check|clippy|fmt|build|doc|bench)(\\s[^;|&`]*)?\"(\\s*[;&|]+\\s*echo\\s.*)?$/": {
+        "approve": true,
+        "matchCommandLine": true
+    },
+    "New-Item": true,
+    "Out-Null": true,
+    "cargo build": true,
+    "cargo check": true,
+    "cargo doc": true,
+    "cargo test": true,
+    "git commit": true,
+    "ForEach-Object": true,
+    "cargo clippy": true,
+    "cargo fmt": true,
+    "git add": true,
+    "git push": true
+}
 <!-- MANUAL ADDITIONS END -->

@@ -32,7 +32,7 @@ Implements a single phase from a feature specification's task plan. The workflow
 Invoke the skill with both required parameters:
 
 ```text
-Build feature 001-mcp-remote-agent-server phase <phase-number>
+Build feature 001-<spec-name> phase <phase-number>
 ```
 
 The skill runs autonomously through all required steps, halting only on unrecoverable errors or constitution violations requiring human judgment.
@@ -54,8 +54,11 @@ The skill runs autonomously through all required steps, halting only on unrecove
 * Read `specs/${input:spec-name}/data-model.md` if it exists, for entity definitions and relationships.
 * Read `specs/${input:spec-name}/contracts/` if it exists, for MCP tool JSON-RPC specifications and error contracts.
 * Read `specs/${input:spec-name}/research.md` if it exists, for technical decisions and constraints.
+* Read `specs/${input:spec-name}/quickstart.md` if it exists, for integration scenarios.
 * Read `.github/copilot-instructions.md` for the project constitution, coding standards, and session memory requirements.
-* Read `.github/agents/rust-eng.implement.agent.md` for language-specific engineering standards.
+* Read `.github/agents/rust-engineer.agent.md` for language-specific engineering standards.
+* Read `.github/agents/rust-mcp-expert.agent.md` for MCP protocol patterns, rmcp SDK usage, transport configuration, and tool/prompt/resource handler implementation.
+* Read `.github/instructions/rust-mcp-server.instructions.md` for MCP server development best practices including error handling with `ErrorData`, state management, and testing patterns.
 * Build a task execution list respecting dependencies: sequential tasks run in order, tasks marked `[P]` can run in parallel.
 * Identify which tasks are tests and which are implementation; TDD order means test tasks execute before their corresponding implementation tasks.
 * Report a summary of the phase scope: task count, estimated files affected, and user story coverage.
@@ -64,7 +67,18 @@ The skill runs autonomously through all required steps, halting only on unrecove
 
 * Read `specs/${input:spec-name}/plan.md` and locate the Constitution Check table.
 * Verify every principle listed in the table is satisfied for the work about to begin.
-* If `specs/${input:spec-name}/checklists/` exists, scan all checklist files and verify completion status.
+* If `specs/${input:spec-name}/checklists/` exists, scan all checklist files and for each checklist count:
+  * Total items: all lines matching `- [ ]` or `- [X]` or `- [x]`
+  * Completed items: lines matching `- [X]` or `- [x]`
+  * Incomplete items: lines matching `- [ ]`
+* Create a status table:
+```text
+| Checklist   | Total | Completed | Incomplete | Status |
+|-------------|-------|-----------|------------|--------|
+| ux.md       | 12    | 12        | 0          | PASS   |
+| test.md     | 8     | 5         | 3          | FAIL   |
+| security.md | 6     | 6         | 0          | PASS   |
+```
 * If any constitution principle is violated or any required checklist is incomplete, halt and report the violation with actionable remediation steps.
 * If all gates pass, proceed to Step 3.
 
@@ -81,10 +95,11 @@ Execute tasks in dependency order following TDD discipline:
      * Diff/Policy tasks (touching `diff/`, `policy/`): apply General Rust and Error Handling constraints.
      * IPC tasks (touching `ipc/`): apply General Rust and Error Handling constraints.
    * Read any existing source files that the task modifies.
-   * Implement the task following the coding standards from the rust-eng.implement agent, injecting only the task-type-specific constraints identified above.
+   * For test tasks: write the test first, then run it and **confirm the test fails** before implementing the production code (red-green TDD).
+   * Implement the task following the coding standards from the rust-engineer agent, injecting only the task-type-specific constraints identified above.
    * After implementing each task, run `cargo check` to verify compilation.
    * If compilation fails, diagnose the error, fix it, and re-run `cargo check` until it passes.
-   * Mark the completed task as `[X]` in `specs/${input:spec-name}/tasks.md`.
+   * A task is complete only when `cargo check` passes **and** relevant tests pass. Mark the completed task as `[X]` in `specs/${input:spec-name}/tasks.md`.
 
 2. Follow these implementation rules:
    * Setup tasks first (project structure, dependencies, configuration).
@@ -93,7 +108,12 @@ Execute tasks in dependency order following TDD discipline:
    * Sequential tasks (no `[P]` marker) must complete in listed order.
    * Tasks affecting the same files must run sequentially regardless of markers.
 
-3. Track architectural decisions made during implementation for recording in Step 6.
+3. Error handling during build:
+   * Halt execution if any sequential task fails. Do not proceed to the next task until the failure is resolved.
+   * For parallel tasks `[P]`, continue with successful tasks and report failed ones.
+   * Provide clear error messages with context for debugging.
+   * If implementation cannot proceed, report the blocker and suggest next steps.
+4. Track architectural decisions made during implementation for recording in Step 6.
 
 ### Step 4: Test Phase (Iterative)
 
@@ -118,12 +138,13 @@ Return to Step 3 if test failures reveal missing implementation work. Continue i
 Re-check the constitution after implementation is complete:
 
 * Verify `#![forbid(unsafe_code)]` is maintained; no `unsafe` blocks introduced.
-* Verify no `unwrap()` or `expect()` calls exist in library code paths (workspace lint `clippy::unwrap_used = "deny"` and `clippy::expect_used = "deny"`).
+* Verify no `unwrap()` or `expect()` calls exist in library code paths.
 * Verify all new public items have `///` doc comments.
 * Verify error handling uses `AppError` variants from `src/errors.rs` with descriptive lowercase messages.
 * Verify any new async code follows tokio patterns (no mutex guards held across `.await` points, `CancellationToken` for shutdown coordination).
 * Verify all Slack message posting routes through the rate-limited message queue.
 * Verify all file path operations validate against the workspace root via `starts_with()`.
+* Verify test coverage aligns with the 80% target from the constitution.
 * If any violation is found, return to Step 3 to remediate before proceeding.
 
 ### Step 6: Record Architectural Decisions
@@ -141,8 +162,9 @@ For each significant decision made during the build phase:
 * Decisions worth recording include: dependency choices, MCP tool design trade-offs, data model changes, SurrealDB workarounds, Slack interaction patterns, rmcp SDK patterns, error handling strategies, and performance trade-offs.
 * Skip this step if no significant architectural decisions were made during the phase.
 
-### Step 7: Record Session Memory
+### Step 7: Record Session Memory (Mandatory Gate)
 
+This step is a hard gate. The phase is not complete until the memory file exists on disk. Do not skip this step under any circumstances, including context pressure or time constraints.
 Persist the full session details to `.copilot-tracking/memory/` following the project's session memory requirements:
 
 * Create a memory file at `.copilot-tracking/memory/{YYYY-MM-DD}/{spec-name}-phase-{N}-memory.md` where the date is today and N is the phase number.
@@ -153,8 +175,9 @@ Persist the full session details to `.copilot-tracking/memory/` following the pr
   * Next Steps: what the next phase should address, any open questions, known issues
   * Context to Preserve: source file references, agent references, unresolved questions
 * Use the existing memory files in `.copilot-tracking/memory/` as format examples.
+* After writing the file, verify it exists by reading it back. If the file is missing or empty, halt and retry.
 
-### Step 8: Pre-Commit Review
+### Step 8: Stage and Commit
 
 1. Review all changes made during the phase to ensure they align with the completed tasks and constitution.
 2. Review the ADRs created in Step 6 for clarity and completeness.
@@ -175,9 +198,23 @@ Finalize all changes with a Git commit:
 5. Run `git push` to sync the commit to the remote repository.
 6. Report the commit hash and a summary of changes committed.
 
+### Step 10: Compact Context (Mandatory Gate)
+This step is a hard gate. The phase is not complete until context compaction has run and a checkpoint file exists. Do not skip this step, even if context space appears sufficient. When running in full-spec loop mode, the orchestrator verifies checkpoint existence before advancing to the next phase.
+1. Run the `compact-context` skill (located at `.github/skills/compact-context/SKILL.md`).
+2. Follow all steps defined in that skill: gather session state, write checkpoint, report, and compact.
+3. Verify a checkpoint file was created in `.copilot-tracking/checkpoints/` during this execution. If missing, retry the compact-context skill.
+### Phase Completion Signal
+After Step 10 completes, the phase is fully done. Report the following completion signal for the orchestrator to consume:
+* **Phase**: `{phase-number}` — `{phase title}`
+* **Status**: COMPLETE
+* **Memory file**: `.copilot-tracking/memory/{YYYY-MM-DD}/{spec-name}-phase-{N}-memory.md`
+* **Checkpoint file**: `.copilot-tracking/checkpoints/{YYYY-MM-DD}-{HHmm}-checkpoint.md`
+* **Commit hash**: `{hash}`
+* **Tasks completed**: `{count}`
+The orchestrator uses this signal to verify all gates passed before looping to the next phase.
 ## Troubleshooting
 
-### SurrealDB embedded behavioral differences
+### SurrealDB v2 SDK behavioral differences
 
 Refer to session memory at `.copilot-tracking/memory/` for documented workarounds including `Thing` deserialization via `*Row` structs, `SCHEMAFULL` table DDL patterns, and record ID serialization from `surrealdb::sql::Thing` to `String`.
 

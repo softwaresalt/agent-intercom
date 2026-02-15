@@ -495,3 +495,123 @@ With multiple developers after Phase 2:
 - All model structs use `#[derive(Serialize, Deserialize, Debug, Clone)]`
 - All MCP tool handlers emit tracing spans per FR-037
 - All Slack interactions verify session owner per FR-013
+
+---
+
+# Tasks Addendum: US11–US13 (2026-02-14)
+
+**Input**: Plan addendum from `specs/001-mcp-remote-agent-server/plan.md` (Phases 15–17)
+**Prerequisites**: All Phases 1–14 complete (T001–T098, T100–T128)
+
+**Tests**: Test tasks included per Constitution Principle III (Test-First Development). Run `cargo test` / `cargo clippy` after each phase.
+
+**Organization**: Three new user stories from spec.md addendum, each in its own phase.
+
+**Recommended Execution Order**: Phase 17 (US13: Rename) → Phase 15 (US11: Env Vars) → Phase 16 (US12: Channel). Rename first avoids double-editing new files. See Dependencies section below.
+
+---
+
+## Phase 15: User Story 11 — Slack Environment Variable Configuration (Priority: P1)
+
+**Goal**: Validate and formalize the existing credential loading behavior; ensure error messages are clear and actionable.
+
+**Independent Test**: Unset keychain entries, set `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN`/`SLACK_TEAM_ID` as env vars, start server, verify successful Slack connection.
+
+### Tests (Constitution Principle III)
+
+- [ ] T200 [US11] Write unit tests for credential loading in `tests/unit/credential_loading_tests.rs`: test env-var-only credential loading (no keychain), keychain-takes-precedence when both sources exist, missing required credential error message content (must name both keychain service and env var), optional `SLACK_TEAM_ID` absent is not an error, empty env var treated as absent
+
+### Implementation for User Story 11
+
+- [ ] T201 [US11] Review and improve `load_credential()` error messages in `src/config.rs`: ensure error includes keychain service name (`monocoque-agent-rc` post-rename), expected env var name, and both resolution methods; ensure `SLACK_TEAM_ID` is loaded with a separate non-failing path (optional credential per FR-041)
+- [ ] T202 [P] [US11] Update `specs/001-mcp-remote-agent-server/quickstart.md` with explicit environment variable setup instructions: list all three env vars, explain keychain-first precedence, document optional nature of `SLACK_TEAM_ID`
+- [ ] T203 [US11] Add tracing span to credential loading in `src/config.rs`: log which source (keychain or env var) was used for each credential at info level (never log the credential value itself per FR-036)
+
+**Checkpoint**: All credential loading paths tested, error messages are clear and actionable, quickstart documented.
+
+---
+
+## Phase 16: User Story 12 — Dynamic Slack Channel Selection (Priority: P2)
+
+**Goal**: Validate and formalize the existing per-session channel override via SSE query parameter.
+
+**Independent Test**: Connect two SSE agents with different `?channel_id=` values, invoke `remote_log` from each, verify messages appear in different channels.
+
+### Tests (Constitution Principle III)
+
+- [ ] T204 [US12] Write integration test for channel override in `tests/integration/channel_override_tests.rs`: test SSE connection with `?channel_id=C_TEST` uses override, SSE connection without `?channel_id=` uses default, SSE connection with empty `?channel_id=` uses default, two concurrent SSE sessions with different `channel_id` values route independently
+
+### Implementation for User Story 12
+
+- [ ] T205 [P] [US12] Update `config.toml` comments to document the `?channel_id=` query parameter on the SSE endpoint, with example `.vscode/mcp.json` configuration showing `channel_id` usage
+- [ ] T206 [P] [US12] Update `specs/001-mcp-remote-agent-server/quickstart.md` with multi-workspace channel configuration instructions and example SSE URL with `?channel_id=`
+- [ ] T207 [US12] Verify `extract_channel_id()` in `src/mcp/sse.rs` handles URL-encoded values and edge cases: multiple `channel_id` params (first wins), `channel_id` with no `=`, special characters; add unit tests if gaps found
+
+**Checkpoint**: Channel override behavior validated with tests, documented in config and quickstart.
+
+---
+
+## Phase 17: User Story 13 — Service Rebranding to Remote Control (Priority: P1)
+
+**Goal**: Rename all references from `monocoque-agent-rem` / `agent_rem` to `monocoque-agent-rc` / `agent_rc` across the entire codebase.
+
+**Independent Test**: After rename, `cargo build` produces `monocoque-agent-rc`, `cargo test` passes, grep finds zero remaining `agent.rem` references in non-changelog files.
+
+### Rename Categories
+
+| Pattern to find | Replace with |
+|----------------|--------------|
+| `monocoque-agent-rem` | `monocoque-agent-rc` |
+| `monocoque_agent_rem` | `monocoque_agent_rc` |
+| `agent_rem` (SurrealDB database) | `agent_rc` |
+| `agent-rem` (documentation, workspace file) | `agent-rc` |
+
+### Implementation for User Story 13
+
+- [ ] T208 [US13] Rename `Cargo.toml`: update `[package] name` from `monocoque-agent-rem` to `monocoque-agent-rc` and `[[bin]] name` from `monocoque-agent-rem` to `monocoque-agent-rc`
+- [ ] T209 [US13] Rename source code references in `src/`: update `monocoque-agent-rem` and `monocoque_agent_rem` to `monocoque-agent-rc` and `monocoque_agent_rc` across `src/main.rs`, `src/config.rs`, `src/persistence/db.rs`, `src/mcp/handler.rs`, `src/mcp/resources/slack_channel.rs`
+- [ ] T210 [US13] Rename CLI references in `ctl/main.rs`: update `monocoque-agent-rem` / `monocoque_agent_rem` to `monocoque-agent-rc` / `monocoque_agent_rc`
+- [ ] T211 [P] [US13] Rename `config.toml` references: update comments and default values referencing `monocoque-agent-rem` to `monocoque-agent-rc`
+- [ ] T212 [US13] Rename test references in `tests/`: update all `monocoque_agent_rem` crate references to `monocoque_agent_rc` (~75 occurrences across all test files)
+- [ ] T213 [P] [US13] Rename documentation references: update `README.md`, `specs/001-mcp-remote-agent-server/quickstart.md`, all `specs/**/*.md` files, `.specify/memory/constitution.md`, `.github/copilot-instructions.md`, `agent-rem.code-workspace`
+- [ ] T214 [US13] Verify compilation: run `cargo build` and confirm binary is named `monocoque-agent-rc`
+- [ ] T215 [US13] Verify tests: run `cargo test` and confirm all tests pass with renamed crate
+- [ ] T216 [US13] Verify naming consistency: grep the entire workspace for `agent.rem` (regex) and confirm zero matches in non-changelog files (SC-015)
+- [ ] T217 [US13] Run `cargo clippy -- -D warnings` and confirm zero warnings
+
+**Checkpoint**: Full rename complete — binary, crate, keychain, DB, IPC, docs all use `monocoque-agent-rc`. Zero `agent-rem` / `agent_rem` references remain.
+
+---
+
+## Dependencies & Execution Order (US11–US13)
+
+### Phase Dependencies
+
+```text
+Phase 15 (US11) ─── depends on ──→ Phase 2 (Foundational) ✅ complete
+Phase 16 (US12) ─── depends on ──→ Phase 2 (Foundational) ✅ complete
+Phase 17 (US13) ─── depends on ──→ Phase 2 (Foundational) ✅ complete
+```
+
+### Recommended Execution Order
+
+```text
+Phase 17 (US13: Rename) → Phase 15 (US11: Env Vars) → Phase 16 (US12: Channel)
+```
+
+**Rationale**: Perform the rename first so that all new test files and documentation written for US11/US12 use the correct `monocoque-agent-rc` name from the start, avoiding double-editing.
+
+### Parallel Opportunities
+
+- T200–T203 (US11) can run in parallel with T204–T207 (US12) — different files
+- T208–T213 (US13 rename) must be sequential within the phase (Cargo.toml first, then source, then tests, then docs)
+- T214–T217 (US13 verification) must follow all rename tasks
+- T211 and T213 can run in parallel (different file sets)
+
+### Verification Gates
+
+| Phase | Gate | Command |
+|-------|------|---------|
+| 15 (US11) | All credential tests pass | `cargo test credential_loading` |
+| 16 (US12) | All channel override tests pass | `cargo test channel_override` |
+| 17 (US13) | Build + test + grep zero matches | `cargo build` then `cargo test` then `grep -r "agent.rem" src/ tests/ ctl/ Cargo.toml` |

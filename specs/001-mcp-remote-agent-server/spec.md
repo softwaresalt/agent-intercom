@@ -206,6 +206,62 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 
 ---
 
+### User Story 11 - Slack Environment Variable Configuration (Priority: P1)
+
+The server reads Slack connectivity credentials from well-known user environment variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID`. This provides a simple, portable configuration mechanism for development environments, CI/CD pipelines, and deployments where OS keychain access is unavailable or impractical. Environment variables serve as the fallback when the OS keychain does not contain the required credentials.
+
+**Why this priority**: Without Slack credentials the server cannot connect to any workspace. Environment variables are the most universally available credential mechanism across all platforms and container runtimes. While the OS keychain is preferred for security, many legitimate deployment scenarios (containers, headless servers, CI runners) lack a keychain entirely. Ensuring explicit, documented support for these three environment variables removes a critical onboarding barrier.
+
+**Independent Test**: Unset any keychain entries for the service. Set `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID` as environment variables. Start the server and verify it connects to Slack successfully using the environment-provided credentials.
+
+**Acceptance Scenarios**:
+
+1. **Given** the OS keychain does not contain Slack credentials, **When** `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID` are set as environment variables, **Then** the server loads all three values from the environment and connects to Slack successfully
+2. **Given** the OS keychain contains Slack credentials, **When** the same credentials are also present as environment variables, **Then** the server uses the keychain values (keychain takes precedence over environment variables)
+3. **Given** neither the OS keychain nor environment variables provide the required Slack credentials, **When** the server starts, **Then** the server fails with a clear, actionable error message identifying which credential is missing and how to provide it
+4. **Given** the `SLACK_TEAM_ID` environment variable is set, **When** the server connects to Slack, **Then** the team ID is used to scope Socket Mode connections to the correct workspace
+5. **Given** the `SLACK_TEAM_ID` environment variable is empty or unset and the keychain has no team ID, **When** the server connects to Slack, **Then** the server connects without a team ID constraint (single-workspace mode)
+
+---
+
+### User Story 12 - Dynamic Slack Channel Selection (Priority: P2)
+
+When a remote agent connects to the server via the HTTP/SSE transport, the connecting client can specify a Slack channel ID as a query string parameter on the SSE endpoint URL (e.g., `/sse?channel_id=C_MY_CHANNEL`). This per-session channel override directs all Slack notifications, approval requests, and interactive messages for that agent session to the specified channel instead of the default channel from the global configuration. This enables multi-workspace setups where each connected IDE or project targets a different Slack channel for its notifications.
+
+**Why this priority**: Multi-workspace support is an in-scope requirement. Different projects often need notifications routed to different Slack channels (e.g., a frontend project to `#frontend-agents` and a backend project to `#backend-agents`). Without per-session channel selection, all agent sessions would post to the same channel, creating noise and confusion. This is critical for the multi-workspace use case but not for single-workspace MVP operation.
+
+**Independent Test**: Start the server with a default channel configured. Connect an agent via SSE with `?channel_id=C_TEST_CHANNEL` in the URL. Have the agent invoke `remote_log` and verify the message appears in `C_TEST_CHANNEL` rather than the default channel.
+
+**Acceptance Scenarios**:
+
+1. **Given** the server is running with a default Slack channel configured, **When** an agent connects via SSE with `?channel_id=C_OTHER_CHANNEL` in the URL, **Then** all Slack messages for that session are posted to `C_OTHER_CHANNEL`
+2. **Given** an agent connects via SSE without a `channel_id` query parameter, **When** the agent invokes any tool that posts to Slack, **Then** the default channel from the global configuration is used
+3. **Given** an agent connects via SSE with an empty `channel_id` parameter, **When** the agent invokes any tool that posts to Slack, **Then** the default channel from the global configuration is used (empty value is treated as absent)
+4. **Given** two agents connect simultaneously with different `channel_id` values, **When** both agents invoke tools that post to Slack, **Then** each session's messages are routed to its respective channel independently
+5. **Given** an agent connects via the stdio transport (primary agent), **When** the agent invokes any tool that posts to Slack, **Then** the default channel from the global configuration is always used (channel override is only available on SSE transport)
+
+---
+
+### User Story 13 - Service Rebranding to Remote Control (Priority: P1)
+
+The service is renamed from "monocoque-agent-rem" (remote) to "monocoque-agent-rc" (remote control) across the entire codebase. This includes binary names, crate names, Cargo package metadata, configuration file references, OS keychain service identifiers, SurrealDB namespace and database names, documentation, user-facing CLI output, Slack message branding, the companion CLI tool name, and all internal code references. The rename establishes a consistent, intentional identity that accurately describes the service's purpose as a remote control interface for AI agents — not merely a "remote" endpoint.
+
+**Why this priority**: Naming consistency is a foundational concern that affects every user-facing surface — binary names operators type, keychain entries operators configure, Slack messages operators read, and documentation operators reference. Performing the rename now, before external users adopt the current naming, avoids a disruptive breaking change later. After this rename, all new documentation, integrations, and user muscle memory will build on the correct name from the start.
+
+**Independent Test**: After the rename, verify that `cargo build` produces a binary named `monocoque-agent-rc` (not `monocoque-agent-rem`). Verify that the companion CLI binary is named `monocoque-ctl` (unchanged). Verify that `config.toml` references the new service name. Verify that running the renamed binary starts the server with the correct SurrealDB database name and keychain service name.
+
+**Acceptance Scenarios**:
+
+1. **Given** the rename is complete, **When** `cargo build` is executed, **Then** the output binary is named `monocoque-agent-rc` and `monocoque-ctl`
+2. **Given** the rename is complete, **When** the server starts, **Then** the SurrealDB namespace is `monocoque` and the database name is `agent_rc` (changed from `agent_rem`)
+3. **Given** the rename is complete, **When** the server loads credentials from the OS keychain, **Then** it looks for the keychain service name `monocoque-agent-rc` (changed from `monocoque-agent-rem`)
+4. **Given** the rename is complete, **When** the server emits tracing spans and log messages, **Then** all references use `monocoque-agent-rc` or `agent_rc` as appropriate
+5. **Given** the rename is complete, **When** MCP server-to-client notifications are sent (e.g., nudge), **Then** the custom method prefix is `monocoque/nudge` (the `monocoque` namespace prefix is unchanged)
+6. **Given** the rename is complete, **When** the user examines Cargo.toml, README, CLI help text, and config.toml comments, **Then** all references consistently use `monocoque-agent-rc` and there are zero remaining references to `monocoque-agent-rem` or `agent-rem` or `agent_rem` (except historical changelog entries)
+7. **Given** an existing deployment that used the old `monocoque-agent-rem` keychain service name, **When** the server starts with the new name, **Then** the server does NOT automatically migrate keychain entries (the operator must re-store credentials under the new service name), and the startup error message clearly explains the required action
+
+---
+
 ### Edge Cases
 
 * What happens when the Slack WebSocket connection drops mid-approval? The server queues the pending request in the database and re-posts it to Slack upon reconnection.
@@ -224,6 +280,12 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * What happens when the agent calls `heartbeat` indefinitely but never makes progress? The heartbeat resets the stall timer, so no stall alert fires. However, the operator retains visibility via `remote_log` messages and session elapsed time. A future enhancement could track heartbeat-without-progress as a distinct anomaly, but for v1 the heartbeat is trusted as a liveness signal.
 * What happens when the agent sends a malformed or empty progress snapshot in the `heartbeat` call? The server validates the snapshot structure (an ordered list of items, each with a string label and a status enum). If the snapshot is malformed, the server rejects the heartbeat call with a descriptive error, leaves the existing snapshot unchanged, and still resets the stall timer.
 * What happens when a checkpoint is restored and the stored progress snapshot no longer matches the agent's actual state? The restored progress snapshot is informational — the agent is the source of truth. The server includes the checkpoint's progress snapshot in the restore response so the agent can use it for orientation, but the agent is expected to submit a fresh progress snapshot via `heartbeat` once it re-evaluates its position. The server does not enforce consistency between the snapshot and actual file system state.
+* What happens when `SLACK_BOT_TOKEN` is set as an environment variable but contains an invalid or expired token? The server accepts the value at startup (it cannot validate token freshness without contacting Slack). The Slack client connection attempt fails with an authentication error. The server logs the failure with a message suggesting the operator verify the token value.
+* What happens when the OS keychain has a stale `slack_bot_token` and the environment variable has a fresh one? The keychain value takes precedence per FR-039. The operator must update the keychain entry or remove it to allow the environment variable fallback to activate.
+* What happens when an SSE client provides a `channel_id` for a Slack channel the bot is not a member of? The server accepts the channel ID at connection time (no pre-validation). Subsequent Slack API calls to that channel fail with a "not_in_channel" error. The server logs the error and returns it to the agent as a tool call failure.
+* What happens when the `channel_id` query parameter contains special characters or an invalid Slack channel ID format? The server does not validate the format of the channel ID — it passes it through to the Slack API, which rejects invalid IDs with an error. The error is surfaced to the agent.
+* What happens when a user runs the renamed `monocoque-agent-rc` binary but their keychain still has credentials stored under the old `monocoque-agent-rem` service name? The server does not find the credentials in the keychain (it only checks the new service name `monocoque-agent-rc`). It falls back to environment variables. If those are also absent, the server fails with an error message that includes the expected keychain service name, helping the operator identify the mismatch.
+* What happens when a user has a SurrealDB database from the old `agent_rem` name and starts the renamed server? The server creates a new `agent_rc` database. The old `agent_rem` data is not migrated automatically. The operator must manually migrate or re-initialize. The server does not access or delete the old database.
 
 ## Out of Scope (v1)
 
@@ -276,6 +338,27 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * **FR-036**: System MUST load Slack tokens and other sensitive credentials from the OS keychain (Windows Credential Manager / macOS Keychain) as the primary mechanism. If the keychain is unavailable or credentials are not found, the system MUST fall back to reading from environment variables. Credentials MUST NOT be stored in plaintext configuration files.
 * **FR-037**: System MUST emit structured tracing spans to stderr via `tracing-subscriber` covering MCP tool call execution, Slack API interactions, stall detection events, and session lifecycle transitions. No metrics endpoint or external telemetry collector is required.
 
+### Functional Requirements — Slack Environment Variable Configuration (US11)
+
+* **FR-038**: System MUST attempt to load `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID` from user environment variables when the corresponding credentials are not found in the OS keychain. The environment variable names are fixed and case-sensitive.
+* **FR-039**: System MUST use the OS keychain as the primary credential source and environment variables as the fallback. When both sources contain a credential, the keychain value takes precedence.
+* **FR-040**: System MUST fail startup with a clear, actionable error message if any required Slack credential (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`) cannot be found in either the OS keychain or the corresponding environment variable. The error message MUST identify the missing credential by name and describe both resolution methods (keychain and environment variable).
+* **FR-041**: System MUST treat `SLACK_TEAM_ID` as optional. If absent from both keychain and environment, the server connects to Slack without a team ID constraint (suitable for single-workspace installations). If present, it is used to scope Socket Mode connections to the specified workspace.
+
+### Functional Requirements — Dynamic Slack Channel Selection (US12)
+
+* **FR-042**: System MUST accept an optional `channel_id` query string parameter on the HTTP/SSE transport endpoint URL (e.g., `/sse?channel_id=C_CHANNEL_ID`). When present and non-empty, all Slack messages for that SSE session are routed to the specified channel instead of the default `config.slack.channel_id`.
+* **FR-043**: System MUST use the default `config.slack.channel_id` when the `channel_id` query parameter is absent, empty, or when the agent connects via the stdio transport.
+* **FR-044**: System MUST support concurrent SSE sessions with different `channel_id` overrides, routing each session's Slack messages independently to its designated channel.
+
+### Functional Requirements — Service Rebranding (US13)
+
+* **FR-045**: System MUST be built and distributed as a binary named `monocoque-agent-rc` (replacing the former `monocoque-agent-rem` binary name). The companion CLI binary remains `monocoque-ctl`.
+* **FR-046**: System MUST use the keychain service identifier `monocoque-agent-rc` when loading credentials from the OS keychain. The former service name `monocoque-agent-rem` is NOT checked as a fallback.
+* **FR-047**: System MUST use the SurrealDB database name `agent_rc` (within the `monocoque` namespace) for all persistent storage. The former database name `agent_rem` is NOT automatically migrated.
+* **FR-048**: System MUST update all user-visible references (CLI help text, tracing output, Slack message content, configuration file comments, README, error messages) to use `monocoque-agent-rc` consistently. Zero references to the former name `monocoque-agent-rem` or `agent-rem` shall remain in the codebase except in historical changelog or migration notes.
+* **FR-049**: System MUST update the Cargo.toml package name and all internal Rust crate references to use the `rc` suffix consistently. All module names, test files, and import paths that previously referenced `rem` MUST be updated to `rc`.
+
 ### Key Entities
 
 * **Approval Request**: A pending human decision on a code proposal. Attributes include a unique request ID, proposal title, description, diff content, target file path, risk level, status (pending, approved, rejected, expired, consumed), and creation timestamp. Belongs to exactly one Session.
@@ -302,10 +385,14 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * **SC-010**: The server starts and becomes operational (MCP interface ready, Slack connected) within 10 seconds on standard hardware
 * **SC-011**: Silent agent stalls are detected and the operator is alerted within the configured inactivity threshold (default: 5 minutes), eliminating undetected idle periods during unattended operation
 * **SC-012**: Auto-nudge recovers stalled agents without operator intervention in at least 80% of stall events, reducing the need for manual nudges
+* **SC-013**: The server starts successfully with Slack credentials provided exclusively via environment variables, with no keychain dependency, in under 10 seconds on standard hardware
+* **SC-014**: Multiple concurrent SSE agent sessions, each specifying a different `channel_id`, route 100% of their Slack messages to their designated channels with zero cross-contamination
+* **SC-015**: After the service rename, zero references to "monocoque-agent-rem", "agent-rem", or "agent_rem" exist in the codebase (excluding historical changelog entries), verified by automated grep across all source files, configuration files, and documentation
 
 ## Assumptions
 
 * The operator has a Slack workspace with a bot application configured for Socket Mode (App-Level Token and Bot Token available)
+* Slack credentials (bot token, app token, team ID) are available via the OS keychain under the service name `monocoque-agent-rc`, or as environment variables `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID`
 * The local workstation has a stable internet connection for Slack WebSocket communication, though temporary interruptions are tolerated
 * The AI agent (Claude Code, GitHub Copilot CLI, Cursor, etc.) supports the Model Context Protocol and can connect to a local MCP server
 * Each connected agent is associated with a workspace root directory. The server supports multiple concurrent workspaces, each identified by its root path. Workspace roots are specified per-session at connection time rather than as a single global setting
@@ -313,3 +400,4 @@ The developer switches the server between "remote", "local", and "hybrid" modes 
 * The operator's Slack user ID is known in advance and configured in the server's authorized user list
 * The host CLI binary for session spawning (e.g., "claude", "gh copilot") is installed and available on the system PATH
 * SurrealDB is used in embedded mode as the persistent storage engine for all session state, approval requests, checkpoints, and stall alerts
+* The service is branded and distributed as `monocoque-agent-rc` (remote control). All binary names, keychain entries, database identifiers, and documentation use this name consistently
