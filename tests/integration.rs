@@ -1,5 +1,6 @@
 mod integration {
     mod approval_flow_tests;
+    mod channel_override_tests;
     mod crash_recovery_tests;
     mod diff_apply_tests;
     mod nudge_flow_tests;

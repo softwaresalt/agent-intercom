@@ -15,6 +15,17 @@
 #     "url": "http://127.0.0.1:3000/sse?channel_id=C_WORKSPACE_CHANNEL"
 #
 #   When omitted, the global `slack.channel_id` below is used as the default.
+#
+#   Example .vscode/mcp.json for a workspace targeting a specific channel:
+#
+#     {
+#       "servers": {
+#         "monocoque": {
+#           "type": "sse",
+#           "url": "http://127.0.0.1:3000/sse?channel_id=C0123FRONTEND"
+#         }
+#       }
+#     }
 
 default_workspace_root = "D:\\Source\\GitHub\\monocoque-agent-rem"
 http_port = 3000

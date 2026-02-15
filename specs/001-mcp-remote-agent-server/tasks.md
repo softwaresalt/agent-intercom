@@ -539,13 +539,13 @@ With multiple developers after Phase 2:
 
 ### Tests (Constitution Principle III)
 
-- [ ] T204 [US12] Write integration test for channel override in `tests/integration/channel_override_tests.rs`: test SSE connection with `?channel_id=C_TEST` uses override, SSE connection without `?channel_id=` uses default, SSE connection with empty `?channel_id=` uses default, two concurrent SSE sessions with different `channel_id` values route independently
+- [X] T204 [US12] Write integration test for channel override in `tests/integration/channel_override_tests.rs`: test SSE connection with `?channel_id=C_TEST` uses override, SSE connection without `?channel_id=` uses default, SSE connection with empty `?channel_id=` uses default, two concurrent SSE sessions with different `channel_id` values route independently
 
 ### Implementation for User Story 12
 
-- [ ] T205 [P] [US12] Update `config.toml` comments to document the `?channel_id=` query parameter on the SSE endpoint, with example `.vscode/mcp.json` configuration showing `channel_id` usage
-- [ ] T206 [P] [US12] Update `specs/001-mcp-remote-agent-server/quickstart.md` with multi-workspace channel configuration instructions and example SSE URL with `?channel_id=`
-- [ ] T207 [US12] Verify `extract_channel_id()` in `src/mcp/sse.rs` handles URL-encoded values and edge cases: multiple `channel_id` params (first wins), `channel_id` with no `=`, special characters; add unit tests if gaps found
+- [X] T205 [P] [US12] Update `config.toml` comments to document the `?channel_id=` query parameter on the SSE endpoint, with example `.vscode/mcp.json` configuration showing `channel_id` usage
+- [X] T206 [P] [US12] Update `specs/001-mcp-remote-agent-server/quickstart.md` with multi-workspace channel configuration instructions and example SSE URL with `?channel_id=`
+- [X] T207 [US12] Verify `extract_channel_id()` in `src/mcp/sse.rs` handles URL-encoded values and edge cases: multiple `channel_id` params (first wins), `channel_id` with no `=`, special characters; add unit tests if gaps found
 
 **Checkpoint**: Channel override behavior validated with tests, documented in config and quickstart.
 

@@ -161,6 +161,40 @@ Add the MCP server to your agent's configuration.
 }
 ```
 
+### 5a. (Optional) Multi-workspace channel routing
+
+When you have multiple VS Code workspaces connected to the same monocoque-agent-rc server, each workspace can target a different Slack channel by appending `?channel_id=` to the SSE URL. This keeps notifications organized — for example, frontend changes go to `#frontend-agents` and backend changes go to `#backend-agents`.
+
+In each workspace's `.vscode/mcp.json`, use the SSE transport with a `channel_id` query parameter:
+
+**Workspace A** (e.g., frontend project):
+
+```json
+{
+  "servers": {
+    "monocoque": {
+      "type": "sse",
+      "url": "http://127.0.0.1:3000/sse?channel_id=C_FRONTEND_CHANNEL"
+    }
+  }
+}
+```
+
+**Workspace B** (e.g., backend project):
+
+```json
+{
+  "servers": {
+    "monocoque": {
+      "type": "sse",
+      "url": "http://127.0.0.1:3000/sse?channel_id=C_BACKEND_CHANNEL"
+    }
+  }
+}
+```
+
+When `channel_id` is omitted, messages are sent to the default `slack.channel_id` configured in `config.toml`.
+
 ### 6. Verify the connection
 
 Once the agent starts and connects:

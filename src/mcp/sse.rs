@@ -121,3 +121,57 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
     info!("HTTP/SSE MCP transport shut down");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_uri(s: &str) -> axum::http::Uri {
+        s.parse().expect("valid URI")
+    }
+
+    #[test]
+    fn channel_id_present_returns_value() {
+        let uri = parse_uri("/sse?channel_id=C_WORKSPACE");
+        assert_eq!(extract_channel_id(&uri), Some("C_WORKSPACE".to_owned()));
+    }
+
+    #[test]
+    fn missing_channel_id_returns_none() {
+        let uri = parse_uri("/sse");
+        assert_eq!(extract_channel_id(&uri), None);
+    }
+
+    #[test]
+    fn empty_channel_id_returns_none() {
+        let uri = parse_uri("/sse?channel_id=");
+        assert_eq!(extract_channel_id(&uri), None);
+    }
+
+    #[test]
+    fn multiple_channel_id_params_first_wins() {
+        let uri = parse_uri("/sse?channel_id=C_FIRST&channel_id=C_SECOND");
+        assert_eq!(extract_channel_id(&uri), Some("C_FIRST".to_owned()));
+    }
+
+    #[test]
+    fn channel_id_with_no_equals_returns_none() {
+        let uri = parse_uri("/sse?channel_id");
+        assert_eq!(extract_channel_id(&uri), None);
+    }
+
+    #[test]
+    fn channel_id_among_other_params() {
+        let uri = parse_uri("/sse?foo=bar&channel_id=C_TARGET&baz=qux");
+        assert_eq!(extract_channel_id(&uri), Some("C_TARGET".to_owned()));
+    }
+
+    #[test]
+    fn url_encoded_channel_id_passes_through_raw() {
+        // Slack channel IDs are alphanumeric (C[A-Z0-9]+), so URL encoding
+        // is not a practical concern. The function intentionally does NOT
+        // URL-decode values, keeping the implementation simple.
+        let uri = parse_uri("/sse?channel_id=C_TEST%20SPACE");
+        assert_eq!(extract_channel_id(&uri), Some("C_TEST%20SPACE".to_owned()));
+    }
+}
