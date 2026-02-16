@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::unwrap_used, missing_docs)]
+
 mod unit {
     mod checkpoint_tests;
     mod command_exec_tests;

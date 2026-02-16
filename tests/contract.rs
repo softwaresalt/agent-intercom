@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::unwrap_used, missing_docs)]
+
 mod contract {
     mod accept_diff_tests;
     mod ask_approval_tests;

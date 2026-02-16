@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::unwrap_used, missing_docs)]
+
 mod integration {
     mod approval_flow_tests;
     mod channel_override_tests;

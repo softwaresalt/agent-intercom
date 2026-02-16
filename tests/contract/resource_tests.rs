@@ -3,7 +3,7 @@
 //! Validates the output schema per `mcp-resources.json` contract and verifies
 //! channel ID validation against configuration.
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 /// The resource URI template as defined in `mcp-resources.json`.
 const RESOURCE_URI_TEMPLATE: &str = "slack://channel/{id}/recent";
