@@ -31,7 +31,8 @@
 			"New-Item": true,
 			"cargo fmt": true,
 			"Get-Item": true,
-			"Group-Object": true
+			"Group-Object": true,
+			"cargo audit": true
 		},
 		"powershell.cwd": "monocoque-agent-rc",
     "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,
