@@ -12,6 +12,7 @@ use tracing::{info, info_span, Instrument};
 use crate::mcp::handler::AgentRemServer;
 use crate::models::progress::{validate_snapshot, ProgressItem};
 use crate::persistence::session_repo::SessionRepo;
+use crate::slack::client::SlackMessage;
 
 /// Input parameters per mcp-tools.json contract.
 #[derive(Debug, serde::Deserialize)]
@@ -116,18 +117,7 @@ pub async fn handle(
 
         // ── Optional: log status_message to Slack ────────────
         if let Some(ref msg) = input.status_message {
-            if let Some(ref slack) = state.slack {
-                let channel = slack_morphism::prelude::SlackChannelId(channel_id.clone());
-                let slack_msg = crate::slack::client::SlackMessage {
-                    channel,
-                    text: Some(format!("\u{1f493} {msg}")),
-                    blocks: Some(vec![crate::slack::blocks::severity_section("info", msg)]),
-                    thread_ts: None,
-                };
-                if let Err(err) = slack.enqueue(slack_msg).await {
-                    tracing::warn!(%err, "failed to enqueue heartbeat status to slack");
-                }
-            }
+            send_heartbeat_to_slack(&state, &channel_id, msg).await;
         }
 
         info!(
@@ -155,4 +145,24 @@ pub async fn handle(
     }
     .instrument(span)
     .await
+}
+
+/// Forward a heartbeat status message to the Slack channel, if configured.
+async fn send_heartbeat_to_slack(
+    state: &crate::mcp::handler::AppState,
+    channel_id: &str,
+    msg: &str,
+) {
+    if let Some(ref slack) = state.slack {
+        let channel = slack_morphism::prelude::SlackChannelId(channel_id.to_owned());
+        let slack_msg = SlackMessage {
+            channel,
+            text: Some(format!("\u{1f493} {msg}")),
+            blocks: Some(vec![crate::slack::blocks::severity_section("info", msg)]),
+            thread_ts: None,
+        };
+        if let Err(err) = slack.enqueue(slack_msg).await {
+            tracing::warn!(%err, "failed to enqueue heartbeat status to slack");
+        }
+    }
 }

@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn truncate_max_len_zero() {
         let result = truncate_text("hello", 0);
-        assert!(result.len() <= 0);
+        assert!(result.is_empty());
         assert_eq!(result, "");
     }
 
@@ -124,9 +124,9 @@ mod tests {
 
     #[tokio::test]
     async fn hash_nonexistent_file() {
-        let hash = compute_file_hash(Path::new("/nonexistent/file.txt"))
-            .await
-            .unwrap();
-        assert_eq!(hash, "new_file");
+        match compute_file_hash(Path::new("/nonexistent/file.txt")).await {
+            Ok(hash) => assert_eq!(hash, "new_file"),
+            Err(err) => panic!("expected Ok, got Err({err})"),
+        }
     }
 }
