@@ -27,7 +27,7 @@
 #       }
 #     }
 
-default_workspace_root = "D:\\Source\\GitHub\\monocoque-agent-rc"
+default_workspace_root = "/path/to/workspace"
 http_port = 3000
 ipc_name = "monocoque-agent-rc"
 max_concurrent_sessions = 3
