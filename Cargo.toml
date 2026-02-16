@@ -30,7 +30,7 @@ uuid = { version = "1.7", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]
@@ -44,6 +44,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 axum = { workspace = true }

@@ -4,12 +4,10 @@
 //! Validates approval status, checks file integrity via SHA-256 hash
 //! comparison, and performs atomic writes.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
-use sha2::{Digest, Sha256};
 use slack_morphism::prelude::SlackChannelId;
 use tracing::{info, info_span, warn, Instrument};
 
@@ -39,9 +37,9 @@ fn error_result(code: &str, message: &str) -> CallToolResult {
         "error_code": code,
         "error_message": message,
     });
-    CallToolResult::success(vec![rmcp::model::Content::text(
-        serde_json::to_string(&body).unwrap_or_default(),
-    )])
+    // The json! macro produces values that always serialize successfully.
+    CallToolResult::success(vec![rmcp::model::Content::json(body)
+        .unwrap_or_else(|_| rmcp::model::Content::text(format!("{code}: {message}")))])
 }
 
 /// Handle the `accept_diff` tool call.
@@ -119,7 +117,14 @@ pub async fn handle(
         };
 
         // ── Hash comparison (integrity check) ────────────────
-        let current_hash = compute_file_hash(&validated_path);
+        let current_hash = super::util::compute_file_hash(&validated_path)
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to read file for hash: {err}"),
+                    None,
+                )
+            })?;
         let hash_matches = current_hash == approval.original_hash;
 
         info!(
@@ -171,13 +176,13 @@ pub async fn handle(
 
         let write_result = if is_unified_diff {
             apply_patch(
-                &std::path::PathBuf::from(&approval.file_path),
+                &validated_path,
                 &approval.diff_content,
                 &workspace_root,
             )
         } else {
             write_full_file(
-                &std::path::PathBuf::from(&approval.file_path),
+                &validated_path,
                 &approval.diff_content,
                 &workspace_root,
             )
@@ -240,24 +245,16 @@ pub async fn handle(
             }],
         });
 
-        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
-            serde_json::to_string(&response).unwrap_or_default(),
-        )]))
+        Ok(CallToolResult::success(vec![rmcp::model::Content::json(
+            response,
+        )
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(
+                format!("failed to serialize accept_diff response: {err}"),
+                None,
+            )
+        })?]))
     }
     .instrument(span)
     .await
-}
-
-/// Compute the SHA-256 hash of a file's contents.
-///
-/// Returns `"new_file"` if the file does not exist.
-fn compute_file_hash(path: &Path) -> String {
-    match std::fs::read(path) {
-        Ok(contents) => {
-            let mut hasher = Sha256::new();
-            hasher.update(&contents);
-            format!("{:x}", hasher.finalize())
-        }
-        Err(_) => "new_file".to_owned(),
-    }
 }

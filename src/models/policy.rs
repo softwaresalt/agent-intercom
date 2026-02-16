@@ -2,6 +2,8 @@
 
 use serde::Deserialize;
 
+use crate::models::approval::RiskLevel;
+
 /// File pattern rules for auto-approval matching.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -32,9 +34,9 @@ pub struct WorkspacePolicy {
     /// File pattern rules for writes and reads.
     #[serde(default)]
     pub file_patterns: FilePatterns,
-    /// Maximum risk level for auto-approve (`low`, `high`).
+    /// Maximum risk level for auto-approve.
     #[serde(default = "default_risk_threshold")]
-    pub risk_level_threshold: String,
+    pub risk_level_threshold: RiskLevel,
     /// Whether to post auto-approved actions to Slack.
     #[serde(default)]
     pub log_auto_approved: bool,
@@ -43,8 +45,8 @@ pub struct WorkspacePolicy {
     pub summary_interval_seconds: u64,
 }
 
-fn default_risk_threshold() -> String {
-    "low".into()
+fn default_risk_threshold() -> RiskLevel {
+    RiskLevel::Low
 }
 
 fn default_summary_interval() -> u64 {

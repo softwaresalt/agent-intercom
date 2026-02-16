@@ -107,6 +107,11 @@ pub async fn handle_interaction(
                 .map(|u| u.id.to_string())
                 .unwrap_or_default();
 
+            if user_id.is_empty() {
+                warn!("block action with empty user ID; ignoring");
+                return Ok(());
+            }
+
             // ── T093: Centralized authorization guard ────────────
             // Check once at the dispatch level. Unauthorized users
             // are silently dropped with a security log.
@@ -121,19 +126,20 @@ pub async fn handle_interaction(
             }
 
             if let Some(actions) = &block_event.actions {
+                // ── T094: Pre-dispatch double-submission guard ──
+                // Replace buttons once before dispatching any actions.
+                // This prevents concurrent taps from triggering the
+                // handler a second time.
+                replace_buttons_with_processing(
+                    block_event.channel.as_ref(),
+                    block_event.message.as_ref(),
+                    app,
+                )
+                .await;
+
                 for action in actions {
                     let action_id = action.action_id.to_string();
                     info!(action_id, user_id, "dispatching block action");
-
-                    // ── T094: Pre-dispatch double-submission guard ──
-                    // Replace buttons immediately so concurrent taps
-                    // cannot trigger the handler a second time.
-                    replace_buttons_with_processing(
-                        block_event.channel.as_ref(),
-                        block_event.message.as_ref(),
-                        app,
-                    )
-                    .await;
 
                     // Route by action_id prefix to the correct handler.
                     if action_id.starts_with("approve_") {

@@ -4,13 +4,11 @@
 //! Blocks the agent until the operator responds (Accept/Reject) or
 //! the configured timeout elapses.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
-use sha2::{Digest, Sha256};
 use slack_morphism::prelude::{SlackBlock, SlackChannelId};
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
@@ -92,7 +90,14 @@ pub async fn handle(
         })?;
 
         // ── Compute SHA-256 hash of current file ─────────────
-        let original_hash = compute_file_hash(&validated_path);
+        let original_hash = super::util::compute_file_hash(&validated_path)
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to read file for hash: {err}"),
+                    None,
+                )
+            })?;
 
         // ── Create ApprovalRequest record ────────────────────
         let approval = ApprovalRequest::new(
@@ -107,7 +112,7 @@ pub async fn handle(
         let request_id = approval.id.clone();
 
         let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
-        let created = approval_repo.create(&approval).await.map_err(|err| {
+        let _created = approval_repo.create(&approval).await.map_err(|err| {
             rmcp::ErrorData::internal_error(
                 format!("failed to persist approval request: {err}"),
                 None,
@@ -166,9 +171,6 @@ pub async fn handle(
         } else {
             warn!("slack not configured; approval request will block without notification");
         }
-
-        // Suppress unused variable warning.
-        let _ = &created;
 
         // ── Register oneshot and wait ────────────────────────
         let (tx, rx) = oneshot::channel::<ApprovalResponse>();
@@ -249,9 +251,15 @@ pub async fn handle(
             response_json["reason"] = serde_json::Value::String(r.clone());
         }
 
-        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
-            serde_json::to_string(&response_json).unwrap_or_default(),
-        )]))
+        Ok(CallToolResult::success(vec![rmcp::model::Content::json(
+            response_json,
+        )
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(
+                format!("failed to serialize ask_approval response: {err}"),
+                None,
+            )
+        })?]))
     }
     .instrument(span)
     .await
@@ -293,18 +301,4 @@ fn build_approval_blocks(
     }
 
     result
-}
-
-/// Compute the SHA-256 hash of a file's contents.
-///
-/// Returns `"new_file"` if the file does not exist (new file creation).
-fn compute_file_hash(path: &Path) -> String {
-    match std::fs::read(path) {
-        Ok(contents) => {
-            let mut hasher = Sha256::new();
-            hasher.update(&contents);
-            format!("{:x}", hasher.finalize())
-        }
-        Err(_) => "new_file".to_owned(),
-    }
 }

@@ -52,6 +52,7 @@ fn make_config() -> (tempfile::TempDir, GlobalConfig) {
 /// Use `cargo test credential_loading -- --test-threads=1` if needed.
 #[tokio::test]
 #[serial_test::serial]
+#[allow(unsafe_code)]
 async fn env_var_only_credential_loading() {
     let (_temp, mut config) = make_config();
 
@@ -85,6 +86,7 @@ async fn env_var_only_credential_loading() {
 /// keychain service and the environment variable.
 #[tokio::test]
 #[serial_test::serial]
+#[allow(unsafe_code)]
 async fn missing_required_credential_error_names_both_sources() {
     let (_temp, mut config) = make_config();
 
@@ -120,6 +122,7 @@ async fn missing_required_credential_error_names_both_sources() {
 /// `load_credentials()` should succeed and `team_id` should be empty.
 #[tokio::test]
 #[serial_test::serial]
+#[allow(unsafe_code)]
 async fn optional_team_id_absent_is_not_error() {
     let (_temp, mut config) = make_config();
 
@@ -150,6 +153,7 @@ async fn optional_team_id_absent_is_not_error() {
 /// Empty env var is treated as absent (falls through to error).
 #[tokio::test]
 #[serial_test::serial]
+#[allow(unsafe_code)]
 async fn empty_env_var_treated_as_absent() {
     let (_temp, mut config) = make_config();
 

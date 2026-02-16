@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use tracing::{info, info_span};
 
+use crate::models::approval::RiskLevel;
 use crate::models::policy::WorkspacePolicy;
 
 /// Additional metadata supplied by the agent for fine-grained evaluation.
@@ -63,10 +64,10 @@ impl PolicyEvaluator {
         // ── 2. Risk level gate ───────────────────────────────
         if let Some(ref ctx) = context {
             if let Some(ref risk) = ctx.risk_level {
-                if !risk_within_threshold(risk, &policy.risk_level_threshold) {
+                if !risk_within_threshold(risk, policy.risk_level_threshold) {
                     info!(
                         risk = %risk,
-                        threshold = %policy.risk_level_threshold,
+                        threshold = ?policy.risk_level_threshold,
                         "risk exceeds threshold, denying auto-approve"
                     );
                     return deny();
@@ -105,22 +106,26 @@ impl PolicyEvaluator {
     }
 }
 
-/// Risk levels ranked by severity (lower index = lower risk).
-const RISK_LEVELS: &[&str] = &["low", "high", "critical"];
-
 /// Check whether the request risk is within the policy threshold.
 ///
 /// `critical` risk is never auto-approved regardless of threshold.
-fn risk_within_threshold(request_risk: &str, threshold: &str) -> bool {
-    let request_idx = RISK_LEVELS.iter().position(|&r| r == request_risk);
-    let threshold_idx = RISK_LEVELS.iter().position(|&r| r == threshold);
+fn risk_within_threshold(request_risk: &str, threshold: RiskLevel) -> bool {
+    let request_level = match request_risk {
+        "low" => RiskLevel::Low,
+        "high" => RiskLevel::High,
+        // critical and unknown levels are never auto-approved
+        _ => return false,
+    };
 
-    match (request_idx, threshold_idx) {
-        // "critical" is never auto-approved.
-        (Some(req), _) if RISK_LEVELS[req] == "critical" => false,
-        (Some(req), Some(thr)) => req <= thr,
-        // Unknown risk levels default to deny.
-        _ => false,
+    risk_ordinal(request_level) <= risk_ordinal(threshold)
+}
+
+/// Map a `RiskLevel` to a numeric ordinal for comparison.
+const fn risk_ordinal(level: RiskLevel) -> u8 {
+    match level {
+        RiskLevel::Low => 0,
+        RiskLevel::High => 1,
+        RiskLevel::Critical => 2,
     }
 }
 

@@ -1,7 +1,8 @@
 //! `SurrealDB` schema definitions and bootstrap logic.
 //!
 //! All table definitions use `SCHEMAFULL` mode. Schema is applied
-//! idempotently with `IF NOT EXISTS` on every server startup.
+//! on every server startup; `DEFINE` statements in `SurrealDB` are
+//! inherently idempotent (re-defining an existing field is a no-op).
 
 use crate::Result;
 
@@ -9,7 +10,7 @@ use super::db::Database;
 
 /// Apply all table and field definitions to the connected database.
 ///
-/// Uses `IF NOT EXISTS` so re-execution is safe across restarts.
+/// Re-execution is safe: `SurrealDB` `DEFINE` statements are idempotent.
 ///
 /// # Errors
 ///

@@ -57,6 +57,8 @@ async fn purge(db: &Database, retention_days: u32) -> Result<()> {
         "stall_alert",
     ];
     for table in child_tables {
+        // SAFETY: `table` values are compile-time string literals defined above,
+        // not user input, so interpolation here is not a SQL injection vector.
         let query = format!(
             "DELETE FROM {table} WHERE session_id IN \
              (SELECT VALUE id FROM session \

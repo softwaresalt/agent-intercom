@@ -37,29 +37,23 @@ pub enum AppError {
 impl Display for AppError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Config(msg)
-            | Self::Db(msg)
-            | Self::Slack(msg)
-            | Self::Mcp(msg)
-            | Self::Diff(msg)
-            | Self::Policy(msg)
-            | Self::Ipc(msg)
-            | Self::PathViolation(msg)
-            | Self::PatchConflict(msg)
-            | Self::NotFound(msg)
-            | Self::Unauthorized(msg)
-            | Self::AlreadyConsumed(msg) => f.write_str(msg),
+            Self::Config(msg) => write!(f, "config: {msg}"),
+            Self::Db(msg) => write!(f, "db: {msg}"),
+            Self::Slack(msg) => write!(f, "slack: {msg}"),
+            Self::Mcp(msg) => write!(f, "mcp: {msg}"),
+            Self::Diff(msg) => write!(f, "diff: {msg}"),
+            Self::Policy(msg) => write!(f, "policy: {msg}"),
+            Self::Ipc(msg) => write!(f, "ipc: {msg}"),
+            Self::PathViolation(msg) => write!(f, "path violation: {msg}"),
+            Self::PatchConflict(msg) => write!(f, "patch conflict: {msg}"),
+            Self::NotFound(msg) => write!(f, "not found: {msg}"),
+            Self::Unauthorized(msg) => write!(f, "unauthorized: {msg}"),
+            Self::AlreadyConsumed(msg) => write!(f, "already consumed: {msg}"),
         }
     }
 }
 
 impl std::error::Error for AppError {}
-
-impl From<std::io::Error> for AppError {
-    fn from(err: std::io::Error) -> Self {
-        Self::Config(format!("io error: {err}"))
-    }
-}
 
 impl From<toml::de::Error> for AppError {
     fn from(err: toml::de::Error) -> Self {

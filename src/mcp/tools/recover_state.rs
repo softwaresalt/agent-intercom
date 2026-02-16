@@ -86,7 +86,9 @@ async fn resolve_session(
     session_id: Option<&str>,
 ) -> Result<Option<Session>, rmcp::ErrorData> {
     if let Some(sid) = session_id {
-        Ok(repo.get_by_id(sid).await.ok())
+        repo.get_by_id(sid).await.map(Some).map_err(|err| {
+            rmcp::ErrorData::internal_error(format!("failed to query session {sid}: {err}"), None)
+        })
     } else {
         repo.get_most_recent_interrupted().await.map_err(|err| {
             rmcp::ErrorData::internal_error(

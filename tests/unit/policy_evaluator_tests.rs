@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use monocoque_agent_rc::models::approval::RiskLevel;
 use monocoque_agent_rc::models::policy::{FilePatterns, WorkspacePolicy};
 use monocoque_agent_rc::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
 
@@ -16,7 +17,7 @@ fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> WorkspacePolicy {
         commands: commands.iter().map(|s| (*s).to_owned()).collect(),
         tools: tools.iter().map(|s| (*s).to_owned()).collect(),
         file_patterns: FilePatterns::default(),
-        risk_level_threshold: "low".to_owned(),
+        risk_level_threshold: RiskLevel::Low,
         log_auto_approved: false,
         summary_interval_seconds: 300,
     }
@@ -162,7 +163,7 @@ fn risk_exceeding_threshold_denied() {
     let wp = WorkspacePolicy {
         enabled: true,
         tools: vec!["ask_approval".to_owned()],
-        risk_level_threshold: "low".to_owned(),
+        risk_level_threshold: RiskLevel::Low,
         ..WorkspacePolicy::default()
     };
     let global = HashMap::new();
@@ -183,7 +184,7 @@ fn risk_within_threshold_approved() {
     let wp = WorkspacePolicy {
         enabled: true,
         tools: vec!["ask_approval".to_owned()],
-        risk_level_threshold: "high".to_owned(),
+        risk_level_threshold: RiskLevel::High,
         ..WorkspacePolicy::default()
     };
     let global = HashMap::new();
@@ -201,7 +202,7 @@ fn critical_risk_always_denied() {
     let wp = WorkspacePolicy {
         enabled: true,
         tools: vec!["ask_approval".to_owned()],
-        risk_level_threshold: "high".to_owned(),
+        risk_level_threshold: RiskLevel::High,
         ..WorkspacePolicy::default()
     };
     let global = HashMap::new();

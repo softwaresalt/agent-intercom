@@ -32,9 +32,13 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 /// Message to be delivered to Slack via chat.postMessage.
 #[derive(Debug, Clone)]
 pub struct SlackMessage {
+    /// Target Slack channel.
     pub channel: SlackChannelId,
+    /// Plain-text body (may be `None` when blocks are present).
     pub text: Option<String>,
+    /// Block Kit layout blocks.
     pub blocks: Option<Vec<SlackBlock>>,
+    /// Thread timestamp for threaded replies.
     pub thread_ts: Option<SlackTs>,
 }
 
@@ -86,7 +90,9 @@ pub struct SlackService {
 
 /// Join handles for Slack background tasks.
 pub struct SlackRuntime {
+    /// Background task that drains the outgoing message queue.
     pub queue_task: JoinHandle<()>,
+    /// Background task running Slack Socket Mode.
     pub socket_task: JoinHandle<()>,
 }
 
@@ -178,10 +184,14 @@ impl SlackService {
         mut queue_rx: mpsc::Receiver<SlackMessage>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
+            /// Maximum consecutive retries before dropping a message.
+            const MAX_RETRIES: u32 = 5;
+
             let session = client.open_session(&token);
             while let Some(message) = queue_rx.recv().await {
                 let request = message.into_request();
                 let mut backoff = INITIAL_RETRY_DELAY;
+                let mut attempt = 0u32;
                 loop {
                     match session.chat_post_message(&request).await {
                         Ok(_) => {
@@ -189,13 +199,18 @@ impl SlackService {
                             break;
                         }
                         Err(error) => {
+                            attempt += 1;
+                            if attempt >= MAX_RETRIES {
+                                error!(?error, attempt, "dropping slack message after max retries");
+                                break;
+                            }
                             let delay = match &error {
                                 slack_morphism::errors::SlackClientError::RateLimitError(rate) => {
                                     rate.retry_after.unwrap_or(backoff)
                                 }
                                 _ => backoff,
                             };
-                            warn!(?error, delay=?delay, "slack post failed; retrying");
+                            warn!(?error, delay=?delay, attempt, "slack post failed; retrying");
                             sleep(delay).await;
                             backoff = (backoff * 2).min(MAX_RETRY_DELAY);
                         }
@@ -213,8 +228,11 @@ impl SlackService {
     ) -> JoinHandle<()> {
         let mut listener_env = SlackClientEventsListenerEnvironment::new(Arc::clone(client))
             .with_error_handler(|err, _client, _state| {
+                // Log the error but return 200 to Slack so it does not retry
+                // the same event envelope. Transient errors will resolve on
+                // the next event; persistent errors surface in structured logs.
                 error!(?err, "socket mode error");
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+                axum::http::StatusCode::OK
             });
 
         // Inject shared AppState so interaction callbacks can access it.

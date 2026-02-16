@@ -58,6 +58,7 @@ async fn test_state() -> Arc<AppState> {
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
         stall_detectors: None,
+        ipc_auth_token: None,
     })
 }
 

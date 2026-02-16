@@ -125,6 +125,10 @@ impl PolicyWatcher {
                     crate::AppError::Policy(format!("failed to watch directory: {err}"))
                 })?;
         } else {
+            // The directory doesn't exist yet. The watcher is stored but
+            // will not receive events until the directory is created.
+            // Callers should re-register after creating the directory,
+            // or rely on the loader's fallback to the default deny-all policy.
             info!(
                 dir = %watch_dir.display(),
                 "policy directory does not exist yet, watcher deferred"

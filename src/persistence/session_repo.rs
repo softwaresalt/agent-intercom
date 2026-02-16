@@ -152,9 +152,7 @@ impl SessionRepo {
             .query("SELECT count() AS count FROM session WHERE status = 'active' GROUP ALL")
             .await?;
         let count_row: Option<CountRow> = response.take(0)?;
-        count_row
-            .map(|row| row.count)
-            .ok_or_else(|| AppError::Db("failed to count sessions".into()))
+        Ok(count_row.map_or(0, |row| row.count))
     }
 
     /// Retrieve the most recently interrupted session.

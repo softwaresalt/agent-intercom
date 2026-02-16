@@ -20,6 +20,8 @@ use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
 
+use super::util::truncate_text;
+
 /// Input parameters for the `forward_prompt` tool per mcp-tools.json contract.
 #[derive(Debug, serde::Deserialize)]
 struct ForwardPromptInput {
@@ -205,9 +207,15 @@ pub async fn handle(
             response_json["instruction"] = serde_json::Value::String(inst.clone());
         }
 
-        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
-            serde_json::to_string(&response_json).unwrap_or_default(),
-        )]))
+        Ok(CallToolResult::success(vec![rmcp::model::Content::json(
+            response_json,
+        )
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(
+                format!("failed to serialize forward_prompt response: {err}"),
+                None,
+            )
+        })?]))
     }
     .instrument(span)
     .await
@@ -266,14 +274,5 @@ fn prompt_type_label(prompt_type: PromptType) -> &'static str {
         PromptType::Clarification => "Clarification",
         PromptType::ErrorRecovery => "Error Recovery",
         PromptType::ResourceWarning => "Resource Warning",
-    }
-}
-
-/// Truncate text to a maximum length, appending "..." if truncated.
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        text.to_owned()
-    } else {
-        format!("{}...", &text[..max_len.saturating_sub(3)])
     }
 }

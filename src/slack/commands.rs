@@ -845,7 +845,15 @@ fn truncate_output(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_owned()
     } else {
-        let truncated = &s[..max_len];
+        // Find the largest char boundary ≤ max_len to avoid splitting
+        // multi-byte UTF-8 sequences.
+        let boundary = s
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= max_len)
+            .last()
+            .unwrap_or(0);
+        let truncated = &s[..boundary];
         format!(
             "{truncated}\n... (truncated, {total} bytes total)",
             total = s.len()

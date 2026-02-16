@@ -77,6 +77,8 @@ pub struct AppState {
     pub pending_waits: PendingWaits,
     /// Per-session stall detector handles keyed by `session_id`.
     pub stall_detectors: Option<StallDetectors>,
+    /// Shared secret for IPC authentication (`None` disables auth).
+    pub ipc_auth_token: Option<String>,
 }
 
 /// MCP server implementation that exposes the nine monocoque-agent-rc tools.
@@ -123,71 +125,74 @@ impl AgentRemServer {
         &self.state
     }
 
-    fn tool_router() -> ToolRouter<Self> {
-        let mut router = ToolRouter::new();
+    fn tool_router() -> &'static ToolRouter<Self> {
+        static ROUTER: std::sync::OnceLock<ToolRouter<AgentRemServer>> = std::sync::OnceLock::new();
+        ROUTER.get_or_init(|| {
+            let mut router = ToolRouter::new();
 
-        for tool in Self::all_tools() {
-            let name = tool.name.to_string();
-            match name.as_str() {
-                "ask_approval" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::ask_approval::handle(context))
-                    }));
-                }
-                "accept_diff" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::accept_diff::handle(context))
-                    }));
-                }
-                "heartbeat" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::heartbeat::handle(context))
-                    }));
-                }
-                "remote_log" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::remote_log::handle(context))
-                    }));
-                }
-                "forward_prompt" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::forward_prompt::handle(context))
-                    }));
-                }
-                "check_auto_approve" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::check_auto_approve::handle(context))
-                    }));
-                }
-                "recover_state" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::recover_state::handle(context))
-                    }));
-                }
-                "set_operational_mode" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::set_operational_mode::handle(context))
-                    }));
-                }
-                "wait_for_instruction" => {
-                    router.add_route(ToolRoute::new_dyn(tool, |context| {
-                        Box::pin(crate::mcp::tools::wait_for_instruction::handle(context))
-                    }));
-                }
-                _ => {
-                    router.add_route(ToolRoute::new_dyn(tool, |_context| {
-                        Box::pin(async {
-                            Err(rmcp::ErrorData::internal_error(
-                                "tool not implemented",
-                                None,
-                            ))
-                        })
-                    }));
+            for tool in Self::all_tools() {
+                let name = tool.name.to_string();
+                match name.as_str() {
+                    "ask_approval" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::ask_approval::handle(context))
+                        }));
+                    }
+                    "accept_diff" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::accept_diff::handle(context))
+                        }));
+                    }
+                    "heartbeat" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::heartbeat::handle(context))
+                        }));
+                    }
+                    "remote_log" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::remote_log::handle(context))
+                        }));
+                    }
+                    "forward_prompt" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::forward_prompt::handle(context))
+                        }));
+                    }
+                    "check_auto_approve" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::check_auto_approve::handle(context))
+                        }));
+                    }
+                    "recover_state" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::recover_state::handle(context))
+                        }));
+                    }
+                    "set_operational_mode" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::set_operational_mode::handle(context))
+                        }));
+                    }
+                    "wait_for_instruction" => {
+                        router.add_route(ToolRoute::new_dyn(tool, |context| {
+                            Box::pin(crate::mcp::tools::wait_for_instruction::handle(context))
+                        }));
+                    }
+                    _ => {
+                        router.add_route(ToolRoute::new_dyn(tool, |_context| {
+                            Box::pin(async {
+                                Err(rmcp::ErrorData::internal_error(
+                                    "tool not implemented",
+                                    None,
+                                ))
+                            })
+                        }));
+                    }
                 }
             }
-        }
 
-        router
+            router
+        })
     }
 
     /// Convert a `serde_json::Value::Object` into the `Arc<Map>` expected by `Tool`.

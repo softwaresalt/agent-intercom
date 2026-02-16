@@ -40,6 +40,13 @@ pub async fn spawn_session(
     );
     let _guard = span.enter();
 
+    // Canonicalize workspace root to a resolved absolute path.
+    let workspace_path = std::path::Path::new(workspace_root)
+        .canonicalize()
+        .map_err(|err| {
+            AppError::Config(format!("invalid workspace root {workspace_root}: {err}"))
+        })?;
+
     // Enforce max concurrent sessions (FR-023).
     let active_count = session_repo.count_active().await?;
     if active_count >= u64::from(config.max_concurrent_sessions) {
@@ -68,10 +75,10 @@ pub async fn spawn_session(
     let mut cmd = Command::new(&config.host_cli);
     cmd.args(&config.host_cli_args)
         .arg(prompt)
-        .env("MONOCOQUE_WORKSPACE_ROOT", workspace_root)
+        .env("MONOCOQUE_WORKSPACE_ROOT", &workspace_path)
         .env("MONOCOQUE_SSE_URL", &sse_url)
         .env("MONOCOQUE_SESSION_ID", &created.id)
-        .current_dir(workspace_root)
+        .current_dir(&workspace_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -83,7 +90,7 @@ pub async fn spawn_session(
 
     info!(
         session_id = created.id,
-        pid = child.id().unwrap_or(0),
+        pid = child.id(),
         host_cli = config.host_cli,
         "agent process spawned"
     );

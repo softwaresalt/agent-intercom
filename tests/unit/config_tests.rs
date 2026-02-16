@@ -72,8 +72,17 @@ fn parses_valid_config() {
     assert_eq!(config.ipc_name, "monocoque-agent-rc");
     assert_eq!(config.authorized_user_ids.len(), 2);
     assert!(config.commands.contains_key("status"));
-    let expected_root = temp.path().canonicalize().expect("canonicalize temp path");
-    assert_eq!(config.default_workspace_root(), expected_root);
+    // On Windows, `canonicalize()` may or may not add the `\\?\`
+    // extended-length prefix depending on the path source. Strip
+    // it from both sides before comparing.
+    let strip_unc = |p: &std::path::Path| -> std::path::PathBuf {
+        p.to_str()
+            .and_then(|s| s.strip_prefix(r"\\?\"))
+            .map_or_else(|| p.to_path_buf(), std::path::PathBuf::from)
+    };
+    let expected_root = strip_unc(&temp.path().canonicalize().expect("canonicalize temp path"));
+    let actual_root = strip_unc(config.default_workspace_root());
+    assert_eq!(actual_root, expected_root);
     assert_eq!(config.retention_days, 14);
 }
 

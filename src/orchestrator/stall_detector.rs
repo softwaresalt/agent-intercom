@@ -94,6 +94,7 @@ impl StallDetector {
             stalled: Arc::clone(&stalled),
             session_id: self.session_id.clone(),
             event_tx: self.event_tx.clone(),
+            join_handle: None,
         };
 
         let task_handle = tokio::spawn(
@@ -117,8 +118,8 @@ impl StallDetector {
             stalled: handle.stalled,
             session_id: handle.session_id,
             event_tx: handle.event_tx,
+            join_handle: Some(task_handle),
         }
-        .with_join_handle(task_handle)
     }
 
     /// Core timer loop.
@@ -243,6 +244,11 @@ impl StallDetector {
     /// If paused, waits until unpaused before starting the sleep.
     /// If a reset fires during sleep, the future completes early via
     /// `Notify::notified` in the outer `select!`.
+    ///
+    /// When paused, this function polls at 50 ms intervals until unpaused.
+    /// A `Notify`-based approach would be more efficient, but the pause
+    /// state is rare (only during long-running server operations) and the
+    /// overhead is negligible for this use case.
     async fn wait_unless_paused(
         duration: Duration,
         paused: &AtomicBool,
@@ -268,6 +274,8 @@ pub struct StallDetectorHandle {
     stalled: Arc<AtomicBool>,
     session_id: String,
     event_tx: mpsc::Sender<StallEvent>,
+    /// Task handle for the background detector loop.
+    join_handle: Option<JoinHandle<()>>,
 }
 
 impl StallDetectorHandle {
@@ -298,21 +306,16 @@ impl StallDetectorHandle {
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
-
-    /// Attach the spawned task handle for awaiting shutdown.
-    fn with_join_handle(self, _handle: JoinHandle<()>) -> Self {
-        // We store a detached handle; callers await via CancellationToken.
-        self
-    }
 }
 
 impl StallDetectorHandle {
-    /// Placeholder for awaiting the detector's completion. Useful in tests.
+    /// Await the detector's completion.
     ///
     /// The detector runs until cancelled via `CancellationToken`.
-    pub fn await_completion(self) {
-        // The detector runs until cancelled; this is a no-op placeholder
-        // since the JoinHandle is detached. Callers cancel via CancellationToken.
-        drop(self);
+    /// If no `JoinHandle` is stored, this is a no-op.
+    pub async fn await_completion(self) {
+        if let Some(handle) = self.join_handle {
+            let _ = handle.await;
+        }
     }
 }

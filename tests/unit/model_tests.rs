@@ -292,7 +292,7 @@ fn workspace_policy_from_json() {
 
     assert!(policy.enabled);
     assert_eq!(policy.commands, vec!["cargo test"]);
-    assert_eq!(policy.risk_level_threshold, "high");
+    assert_eq!(policy.risk_level_threshold, RiskLevel::High);
     assert_eq!(policy.summary_interval_seconds, 600);
 }
 
@@ -303,7 +303,7 @@ fn workspace_policy_defaults() {
     assert!(!policy.enabled);
     assert!(policy.commands.is_empty());
     assert!(policy.tools.is_empty());
-    assert_eq!(policy.risk_level_threshold, "low");
+    assert_eq!(policy.risk_level_threshold, RiskLevel::Low);
     assert_eq!(policy.summary_interval_seconds, 300);
 }
 
@@ -314,7 +314,7 @@ fn workspace_policy_partial_json() {
 
     assert!(policy.enabled);
     assert!(policy.commands.is_empty());
-    assert_eq!(policy.risk_level_threshold, "low");
+    assert_eq!(policy.risk_level_threshold, RiskLevel::Low);
 }
 
 #[test]

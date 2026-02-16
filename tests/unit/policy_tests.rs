@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use monocoque_agent_rc::models::approval::RiskLevel;
 use monocoque_agent_rc::policy::loader::PolicyLoader;
 
 /// Helper: write a policy JSON file under `workspace_root/.monocoque/settings.json`.
@@ -55,7 +56,7 @@ fn loads_valid_complete_policy() {
     assert_eq!(policy.tools, vec!["remote_log".to_owned()]);
     assert_eq!(policy.file_patterns.write, vec!["src/**/*.rs".to_owned()]);
     assert_eq!(policy.file_patterns.read, vec!["**/*".to_owned()]);
-    assert_eq!(policy.risk_level_threshold, "high");
+    assert_eq!(policy.risk_level_threshold, RiskLevel::High);
     assert!(policy.log_auto_approved);
     assert_eq!(policy.summary_interval_seconds, 120);
 }
@@ -78,7 +79,7 @@ fn loads_minimal_policy_with_defaults() {
     assert!(policy.enabled);
     assert!(policy.commands.is_empty());
     assert!(policy.tools.is_empty());
-    assert_eq!(policy.risk_level_threshold, "low");
+    assert_eq!(policy.risk_level_threshold, RiskLevel::Low);
     assert!(!policy.log_auto_approved);
     assert_eq!(policy.summary_interval_seconds, 300);
 }

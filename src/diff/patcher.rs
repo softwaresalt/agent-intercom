@@ -50,6 +50,6 @@ pub fn apply_patch(
         ))
     })?;
 
-    // Write the patched content atomically.
-    write_full_file(file_path, &patched, workspace_root)
+    // Write the patched content atomically using the validated path.
+    write_full_file(&validated, &patched, workspace_root)
 }

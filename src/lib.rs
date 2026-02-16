@@ -1,3 +1,9 @@
+//! Monocoque Agent RC — MCP remote agent server.
+//!
+//! Provides session lifecycle management, Slack-based human-in-the-loop
+//! approval workflows, and a persistence layer for long-running AI agent
+//! orchestration.
+
 #![forbid(unsafe_code)]
 
 pub mod config;

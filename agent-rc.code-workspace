@@ -47,7 +47,9 @@
 			"cargo test": true,
 			"git commit": true,
 			"git push": true,
-			"git add": true
+			"git add": true,
+			"New-Item": true,
+			"cargo fmt": true
 		},
 		"powershell.cwd": "monocoque-agent-rc"
 	},

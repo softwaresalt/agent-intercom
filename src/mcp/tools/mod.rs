@@ -8,4 +8,5 @@ pub mod heartbeat;
 pub mod recover_state;
 pub mod remote_log;
 pub mod set_operational_mode;
+pub mod util;
 pub mod wait_for_instruction;

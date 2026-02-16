@@ -26,8 +26,29 @@ pub fn validate_path(workspace_root: &Path, candidate: impl AsRef<Path>) -> Resu
         .canonicalize()
         .map_err(|err| AppError::PathViolation(format!("workspace root invalid: {err}")))?;
 
+    let candidate_ref = candidate.as_ref();
+
+    // Fast path: if the candidate is already absolute and within the root,
+    // skip component-level normalization. This handles re-validation of
+    // previously validated paths (e.g., write_full_file receiving output
+    // from apply_patch).
+    if candidate_ref.is_absolute() && candidate_ref.starts_with(&root) {
+        if candidate_ref.exists() {
+            let canonical = candidate_ref
+                .canonicalize()
+                .map_err(|err| AppError::PathViolation(format!("cannot resolve path: {err}")))?;
+            if !canonical.starts_with(&root) {
+                return Err(AppError::PathViolation(
+                    "symlink target escapes workspace".into(),
+                ));
+            }
+            return Ok(canonical);
+        }
+        return Ok(candidate_ref.to_path_buf());
+    }
+
     let mut normalized = PathBuf::new();
-    for component in candidate.as_ref().components() {
+    for component in candidate_ref.components() {
         match component {
             Component::ParentDir => {
                 if !normalized.pop() {
@@ -38,7 +59,9 @@ pub fn validate_path(workspace_root: &Path, candidate: impl AsRef<Path>) -> Resu
             }
             Component::CurDir => {}
             Component::RootDir | Component::Prefix(_) => {
-                normalized.clear();
+                return Err(AppError::PathViolation(
+                    "absolute paths are not allowed; use workspace-relative paths".into(),
+                ));
             }
             Component::Normal(part) => normalized.push(part),
         }

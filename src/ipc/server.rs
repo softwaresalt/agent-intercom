@@ -48,6 +48,8 @@ struct IpcRequest {
     instruction: Option<String>,
     /// Target mode (for `mode` command).
     mode: Option<String>,
+    /// Shared-secret authentication token.
+    auth_token: Option<String>,
 }
 
 /// Outbound IPC response to `monocoque-ctl`.
@@ -160,7 +162,9 @@ async fn handle_connection(
                         Err(err) => IpcResponse::error(format!("invalid json: {err}")),
                     };
 
-                    let mut response_line = serde_json::to_string(&response).unwrap_or_default();
+                    let mut response_line = serde_json::to_string(&response).unwrap_or_else(|_| {
+                        r#"{"ok":false,"error":"serialization failed"}"#.to_owned()
+                    });
                     response_line.push('\n');
 
                     if let Err(err) = writer.write_all(response_line.as_bytes()).await {
@@ -185,6 +189,17 @@ async fn handle_connection(
 async fn dispatch_command(request: &IpcRequest, state: &Arc<AppState>) -> IpcResponse {
     let span = info_span!("ipc_command", command = %request.command);
     let _guard = span.enter();
+
+    // Validate shared-secret auth token when configured.
+    if let Some(ref expected) = state.ipc_auth_token {
+        match request.auth_token {
+            Some(ref provided) if provided == expected => {}
+            _ => {
+                warn!(command = %request.command, "IPC request rejected: invalid auth token");
+                return IpcResponse::error("unauthorized");
+            }
+        }
+    }
 
     match request.command.as_str() {
         "list" => handle_list(state).await,
@@ -288,11 +303,21 @@ async fn handle_reject(request: &IpcRequest, state: &Arc<AppState>) -> IpcRespon
 }
 
 /// Resume a waiting agent via IPC.
+///
+/// When `request.id` contains a session ID, that specific session is resumed.
+/// Otherwise the first pending wait is used (for single-session scenarios).
 async fn handle_resume(request: &IpcRequest, state: &Arc<AppState>) -> IpcResponse {
     let instruction = request.instruction.clone();
 
-    // Find the first pending wait (keyed by session_id).
-    let session_id = {
+    // Prefer explicit session_id from the request when available.
+    let session_id = if let Some(ref sid) = request.id {
+        let pending = state.pending_waits.lock().await;
+        if pending.contains_key(sid) {
+            Some(sid.clone())
+        } else {
+            return IpcResponse::error(format!("session {sid} is not waiting"));
+        }
+    } else {
         let pending = state.pending_waits.lock().await;
         pending.keys().next().cloned()
     };

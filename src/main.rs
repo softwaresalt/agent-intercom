@@ -1,5 +1,10 @@
 #![forbid(unsafe_code)]
 
+//! `monocoque-agent-rc` — MCP remote agent server binary.
+//!
+//! Bootstraps configuration, starts the MCP transport (HTTP/SSE or stdio),
+//! the Slack Socket Mode integration, and the IPC server for `monocoque-ctl`.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -59,7 +64,10 @@ async fn run(args: Cli) -> Result<()> {
 
     // Override workspace root from CLI if provided.
     if let Some(ws) = args.workspace {
-        config.default_workspace_root = ws;
+        let canonical = std::path::Path::new(&ws)
+            .canonicalize()
+            .map_err(|err| AppError::Config(format!("invalid workspace override: {err}")))?;
+        config.default_workspace_root = canonical;
     }
 
     // Load Slack credentials from keyring / env vars.
@@ -99,6 +107,9 @@ async fn run(args: Cli) -> Result<()> {
         (Some(Arc::new(svc)), Some(runtime))
     };
 
+    // Generate a random IPC auth token for this server instance.
+    let ipc_auth_token = Some(uuid::Uuid::new_v4().to_string());
+
     let state = Arc::new(AppState {
         config: Arc::clone(&config),
         db,
@@ -107,6 +118,7 @@ async fn run(args: Cli) -> Result<()> {
         pending_prompts,
         pending_waits,
         stall_detectors: Some(StallDetectors::default()),
+        ipc_auth_token,
     });
 
     // ── Check for interrupted sessions from prior crash (T082) ──
@@ -306,17 +318,25 @@ async fn shutdown_signal() {
 
     #[cfg(unix)]
     {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("SIGTERM handler");
-        tokio::select! {
-            _ = ctrl_c => {}
-            _ = sigterm.recv() => {}
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = ctrl_c => {}
+                    _ = sigterm.recv() => {}
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%err, "failed to register SIGTERM handler, using ctrl-c only");
+                let _ = ctrl_c.await;
+            }
         }
     }
 
     #[cfg(not(unix))]
     {
-        ctrl_c.await.expect("ctrl-c handler");
+        if let Err(err) = ctrl_c.await {
+            tracing::error!(%err, "ctrl-c signal handler failed");
+        }
     }
 }
 

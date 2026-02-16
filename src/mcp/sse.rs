@@ -16,7 +16,7 @@ use axum::response::Response;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::handler::{AgentRemServer, AppState};
 use crate::{AppError, Result};
@@ -71,7 +71,10 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
     let server_ct = {
         let state = Arc::clone(&state);
         sse_server.with_service(move || {
-            let channel_override = inbox_for_factory.lock().expect("inbox lock").take();
+            let channel_override = inbox_for_factory
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             if let Some(ref ch) = channel_override {
                 info!(channel_id = %ch, "SSE session with per-workspace channel override");
             }
@@ -91,9 +94,14 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
             if is_sse {
                 // Serialise so the inbox value is consumed by exactly
                 // the factory call that corresponds to this request.
-                let _permit = sem.acquire().await.expect("semaphore closed");
+                let Ok(_permit) = sem.acquire().await else {
+                    warn!("connection semaphore closed; skipping channel override");
+                    return next.run(request).await;
+                };
                 let channel_id = extract_channel_id(request.uri());
-                *inbox.lock().expect("inbox lock") = channel_id;
+                *inbox
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = channel_id;
                 let response: Response = next.run(request).await;
                 // _permit drops here after the factory has consumed the inbox
                 response

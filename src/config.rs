@@ -14,7 +14,7 @@ use crate::{AppError, Result};
 ///
 /// Tokens and team ID are loaded at runtime via OS keychain or environment
 /// variables, not from the TOML config file (FR-036).
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SlackConfig {
     /// Default channel where notifications are posted.
@@ -28,6 +28,17 @@ pub struct SlackConfig {
     /// Slack workspace team ID (populated at runtime).
     #[serde(skip)]
     pub team_id: String,
+}
+
+impl std::fmt::Debug for SlackConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SlackConfig")
+            .field("channel_id", &self.channel_id)
+            .field("app_token", &"[REDACTED]")
+            .field("bot_token", &"[REDACTED]")
+            .field("team_id", &self.team_id)
+            .finish()
+    }
 }
 
 /// Configurable timeout values (seconds) for blocking tool interactions.
@@ -299,14 +310,13 @@ async fn load_credential(keyring_key: &str, env_key: &str) -> Result<String> {
 ///
 /// Uses the same resolution order as [`load_credential`] but never fails.
 async fn load_optional_credential(keyring_key: &str, env_key: &str) -> String {
-    match load_credential(keyring_key, env_key).await {
-        Ok(value) => value,
-        Err(_) => {
-            tracing::info!(
-                key = keyring_key,
-                "optional credential not found, using empty default"
-            );
-            String::new()
-        }
+    if let Ok(value) = load_credential(keyring_key, env_key).await {
+        value
+    } else {
+        tracing::info!(
+            key = keyring_key,
+            "optional credential not found, using empty default"
+        );
+        String::new()
     }
 }
