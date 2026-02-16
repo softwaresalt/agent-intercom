@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Remote Agent Server — Tool Contracts",
+  "description": "JSON-RPC tool definitions exposed by the monocoque-agent-rc MCP server. Each tool follows the MCP tool calling convention: the agent sends a tools/call request with the tool name and arguments, and the server returns a result with content blocks.",
+
+  "tools": {
+    "ask_approval": {
+      "description": "Submit a code proposal for remote operator approval via Slack. Blocks until the operator responds or the timeout elapses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Concise summary of the proposal (e.g., 'Create Auth Middleware')"
+          },
+          "description": {
+            "type": "string",
+            "description": "Contextual details about the proposed change"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Standard unified diff or raw file content proposed by the agent"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Target file path relative to workspace_root. For multi-file diffs, this is the primary file; additional paths are extracted from unified diff headers."
+          },
+          "risk_level": {
+            "type": "string",
+            "enum": ["low", "high", "critical"],
+            "default": "low",
+            "description": "Risk classification. 'high' and 'critical' trigger additional alerting (e.g., @channel mention)."
+          }
+        },
+        "required": ["title", "diff", "file_path"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["approved", "rejected", "timeout"]
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Unique identifier. Pass to accept_diff to apply approved changes."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional rejection note from the operator (only present when status=rejected)"
+          }
+        },
+        "required": ["status", "request_id"]
+      }
+    },
+
+    "accept_diff": {
+      "description": "Apply previously approved code changes to the local file system. Validates approval status, checks file integrity, and performs atomic writes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "description": "Unique identifier of the approved proposal returned by ask_approval"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, overwrite the target file even if local content has diverged since proposal creation. Logs a warning to Slack."
+          }
+        },
+        "required": ["request_id"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["applied", "error"]
+          },
+          "files_written": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "bytes": { "type": "integer" }
+              }
+            }
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["request_not_found", "not_approved", "already_consumed", "path_violation", "patch_conflict"],
+            "description": "Present only when status=error"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description"
+          }
+        },
+        "required": ["status"]
+      }
+    },
+
+    "check_auto_approve": {
+      "description": "Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "description": "Name of the tool or command to check (e.g., 'write_file', 'cargo test')"
+          },
+          "context": {
+            "type": "object",
+            "description": "Additional metadata (target file path, risk level) for fine-grained policy evaluation",
+            "properties": {
+              "file_path": { "type": "string" },
+              "risk_level": { "type": "string", "enum": ["low", "high", "critical"] }
+            }
+          }
+        },
+        "required": ["tool_name"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "auto_approved": { "type": "boolean" },
+          "matched_rule": {
+            "type": "string",
+            "description": "The rule key that matched, or null if not auto-approved"
+          }
+        },
+        "required": ["auto_approved"]
+      }
+    },
+
+    "forward_prompt": {
+      "description": "Forward an agent-generated continuation prompt to the remote operator via Slack. Blocks until the operator responds or the timeout elapses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt_text": {
+            "type": "string",
+            "description": "Raw text of the continuation prompt emitted by the agent"
+          },
+          "prompt_type": {
+            "type": "string",
+            "enum": ["continuation", "clarification", "error_recovery", "resource_warning"],
+            "default": "continuation",
+            "description": "Category of the prompt for tailored rendering"
+          },
+          "elapsed_seconds": {
+            "type": "integer",
+            "description": "Seconds since last user interaction"
+          },
+          "actions_taken": {
+            "type": "integer",
+            "description": "Count of actions performed in this iteration"
+          }
+        },
+        "required": ["prompt_text"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": ["continue", "refine", "stop"]
+          },
+          "instruction": {
+            "type": "string",
+            "description": "Revised instruction text (present only when decision=refine)"
+          }
+        },
+        "required": ["decision"]
+      }
+    },
+
+    "remote_log": {
+      "description": "Send a non-blocking status log message to the Slack channel. Does not block agent execution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Log message to post"
+          },
+          "level": {
+            "type": "string",
+            "enum": ["info", "success", "warning", "error"],
+            "default": "info",
+            "description": "Controls visual presentation in Slack"
+          },
+          "thread_ts": {
+            "type": "string",
+            "description": "Slack thread timestamp to post as a reply. When omitted, posts as top-level message."
+          }
+        },
+        "required": ["message"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "posted": { "type": "boolean" },
+          "ts": {
+            "type": "string",
+            "description": "Message timestamp for threading"
+          }
+        },
+        "required": ["posted", "ts"]
+      }
+    },
+
+    "recover_state": {
+      "description": "Retrieve the last known state from the persistent database. Called by the agent on startup to check for interrupted sessions or pending requests.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Specific session to recover. When omitted, returns the most recently active session."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["recovered", "clean"]
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Recovered session ID, or null if clean"
+          },
+          "pending_requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "request_id": { "type": "string" },
+                "type": { "type": "string", "enum": ["approval", "prompt"] },
+                "title": { "type": "string" },
+                "created_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          },
+          "last_checkpoint": {
+            "type": "object",
+            "properties": {
+              "checkpoint_id": { "type": "string" },
+              "label": { "type": "string" },
+              "created_at": { "type": "string", "format": "date-time" }
+            },
+            "description": "Most recent checkpoint, or null if none"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Last-reported progress snapshot from the recovered session, or null if none was reported. Allows the agent to determine which tasks were completed and which remain.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "status": { "type": "string", "enum": ["done", "in_progress", "pending"] }
+              },
+              "required": ["label", "status"]
+            }
+          }
+        },
+        "required": ["status"]
+      }
+    },
+
+    "set_operational_mode": {
+      "description": "Switch the server between remote, local, and hybrid operational modes at runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["remote", "local", "hybrid"],
+            "description": "Target mode. 'remote': Slack only. 'local': IPC only, Slack suppressed. 'hybrid': both channels, first response wins."
+          }
+        },
+        "required": ["mode"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "previous_mode": { "type": "string", "enum": ["remote", "local", "hybrid"] },
+          "current_mode": { "type": "string", "enum": ["remote", "local", "hybrid"] }
+        },
+        "required": ["previous_mode", "current_mode"]
+      }
+    },
+
+    "wait_for_instruction": {
+      "description": "Place the agent in standby, polling for a resume signal or new command from the operator via Slack.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "default": "Agent is idle and awaiting instructions.",
+            "description": "Status message displayed in Slack while waiting"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "default": 0,
+            "description": "Maximum wait time. 0 = indefinite."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["resumed", "timeout"]
+          },
+          "instruction": {
+            "type": "string",
+            "description": "New instruction text from operator, or null if bare resume"
+          }
+        },
+        "required": ["status"]
+      }
+    },
+
+    "heartbeat": {
+      "description": "Lightweight liveness signal. Resets the stall detection timer during long-running local operations. Optionally accepts a structured progress snapshot (ordered list of todo items with labels and statuses) that the server stores on the session record for enriching stall alerts, nudge messages, and crash recovery. Returns immediately.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status_message": {
+            "type": "string",
+            "description": "Optional status update logged to the operator (e.g., 'Processing large codebase...')"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Optional ordered list of todo items. When provided, replaces any previously stored snapshot on the session. When omitted, existing snapshot is preserved.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Human-readable task description"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["done", "in_progress", "pending"],
+                  "description": "Current status of the task"
+                }
+              },
+              "required": ["label", "status"]
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "acknowledged": { "type": "boolean" },
+          "session_id": { "type": "string" },
+          "stall_detection_enabled": {
+            "type": "boolean",
+            "description": "Whether stall detection is active for this session"
+          }
+        },
+        "required": ["acknowledged"]
+      }
+    }
+  }
+}

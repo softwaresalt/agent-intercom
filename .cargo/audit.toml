@@ -1,0 +1,48 @@
+# cargo-audit configuration
+#
+# All advisories listed here originate from transitive dependencies of
+# surrealdb 1.5.6 or rmcp 0.5.0.  These crates cannot be independently
+# upgraded without a major-version bump of the root dependency.
+#
+# SurrealDB will be replaced by sqlx (SQLite) in the next feature release,
+# which will eliminate 8 of the 9 advisories below.  The remaining advisory
+# (paste via rmcp) is a compile-time-only unmaintained warning.
+
+[advisories]
+ignore = [
+    # ── Vulnerabilities (transitive via surrealdb) ───────────────────────────
+
+    # RUSTSEC-2024-0358 — object_store 0.8.0 (low severity 3.8)
+    # AWS WebIdentityToken exposure in log files.
+    # We never use AWS object storage; pulled in by surrealdb-core.
+    "RUSTSEC-2024-0358",
+
+    # RUSTSEC-2025-0009 — ring 0.16.20
+    # AES panic with overflow checking.  Transitive via surrealdb-jsonwebtoken.
+    "RUSTSEC-2025-0009",
+
+    # RUSTSEC-2023-0071 — rsa 0.9.10 (medium severity 5.9)
+    # Marvin Attack timing sidechannel.  No fix available upstream.
+    # RSA is only used internally by surrealdb-jsonwebtoken for JWK support.
+    "RUSTSEC-2023-0071",
+
+    # ── Unmaintained crate warnings ──────────────────────────────────────────
+
+    # RUSTSEC-2023-0089 — atomic-polyfill 1.0.3 (via surrealdb)
+    "RUSTSEC-2023-0089",
+
+    # RUSTSEC-2024-0436 — paste 1.0.15 (via rmcp 0.5.0, compile-time only)
+    "RUSTSEC-2024-0436",
+
+    # RUSTSEC-2024-0370 — proc-macro-error 1.0.4 (via surrealdb, compile-time)
+    "RUSTSEC-2024-0370",
+
+    # RUSTSEC-2025-0010 — ring 0.16.20 unmaintained (via surrealdb)
+    "RUSTSEC-2025-0010",
+
+    # RUSTSEC-2025-0134 — rustls-pemfile 1.0.4 (via surrealdb → reqwest)
+    "RUSTSEC-2025-0134",
+
+    # RUSTSEC-2025-0141 — bincode 1.3.3 (via surrealdb, compile-time)
+    "RUSTSEC-2025-0141",
+]

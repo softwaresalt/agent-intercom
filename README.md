@@ -1,2 +1,3 @@
-# monocoque-agent-rem
-A remote agent management MCP server for agentic development IDEs.
+# monocoque-agent-rc
+Agent Remote Control (ARC) MCP Server for Agentic Development IDEs.
+

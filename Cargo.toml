@@ -1,0 +1,84 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Monocoque Team"]
+
+[workspace.dependencies]
+axum = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+diffy = "0.4"
+interprocess = { version = "2.0", features = ["tokio"] }
+keyring = "3"
+notify = "6.1"
+rmcp = { version = "0.5", features = ["server", "transport-sse-server", "transport-io"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+slack-morphism = { version = "2.17", features = ["hyper"] }
+surrealdb = { version = "1.5", features = ["kv-rocksdb", "kv-mem"] }
+tempfile = "3.10"
+tokio = { version = "1.37", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+uuid = { version = "1.7", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+
+[package]
+name = "monocoque-agent-rc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+clap = { workspace = true }
+diffy = { workspace = true }
+interprocess = { workspace = true }
+keyring = { workspace = true }
+notify = { workspace = true }
+rmcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+slack-morphism = { workspace = true }
+surrealdb = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tokio-util = { version = "0.7.18", features = ["rt"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+glob = "0.3"
+
+[dev-dependencies]
+serial_test = "3"
+
+[[bin]]
+name = "monocoque-agent-rc"
+path = "src/main.rs"
+
+[[bin]]
+name = "monocoque-ctl"
+path = "ctl/main.rs"
