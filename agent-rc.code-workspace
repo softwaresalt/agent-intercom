@@ -8,26 +8,6 @@
 		"chat.tools.terminal.autoApprove": {
 			".specify/scripts/bash/": true,
 			".specify/scripts/powershell/": true,
-			"/^powershell -NoLogo -Command \"Select-String -Path 'D:\\\\\\.cargo\\\\registry\\\\src\\\\index\\.crates\\.io-1949cf8c6b5b557f\\\\rmcp-0\\.5\\.0\\\\src\\\\\\*\\*\\\\\\*\\.rs' -Pattern 'Info' \\| Select-String 'struct Server'\"$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"/^powershell -NoLogo -Command \"Select-String -Path 'D:\\\\\\.cargo\\\\registry\\\\src\\\\index\\.crates\\.io-1949cf8c6b5b557f\\\\rmcp-0\\.5\\.0\\\\src\\\\model\\\\\\*\\.rs' -Pattern 'ServerInfo'\"$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"/^powershell -NoLogo -Command \"Select-String -Path 'D:\\\\\\.cargo\\\\registry\\\\src\\\\index\\.crates\\.io-1949cf8c6b5b557f\\\\rmcp-0\\.5\\.0\\\\src\\\\\\*\\*\\\\\\*\\.rs' -Pattern 'InitializeResult'\"$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"/^powershell -NoLogo -Command \"rg -n --no-heading --color never ServerInfo 'D:\\\\\\.cargo\\\\registry\\\\src\\\\index\\.crates\\.io-1949cf8c6b5b557f\\\\rmcp-0\\.5\\.0'\"$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"/^powershell -NoLogo -Command \"Select-String -Path 'D:\\\\\\.cargo\\\\registry\\\\src\\\\index\\.crates\\.io-1949cf8c6b5b557f\\\\rmcp-0\\.5\\.0\\\\src\\\\\\*\\*\\\\\\*\\.rs' -Pattern 'struct Initialize'\"$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
 			"cargo doc": true,
 			"cargo metadata": true,
 			"Out-File": true,
@@ -49,7 +29,8 @@
 			"git push": true,
 			"git add": true,
 			"New-Item": true,
-			"cargo fmt": true
+			"cargo fmt": true,
+			"Get-Item": true
 		},
 		"powershell.cwd": "monocoque-agent-rc"
 	},

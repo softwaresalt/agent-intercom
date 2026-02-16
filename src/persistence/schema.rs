@@ -2,7 +2,8 @@
 //!
 //! All table definitions use `SCHEMAFULL` mode. Schema is applied
 //! on every server startup; `DEFINE` statements in `SurrealDB` are
-//! inherently idempotent (re-defining an existing field is a no-op).
+//! safe to re-run — re-defining an existing entity overwrites it with
+//! the same definition, so the result is convergent.
 
 use crate::Result;
 
@@ -10,7 +11,8 @@ use super::db::Database;
 
 /// Apply all table and field definitions to the connected database.
 ///
-/// Re-execution is safe: `SurrealDB` `DEFINE` statements are idempotent.
+/// Re-execution is safe: `SurrealDB` `DEFINE` statements overwrite
+/// existing definitions with the same shape, producing a convergent result.
 ///
 /// # Errors
 ///

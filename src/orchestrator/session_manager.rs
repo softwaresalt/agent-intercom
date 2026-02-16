@@ -54,8 +54,9 @@ pub async fn resume_session(session_id: &str, session_repo: &SessionRepo) -> Res
 
 /// Terminate a session, killing the child process with a 5-second grace period.
 ///
-/// Sends SIGTERM (or equivalent) to the child process, waits up to 5 seconds
-/// for graceful exit, then force-kills if necessary. Updates the session
+/// Waits up to 5 seconds for the child process to exit on its own (it may
+/// have already received an EOF on its stdin).  If the process has not
+/// exited after the grace period, it is force-killed.  Updates the session
 /// status to `Terminated` in the database.
 ///
 /// # Errors
@@ -72,11 +73,14 @@ pub async fn terminate_session(
 
     // Attempt graceful termination of the child process.
     if let Some(process) = child {
-        info!(session_id, "sending termination signal to child process");
+        info!(
+            session_id,
+            "waiting for child process to exit (5s grace period)"
+        );
 
-        // Start kill — on Unix this sends SIGKILL via `kill_on_drop`,
-        // on Windows calls TerminateProcess. We use a timeout approach:
-        // wait up to 5s, then force kill.
+        // Wait up to 5s for a natural exit, then force-kill.  The child
+        // process has `kill_on_drop(true)` set, so dropping it will also
+        // terminate it, but we prefer an explicit flow here for logging.
         let grace = Duration::from_secs(5);
         let wait_result = tokio::time::timeout(grace, process.wait()).await;
 

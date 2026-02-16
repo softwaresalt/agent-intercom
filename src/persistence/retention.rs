@@ -19,8 +19,8 @@ const PURGE_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// Spawn the retention purge background task.
 ///
-/// The task runs hourly. On each tick it deletes all associated records
-/// for sessions that have been terminated for longer than `retention_days`.
+/// The first purge runs after `PURGE_INTERVAL` (1 hour), not immediately
+/// on startup.  Subsequent purges repeat at the same interval.
 #[must_use]
 pub fn spawn_retention_task(
     db: Arc<Database>,
@@ -28,7 +28,8 @@ pub fn spawn_retention_task(
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(PURGE_INTERVAL);
+        let mut interval =
+            tokio::time::interval_at(tokio::time::Instant::now() + PURGE_INTERVAL, PURGE_INTERVAL);
         loop {
             tokio::select! {
                 () = cancel.cancelled() => {

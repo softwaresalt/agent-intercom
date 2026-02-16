@@ -127,7 +127,18 @@ pub async fn read_resource(
         .as_ref()
         .ok_or_else(|| AppError::Slack("slack service not available (local-only mode)".into()))?;
 
-    let limit = DEFAULT_LIMIT;
+    // Parse optional limit from the URI query parameters and clamp to
+    // the valid [1, 100] range.  Falls back to DEFAULT_LIMIT.
+    let user_limit = request
+        .uri
+        .split_once('?')
+        .and_then(|(_, query)| {
+            query
+                .split('&')
+                .find_map(|pair| pair.strip_prefix("limit="))
+        })
+        .and_then(|v| v.parse::<u16>().ok());
+    let limit = clamp_limit(user_limit);
     let slack_channel = slack_morphism::prelude::SlackChannelId(channel_id.to_owned());
 
     info!(channel_id, limit, "reading slack channel history resource");

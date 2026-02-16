@@ -59,10 +59,13 @@ pub async fn spawn_session(
     // Verify user is authorized.
     config.ensure_authorized(owner_user_id)?;
 
-    // Create session record.
+    // Create session record with the canonicalized workspace path so all
+    // downstream components (path safety, policy loading, IPC) use a
+    // consistent, fully-resolved root.
+    let canonical_root = workspace_path.display().to_string();
     let session = Session::new(
         owner_user_id.to_owned(),
-        workspace_root.to_owned(),
+        canonical_root,
         Some(prompt.to_owned()),
         SessionMode::Remote,
     );

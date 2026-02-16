@@ -51,10 +51,26 @@ pub async fn handle(
         let sessions = session_repo.list_active().await.map_err(|err| {
             rmcp::ErrorData::internal_error(format!("failed to query active sessions: {err}"), None)
         })?;
-        let session = sessions
-            .into_iter()
-            .next()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
+
+        // Avoid arbitrarily selecting an active session when multiple exist.
+        let mut iter = sessions.into_iter();
+        let first = iter.next();
+        let second = iter.next();
+        let session = match (first, second) {
+            (None, _) => {
+                return Err(rmcp::ErrorData::internal_error(
+                    "no active session found",
+                    None,
+                ));
+            }
+            (Some(sess), None) => sess,
+            (Some(_), Some(_)) => {
+                return Err(rmcp::ErrorData::internal_error(
+                    "multiple active sessions found; heartbeat requires an unambiguous session",
+                    None,
+                ));
+            }
+        };
 
         let stall_enabled = state.config.stall.enabled;
 
