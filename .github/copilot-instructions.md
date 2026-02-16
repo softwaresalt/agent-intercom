@@ -4,30 +4,250 @@ maturity: stable
 ---
 # monocoque-agent-rc Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-02-09
+Last updated: 2026-02-15
 
 ## Active Technologies
 
-- Rust (stable, edition 2021) + `rmcp` 0.5 (official MCP SDK), `slack-morphism` (Slack Socket Mode), `axum` 0.8 (HTTP/SSE transport), `tokio` (async runtime), `serde`/`serde_json`, `diffy` 0.4 (diff/patch), `notify` (fs watcher), `tracing`/`tracing-subscriber` (001-mcp-remote-agent-server)
+| Dependency | Version | Purpose |
+|---|---|---|
+| Rust | stable, edition 2021 | Language toolchain |
+| `rmcp` | 0.5 | MCP SDK (`ServerHandler`, `ToolRouter`, `ToolRoute`) |
+| `axum` | 0.8 | HTTP/SSE transport (`StreamableHttpService` on `/mcp`) |
+| `slack-morphism` | 2.17 | Slack Socket Mode client |
+| `tokio` | 1.37 | Async runtime (full feature set) |
+| `surrealdb` | 1.5 | Embedded DB (`kv-rocksdb` prod, `kv-mem` tests) |
+| `diffy` | 0.4 | Unified diff parsing & patch application |
+| `interprocess` | 2.0 | IPC named pipes (Windows) / Unix domain sockets |
+| `clap` | 4.5 | CLI argument parsing |
+| `notify` | 6.1 | Filesystem watcher (policy hot-reload) |
+| `serde` / `serde_json` | 1.0 | Serialization |
+| `sha2` | 0.10 | Content integrity hashing |
+| `tracing` / `tracing-subscriber` | 0.1 / 0.3 | Structured logging |
+| `chrono` | 0.4 | Timestamps |
+| `uuid` | 1.7 | Entity IDs |
+| `keyring` | 3 | OS keychain credential access |
+| `tokio-util` | 0.7 | `CancellationToken` for graceful shutdown |
+| `reqwest` | 0.13 | HTTP client (rustls) |
+| `glob` | 0.3 | Glob pattern matching |
+| `tempfile` | 3.10 | Atomic file writes |
 
 ## Project Structure
 
 ```text
 src/
+  config.rs               # GlobalConfig, credential loading, TOML parsing
+  errors.rs               # AppError enum (Config, Db, Slack, Mcp, Diff, Policy,
+                           #   Ipc, PathViolation, PatchConflict, NotFound,
+                           #   Unauthorized, AlreadyConsumed)
+  lib.rs                  # Crate root — re-exports GlobalConfig, AppError, Result
+  main.rs                 # CLI bootstrap, tokio runtime, server startup
+  diff/                   # Unified diff parsing, patch application, atomic writes
+    applicator.rs, patcher.rs, path_safety.rs, writer.rs
+  ipc/                    # IPC server (named pipes / Unix sockets) for monocoque-ctl
+    server.rs, socket.rs
+  mcp/                    # MCP protocol layer
+    handler.rs            # AppState, AgentRemServer, ToolRouter wiring
+    context.rs            # Per-request context
+    sse.rs                # HTTP/SSE transport (axum)
+    transport.rs          # Stdio transport for direct agent connections
+    tools/                # 9 MCP tool handlers
+      accept_diff, ask_approval, check_auto_approve, forward_prompt,
+      heartbeat, recover_state, remote_log, set_operational_mode,
+      wait_for_instruction
+    resources/             # MCP resource providers
+      slack_channel
+  models/                 # Domain models
+    approval, checkpoint, policy, progress, prompt, session, stall
+  orchestrator/           # Session lifecycle management
+    session_manager, checkpoint_manager, spawner, stall_detector
+  persistence/            # SurrealDB repository layer
+    db.rs                 # connect(), schema bootstrap
+    schema.rs             # SCHEMAFULL table DDL
+    approval_repo, checkpoint_repo, prompt_repo, session_repo,
+    stall_repo, retention
+  policy/                 # Workspace auto-approve rules
+    evaluator, loader, watcher
+  slack/                  # Slack Socket Mode integration
+    blocks.rs             # Block Kit message builders
+    client.rs             # SlackService (rate-limited message queue)
+    commands.rs           # Slash command handlers
+    events.rs             # Event dispatcher with authorization guard
+    handlers/             # Per-event-type handlers
+ctl/
+  main.rs                 # monocoque-ctl companion CLI
+lib/
+  hve-core/               # External library (separate project)
 tests/
+  unit/                   # Unit tests (12 modules)
+  contract/               # Contract tests (10 modules)
+  integration/            # Integration tests (7 modules)
+docs/
+  adrs/                   # Architecture Decision Records (0001–0011)
+specs/
+  001-mcp-remote-agent-server/   # Feature specification
+config.toml              # Runtime configuration
+rustfmt.toml             # max_width = 100, edition = 2021
 ```
 
-## Commands
+### Binaries
 
-cargo test; cargo clippy
+| Binary | Path | Description |
+|---|---|---|
+| `monocoque-agent-rc` | `src/main.rs` | MCP remote agent server |
+| `monocoque-ctl` | `ctl/main.rs` | Local CLI companion (IPC client) |
 
-## Code Style
+## Quality Gates
 
-Rust (stable, edition 2021): Follow standard conventions
+Every code change must pass these gates in order. Do not skip any gate.
 
-## Recent Changes
+### Gate 1 — Compilation
 
-- 001-mcp-remote-agent-server: Added Rust (stable, edition 2021) + `rmcp` 0.5 (official MCP SDK), `slack-morphism` (Slack Socket Mode), `axum` 0.8 (HTTP/SSE transport), `tokio` (async runtime), `serde`/`serde_json`, `diffy` 0.4 (diff/patch), `notify` (fs watcher), `tracing`/`tracing-subscriber`
+```powershell
+cargo check
+```
+
+All code must compile without errors. Run after every meaningful edit.
+
+### Gate 2 — Lint Compliance
+
+```powershell
+cargo clippy -- -D warnings
+```
+
+The workspace sets `clippy::pedantic = "deny"`, `clippy::unwrap_used = "deny"`, and `clippy::expect_used = "deny"` via `[workspace.lints.clippy]` in `Cargo.toml`. Zero warnings allowed.
+
+### Gate 3 — Formatting
+
+```powershell
+cargo fmt --all -- --check
+```
+
+If violations exist, run `cargo fmt --all` and re-check. Format config: `max_width = 100`, `edition = "2021"` (see `rustfmt.toml`).
+
+### Gate 4 — Tests
+
+```powershell
+cargo test
+```
+
+All unit, contract, and integration tests must pass. If output may be truncated, redirect:
+
+```powershell
+cargo test 2>&1 | Out-File target\test-results.txt
+```
+
+### Gate 5 — TDD Discipline
+
+When adding new functionality:
+1. Write the test first
+2. Run it and **confirm it fails** (red)
+3. Implement the production code
+4. Run the test and confirm it passes (green)
+
+Never write production code before the corresponding test exists and has been observed to fail.
+
+## Code Style and Conventions
+
+### Crate-Level Attributes
+
+* `#![forbid(unsafe_code)]` — no unsafe anywhere (both `src/main.rs` and `ctl/main.rs`)
+* `[workspace.lints.rust]`: `unsafe_code = "forbid"`, `missing_docs = "warn"`
+* `[workspace.lints.clippy]`: `pedantic = "deny"`, `unwrap_used = "deny"`, `expect_used = "deny"`
+
+### Error Handling
+
+* All fallible operations return `Result<T, AppError>` (type alias in `src/errors.rs`)
+* `AppError` variants: `Config`, `Db`, `Slack`, `Mcp`, `Diff`, `Policy`, `Ipc`, `PathViolation`, `PatchConflict`, `NotFound`, `Unauthorized`, `AlreadyConsumed`
+* Map external errors via `From` impls or `.map_err()` — never `unwrap()` or `expect()` in library/production code
+* Error messages are lowercase and do not end with a period
+
+### Naming
+
+* Module files: `src/{module}/mod.rs` pattern for directories
+* Struct IDs: prefixed strings (`task:uuid`, `context:uuid`, `spec:uuid`)
+* Status values: `snake_case` (`todo`, `in_progress`, `done`, `blocked`)
+* Default visibility: `pub(crate)` unless the item needs to be public API
+
+### Documentation
+
+* All public items require `///` doc comments
+* Module-level `//!` doc comments on every `mod.rs` or standalone module file
+
+### Database (SurrealDB)
+
+* All DB access goes through `persistence/` repository modules — no raw queries elsewhere
+* Namespace: `monocoque`, database: `agent_rc`
+* `kv-rocksdb` for production, `kv-mem` for tests (controlled by `connect(config, use_memory)`)
+* Schema uses `SCHEMAFULL` tables with idempotent DDL in `persistence/schema.rs`
+
+### MCP (rmcp 0.5)
+
+* Implements `ServerHandler` trait on `AgentRemServer` in `mcp/handler.rs`
+* Tools registered via `ToolRouter` / `ToolRoute::new_dyn()` — no `#[tool]` proc macros
+* All 9 tools always registered and visible; inapplicable calls return descriptive errors
+* Blocking tools (`ask_approval`, `forward_prompt`, `wait_for_instruction`) use `tokio::sync::oneshot` channels
+* HTTP transport: axum `StreamableHttpService` on `/mcp` endpoint
+* Stdio transport: `rmcp::transport::io::stdio()` for direct agent connections
+
+### Slack (slack-morphism)
+
+* Socket Mode — outbound-only WebSocket (no inbound firewall ports)
+* All message posting routes through the rate-limited in-memory queue with exponential backoff
+* Respect `Retry-After` headers from the Slack API
+* Use Block Kit builders from `slack/blocks.rs` for all messages
+* Centralized authorization guard in `slack/events.rs` — unauthorized users silently ignored
+* Double-submission prevention via `chat.update` replacing buttons before handler dispatch
+
+### Async (tokio)
+
+* `tokio` 1 with `full` feature set
+* `tokio::task::spawn_blocking` for CPU-bound or blocking I/O (e.g., `keyring` credential lookups)
+* Drop `MutexGuard`/`RwLockGuard` before `.await` points
+* `tokio_util::sync::CancellationToken` for graceful shutdown coordination
+* `tokio::process::Command` with `kill_on_drop(true)` for agent session processes
+
+### Path Security
+
+* All file paths canonicalized and validated via `starts_with(workspace_root)` in `diff/path_safety.rs`
+* Reject paths outside the workspace root — return `AppError::PathViolation`
+
+### Workspace Policy
+
+* Auto-approve rules in `.monocoque/settings.json` per workspace
+* Hot-reloaded via `notify` file watcher in `policy/watcher.rs`
+* Evaluated by `policy/evaluator.rs`
+
+### IPC
+
+* `interprocess` crate — named pipes (Windows) / Unix domain sockets
+* JSON-line protocol (one JSON object per line, newline-delimited)
+
+### Testing
+
+* TDD required: write tests first, verify they fail, then implement
+* Three test tiers in `tests/` directory (not inline):
+  * `unit/` — isolated logic tests (12 modules)
+  * `contract/` — MCP tool response contract verification (10 modules)
+  * `integration/` — end-to-end flows with real SSE/DB (7 modules)
+* Test DB: always use `kv-mem` backend
+* Use `serial_test` crate for tests requiring sequential execution
+
+## Architecture Reference
+
+| Concern | Approach |
+|---|---|
+| MCP SDK | `rmcp` 0.5 — `ServerHandler` trait, `ToolRouter` / `ToolRoute::new_dyn()` |
+| Transport (stdio) | `rmcp::transport::io::stdio()` for direct agent connections |
+| Transport (HTTP) | axum 0.8 with `StreamableHttpService` on `/mcp` |
+| Slack | `slack-morphism` 2.17 Socket Mode |
+| Database | SurrealDB 1.5 embedded — `kv-rocksdb` prod, `kv-mem` tests, `SCHEMAFULL` tables |
+| Configuration | TOML (`config.toml`) → `GlobalConfig`, credentials via keyring with env fallback |
+| Workspace policy | JSON auto-approve rules (`.monocoque/settings.json`), hot-reloaded via `notify` |
+| Diff safety | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via `tempfile` |
+| Path security | All paths canonicalized and validated via `starts_with(workspace_root)` |
+| IPC | `interprocess` 2.0 — named pipes (Windows) / Unix domain sockets for `monocoque-ctl` |
+| Shutdown | `CancellationToken` — persist state, notify Slack, terminate children gracefully |
+| ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0011) |
 
 <!-- MANUAL ADDITIONS START -->
 
