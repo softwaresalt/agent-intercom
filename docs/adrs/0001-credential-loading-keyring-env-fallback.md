@@ -12,7 +12,7 @@ The server needs Slack API tokens (app token for Socket Mode, bot token for mess
 
 Tokens are loaded at runtime via a two-tier strategy:
 
-1. **OS keychain first** — `keyring` crate with service name `monocoque-agent-rem` and key names `slack_app_token` / `slack_bot_token`. The keychain lookup runs inside `tokio::task::spawn_blocking` because the `keyring` crate performs synchronous I/O.
+1. **OS keychain first** — `keyring` crate with service name `monocoque-agent-rc` and key names `slack_app_token` / `slack_bot_token`. The keychain lookup runs inside `tokio::task::spawn_blocking` because the `keyring` crate performs synchronous I/O.
 2. **Environment variable fallback** — `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` checked if the keychain lookup fails or returns an empty string.
 
 The `SlackConfig` struct uses `#[serde(skip)]` on both token fields so deserialization never reads them from TOML, and `load_credentials()` is an explicit async method called during bootstrap.

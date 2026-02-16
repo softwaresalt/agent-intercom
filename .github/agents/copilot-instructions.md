@@ -1,4 +1,4 @@
-# monocoque-agent-rem Development Guidelines
+# monocoque-agent-rc Development Guidelines
 
 Auto-generated from all feature plans. Last updated: 2026-02-10
 

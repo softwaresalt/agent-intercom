@@ -2,9 +2,6 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"path": "../../../MyGDrive/GitHub/monocoque-agent-rem"
 		}
 	],
 	"settings": {
@@ -47,9 +44,12 @@
 				"matchCommandLine": true
 			},
 			"Test-Path": true,
-			"cargo test": true
+			"cargo test": true,
+			"git commit": true,
+			"git push": true,
+			"git add": true
 		},
-		"powershell.cwd": "monocoque-agent-rem"
+		"powershell.cwd": "monocoque-agent-rc"
 	},
     "chat.agentFilesLocations": {
         ".github/agents": true,

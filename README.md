@@ -1,2 +1,3 @@
 # monocoque-agent-rc
-A remote agent management MCP server for agentic development IDEs.
+Agent Remote Control (ARC) MCP Server for Agentic Development IDEs.
+
