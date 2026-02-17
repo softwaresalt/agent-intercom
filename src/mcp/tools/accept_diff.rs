@@ -71,7 +71,16 @@ pub async fn handle(
         let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
 
         // ── Look up the approval request ─────────────────────
-        let Ok(approval) = approval_repo.get_by_id(&input.request_id).await else {
+        let Some(approval) = approval_repo
+            .get_by_id(&input.request_id)
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("approval query failed: {err}"),
+                    None,
+                )
+            })?
+        else {
             return Ok(error_result(
                 "request_not_found",
                 "no approval request found with the given id",
@@ -97,7 +106,16 @@ pub async fn handle(
 
         // ── Resolve session for workspace root ───────────────
         let session_repo = SessionRepo::new(Arc::clone(&state.db));
-        let Ok(session) = session_repo.get_by_id(&approval.session_id).await else {
+        let Some(session) = session_repo
+            .get_by_id(&approval.session_id)
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("session query failed: {err}"),
+                    None,
+                )
+            })?
+        else {
             return Err(rmcp::ErrorData::internal_error(
                 "owning session not found",
                 None,

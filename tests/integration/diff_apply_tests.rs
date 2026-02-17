@@ -97,7 +97,11 @@ async fn approve_then_apply_full_file_writes_to_disk() {
         .expect("approve");
 
     // Fetch the approved request.
-    let approved = repo.get_by_id(&request_id).await.expect("fetch");
+    let approved = repo
+        .get_by_id(&request_id)
+        .await
+        .expect("fetch")
+        .expect("approval should exist");
     assert_eq!(approved.status, ApprovalStatus::Approved);
 
     // Apply the full-file write.
@@ -114,7 +118,13 @@ async fn approve_then_apply_full_file_writes_to_disk() {
     assert_eq!(summary.bytes_written, approved.diff_content.len());
 
     // Mark as consumed.
-    let consumed = repo.mark_consumed(&request_id).await.expect("consume");
+    repo.mark_consumed(&request_id).await.expect("consume");
+
+    let consumed = repo
+        .get_by_id(&request_id)
+        .await
+        .expect("fetch consumed")
+        .expect("approval should exist");
     assert_eq!(consumed.status, ApprovalStatus::Consumed);
     assert!(consumed.consumed_at.is_some());
 }

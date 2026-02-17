@@ -89,16 +89,18 @@ async fn prompt_flow_continue_updates_decision() {
     repo.create(&prompt).await.expect("create");
 
     // Simulate Continue decision.
-    let updated = repo
-        .update_decision(&prompt_id, PromptDecision::Continue, None)
+    repo.update_decision(&prompt_id, PromptDecision::Continue, None)
         .await
         .expect("update decision");
-    assert_eq!(updated.decision, Some(PromptDecision::Continue));
-    assert!(updated.instruction.is_none());
 
     // Verify DB state.
-    let fetched = repo.get_by_id(&prompt_id).await.expect("fetch");
+    let fetched = repo
+        .get_by_id(&prompt_id)
+        .await
+        .expect("fetch")
+        .expect("prompt should exist");
     assert_eq!(fetched.decision, Some(PromptDecision::Continue));
+    assert!(fetched.instruction.is_none());
 }
 
 #[tokio::test]
@@ -113,24 +115,25 @@ async fn prompt_flow_refine_updates_decision_with_instruction() {
 
     // Simulate Refine with instruction.
     let instruction = "Focus on error handling first".to_owned();
-    let updated = repo
-        .update_decision(
-            &prompt_id,
-            PromptDecision::Refine,
-            Some(instruction.clone()),
-        )
-        .await
-        .expect("update decision");
-    assert_eq!(updated.decision, Some(PromptDecision::Refine));
-    assert_eq!(
-        updated.instruction.as_deref(),
-        Some("Focus on error handling first")
-    );
+    repo.update_decision(
+        &prompt_id,
+        PromptDecision::Refine,
+        Some(instruction.clone()),
+    )
+    .await
+    .expect("update decision");
 
     // Verify DB state.
-    let fetched = repo.get_by_id(&prompt_id).await.expect("fetch");
+    let fetched = repo
+        .get_by_id(&prompt_id)
+        .await
+        .expect("fetch")
+        .expect("prompt should exist");
     assert_eq!(fetched.decision, Some(PromptDecision::Refine));
-    assert_eq!(fetched.instruction, Some(instruction));
+    assert_eq!(
+        fetched.instruction.as_deref(),
+        Some("Focus on error handling first")
+    );
 }
 
 #[tokio::test]
@@ -144,11 +147,16 @@ async fn prompt_flow_stop_updates_decision() {
     repo.create(&prompt).await.expect("create");
 
     // Simulate Stop decision.
-    let updated = repo
-        .update_decision(&prompt_id, PromptDecision::Stop, None)
+    repo.update_decision(&prompt_id, PromptDecision::Stop, None)
         .await
         .expect("update decision");
-    assert_eq!(updated.decision, Some(PromptDecision::Stop));
+
+    let stopped = repo
+        .get_by_id(&prompt_id)
+        .await
+        .expect("fetch")
+        .expect("prompt should exist");
+    assert_eq!(stopped.decision, Some(PromptDecision::Stop));
 }
 
 #[tokio::test]

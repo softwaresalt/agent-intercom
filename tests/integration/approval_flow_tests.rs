@@ -90,14 +90,16 @@ async fn approval_flow_accept_updates_status() {
     repo.create(&request).await.expect("create");
 
     // Simulate Accept — update status to Approved.
-    let updated = repo
-        .update_status(&request_id, ApprovalStatus::Approved)
+    repo.update_status(&request_id, ApprovalStatus::Approved)
         .await
         .expect("approve");
-    assert_eq!(updated.status, ApprovalStatus::Approved);
 
     // Verify DB state.
-    let fetched = repo.get_by_id(&request_id).await.expect("fetch");
+    let fetched = repo
+        .get_by_id(&request_id)
+        .await
+        .expect("fetch")
+        .expect("approval should exist");
     assert_eq!(fetched.status, ApprovalStatus::Approved);
 }
 
@@ -111,11 +113,16 @@ async fn approval_flow_reject_updates_status() {
     let request_id = request.id.clone();
     repo.create(&request).await.expect("create");
 
-    let updated = repo
-        .update_status(&request_id, ApprovalStatus::Rejected)
+    repo.update_status(&request_id, ApprovalStatus::Rejected)
         .await
         .expect("reject");
-    assert_eq!(updated.status, ApprovalStatus::Rejected);
+
+    let rejected = repo
+        .get_by_id(&request_id)
+        .await
+        .expect("fetch")
+        .expect("approval should exist");
+    assert_eq!(rejected.status, ApprovalStatus::Rejected);
 }
 
 #[tokio::test]
@@ -165,10 +172,15 @@ async fn approval_flow_timeout_expires_request() {
     assert!(timeout_result.is_err(), "should timeout without response");
 
     // On timeout, mark the request as expired.
-    let expired = repo
-        .update_status(&request_id, ApprovalStatus::Expired)
+    repo.update_status(&request_id, ApprovalStatus::Expired)
         .await
         .expect("expire");
+
+    let expired = repo
+        .get_by_id(&request_id)
+        .await
+        .expect("fetch")
+        .expect("approval should exist");
     assert_eq!(expired.status, ApprovalStatus::Expired);
 
     // Sender dropped without sending.

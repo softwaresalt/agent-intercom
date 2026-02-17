@@ -183,3 +183,106 @@ fn checkpoint_with_no_current_files_all_diverged() {
 
     assert_eq!(diverged, vec!["a.rs", "b.rs"]);
 }
+
+// ── CheckpointRepo CRUD tests (T020) ────────────────────────────────────
+
+use std::sync::Arc;
+
+use monocoque_agent_rc::models::checkpoint::Checkpoint;
+use monocoque_agent_rc::persistence::{checkpoint_repo::CheckpointRepo, db};
+
+fn sample_checkpoint(session_id: &str) -> Checkpoint {
+    let mut hashes = HashMap::new();
+    hashes.insert("main.rs".to_owned(), sha256_hex(b"fn main() {}"));
+    Checkpoint::new(
+        session_id.to_owned(),
+        Some("test-label".to_owned()),
+        serde_json::json!({"status": "active"}),
+        hashes,
+        "/tmp/workspace".to_owned(),
+        None,
+    )
+}
+
+#[tokio::test]
+async fn repo_create_persists_all_fields() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = CheckpointRepo::new(Arc::new(db));
+
+    let checkpoint = sample_checkpoint("sess-1");
+    let id = checkpoint.id.clone();
+    let created = repo.create(&checkpoint).await.expect("create");
+
+    assert_eq!(created.id, id);
+    assert_eq!(created.session_id, "sess-1");
+    assert_eq!(created.label, Some("test-label".to_owned()));
+    assert_eq!(created.workspace_root, "/tmp/workspace");
+    assert!(created.file_hashes.contains_key("main.rs"));
+}
+
+#[tokio::test]
+async fn repo_get_by_id_returns_none_for_missing() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = CheckpointRepo::new(Arc::new(db));
+
+    let result = repo.get_by_id("nonexistent").await.expect("query");
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn repo_get_by_id_round_trips() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = CheckpointRepo::new(Arc::new(db));
+
+    let checkpoint = sample_checkpoint("sess-2");
+    let id = checkpoint.id.clone();
+    repo.create(&checkpoint).await.expect("create");
+
+    let fetched = repo.get_by_id(&id).await.expect("query").expect("exists");
+    assert_eq!(fetched.label, Some("test-label".to_owned()));
+    assert_eq!(
+        fetched.session_state,
+        serde_json::json!({"status": "active"})
+    );
+    assert!(fetched.file_hashes.contains_key("main.rs"));
+}
+
+#[tokio::test]
+async fn repo_list_for_session_returns_session_checkpoints() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = CheckpointRepo::new(Arc::new(db));
+
+    let c1 = sample_checkpoint("sess-3");
+    let c2 = sample_checkpoint("sess-3");
+    let c3 = sample_checkpoint("sess-other");
+    repo.create(&c1).await.expect("create1");
+    repo.create(&c2).await.expect("create2");
+    repo.create(&c3).await.expect("create3");
+
+    let list = repo.list_for_session("sess-3").await.expect("list");
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().all(|c| c.session_id == "sess-3"));
+}
+
+#[tokio::test]
+async fn repo_delete_for_session_removes_all() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = CheckpointRepo::new(Arc::new(db));
+
+    let c1 = sample_checkpoint("sess-4");
+    let c2 = sample_checkpoint("sess-4");
+    let c3 = sample_checkpoint("sess-other");
+    let c3_id = c3.id.clone();
+    repo.create(&c1).await.expect("create1");
+    repo.create(&c2).await.expect("create2");
+    repo.create(&c3).await.expect("create3");
+
+    repo.delete_for_session("sess-4").await.expect("delete");
+
+    let remaining = repo.list_for_session("sess-4").await.expect("list");
+    assert!(remaining.is_empty());
+
+    // Other session's checkpoint should be untouched.
+    let other = repo.get_by_id(&c3_id).await.expect("query");
+    assert!(other.is_some());
+}

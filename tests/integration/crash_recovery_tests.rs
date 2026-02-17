@@ -280,6 +280,10 @@ async fn recover_finds_most_recent_interrupted_session() {
     );
 
     // Can also recover a specific session by ID.
-    let specific = session_repo.get_by_id(&session1.id).await.expect("get");
+    let specific = session_repo
+        .get_by_id(&session1.id)
+        .await
+        .expect("get")
+        .expect("session should exist");
     assert_eq!(specific.status, SessionStatus::Interrupted);
 }

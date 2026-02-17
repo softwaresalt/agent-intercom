@@ -119,7 +119,7 @@ async fn max_concurrent_sessions_enforcement() {
 
     // Verify limit would be exceeded — checked by the orchestrator.
     assert!(
-        count >= u64::from(config.max_concurrent_sessions),
+        count >= i64::from(config.max_concurrent_sessions),
         "active sessions should be at or above the max limit"
     );
 }
@@ -139,7 +139,11 @@ async fn owner_binding_verified_at_session_level() {
     let created = repo.create(&session).await.expect("create");
 
     // Fetch session and verify owner binding.
-    let fetched = repo.get_by_id(&created.id).await.expect("fetch");
+    let fetched = repo
+        .get_by_id(&created.id)
+        .await
+        .expect("fetch")
+        .expect("session should exist");
     assert_eq!(fetched.owner_user_id, "U_OWNER");
 
     // Simulate owner-check: a different user should be rejected.
@@ -197,7 +201,8 @@ async fn checkpoint_stores_file_hashes() {
     let fetched = checkpoint_repo
         .get_by_id(&saved.id)
         .await
-        .expect("fetch checkpoint");
+        .expect("fetch checkpoint")
+        .expect("checkpoint should exist");
     assert_eq!(fetched.file_hashes.len(), 2);
     assert_eq!(
         fetched.file_hashes.get("src/main.rs"),
@@ -241,7 +246,11 @@ async fn checkpoint_restore_detects_divergence() {
     current_hashes.insert("src/lib.rs".to_owned(), "hash_original_lib".to_owned());
 
     // Verify divergence detection.
-    let fetched = checkpoint_repo.get_by_id(&saved.id).await.expect("fetch");
+    let fetched = checkpoint_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("checkpoint should exist");
     let mut diverged: Vec<String> = fetched
         .file_hashes
         .iter()

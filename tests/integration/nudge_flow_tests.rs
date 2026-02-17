@@ -148,19 +148,30 @@ async fn nudge_updates_alert_and_increments_count() {
     let saved = stall_repo.create(&alert).await.expect("create alert");
 
     // Simulate nudge: increment count, set status to Nudged.
-    let updated = stall_repo
+    stall_repo
         .increment_nudge_count(&saved.id)
         .await
         .expect("nudge increment");
 
+    let updated = stall_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("alert should exist");
     assert_eq!(updated.nudge_count, 1);
     assert_eq!(updated.status, StallAlertStatus::Nudged);
 
     // Second nudge.
-    let updated2 = stall_repo
+    stall_repo
         .increment_nudge_count(&saved.id)
         .await
         .expect("nudge increment 2");
+
+    let updated2 = stall_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("alert should exist");
     assert_eq!(updated2.nudge_count, 2);
 }
 
@@ -186,11 +197,16 @@ async fn self_recovery_clears_active_alert() {
     let saved = stall_repo.create(&alert).await.expect("create alert");
 
     // Simulate self-recovery: update status.
-    let recovered = stall_repo
+    stall_repo
         .update_status(&saved.id, StallAlertStatus::SelfRecovered)
         .await
         .expect("self recover");
 
+    let recovered = stall_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("alert should exist");
     assert_eq!(recovered.status, StallAlertStatus::SelfRecovered);
 
     // Active alert query should now return None.

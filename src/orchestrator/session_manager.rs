@@ -128,7 +128,10 @@ pub async fn resolve_session(
     session_repo: &SessionRepo,
 ) -> Result<Session> {
     let session = if let Some(id) = session_id {
-        session_repo.get_by_id(id).await?
+        session_repo
+            .get_by_id(id)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("session {id} not found")))?
     } else {
         // Find the most recently active session for this user.
         let active = session_repo.list_active().await?;
