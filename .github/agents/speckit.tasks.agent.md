@@ -7,8 +7,8 @@ handoffs:
     send: true
   - label: Build the Feature
     agent: build-orchestrator
-    prompt: feature: ${input:specName}; phase: ${input:phaseNumber}; mode: ${input:mode} (single|full)
-    send: true
+    prompt: feature: {specName}; phase: {phaseNumber}; mode: (single|full)
+    send: false
 ---
 
 ## User Input
