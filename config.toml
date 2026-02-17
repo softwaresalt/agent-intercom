@@ -36,6 +36,9 @@ host_cli_args = ["--stdio"]
 retention_days = 30
 authorized_user_ids = ["U_YOUR_SLACK_USER_ID"]
 
+[database]
+path = "data/monocoque.db"
+
 [slack]
 channel_id = "C_YOUR_CHANNEL_ID"
 
