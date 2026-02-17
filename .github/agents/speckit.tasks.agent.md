@@ -5,9 +5,9 @@ handoffs:
     agent: speckit.analyze
     prompt: Run a project analysis for consistency
     send: true
-  - label: Implement Project
-    agent: speckit.implement
-    prompt: Start the implementation in phases
+  - label: Build the Feature
+    agent: build-orchestrator
+    prompt: feature: ${input:specName}; phase: ${input:phaseNumber}; mode: ${input:mode} (single|full)
     send: true
 ---
 
