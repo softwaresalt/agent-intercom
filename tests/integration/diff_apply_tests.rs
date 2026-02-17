@@ -80,8 +80,8 @@ fn sample_request(session_id: &str, file_path: &str, hash: &str) -> ApprovalRequ
 #[tokio::test]
 async fn approve_then_apply_full_file_writes_to_disk() {
     let ws = tempfile::tempdir().expect("ws");
-    let config = test_config(&ws);
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config(&ws);
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let repo = ApprovalRepo::new(database);
 
     // Seed the file so we can hash it.
@@ -124,8 +124,8 @@ async fn approve_then_apply_full_file_writes_to_disk() {
 #[tokio::test]
 async fn approve_then_apply_patch_modifies_existing_file() {
     let ws = tempfile::tempdir().expect("ws");
-    let config = test_config(&ws);
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config(&ws);
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let repo = ApprovalRepo::new(database);
 
     // Seed the file.
@@ -174,8 +174,8 @@ async fn approve_then_apply_patch_modifies_existing_file() {
 #[tokio::test]
 async fn hash_mismatch_detected_when_file_mutated() {
     let ws = tempfile::tempdir().expect("ws");
-    let config = test_config(&ws);
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config(&ws);
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let repo = ApprovalRepo::new(database);
 
     // Seed with original content and capture hash.
@@ -209,8 +209,8 @@ async fn hash_mismatch_detected_when_file_mutated() {
 #[tokio::test]
 async fn mark_consumed_twice_returns_already_consumed_error() {
     let ws = tempfile::tempdir().expect("ws");
-    let config = test_config(&ws);
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config(&ws);
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let repo = ApprovalRepo::new(database);
 
     let request = sample_request("session-double", "file.rs", "hash123");
@@ -233,8 +233,8 @@ async fn mark_consumed_twice_returns_already_consumed_error() {
 #[tokio::test]
 async fn mark_consumed_on_pending_returns_error() {
     let ws = tempfile::tempdir().expect("ws");
-    let config = test_config(&ws);
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config(&ws);
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let repo = ApprovalRepo::new(database);
 
     let request = sample_request("session-not-approved", "file.rs", "hash456");

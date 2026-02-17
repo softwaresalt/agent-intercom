@@ -49,7 +49,7 @@ default_nudge_message = "continue"
 /// Build a minimal `AppState` for channel override testing (no Slack client needed).
 async fn test_state() -> Arc<AppState> {
     let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     Arc::new(AppState {
         config: Arc::new(config),
         db: database,

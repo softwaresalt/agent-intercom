@@ -10,7 +10,7 @@ pub type Result<T> = std::result::Result<T, AppError>;
 pub enum AppError {
     /// Configuration parsing or validation failure.
     Config(String),
-    /// Persistence failure when interacting with `SurrealDB`.
+    /// Persistence failure when interacting with `SQLite`.
     Db(String),
     /// Slack API or Socket Mode failure.
     Slack(String),
@@ -61,8 +61,8 @@ impl From<toml::de::Error> for AppError {
     }
 }
 
-impl From<surrealdb::Error> for AppError {
-    fn from(err: surrealdb::Error) -> Self {
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
         Self::Db(err.to_string())
     }
 }

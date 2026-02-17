@@ -21,6 +21,7 @@ use crate::diff::path_safety::validate_path;
 use crate::mcp::handler::AppState;
 use crate::orchestrator::{checkpoint_manager, session_manager, spawner};
 use crate::persistence::checkpoint_repo::CheckpointRepo;
+use crate::persistence::db::Database;
 use crate::persistence::session_repo::SessionRepo;
 
 /// Handle incoming `/monocoque` slash commands routed via Socket Mode.
@@ -206,9 +207,7 @@ const FILES_HELP: &str = "\
 
 // ── Session commands (T067, T072) ────────────────────────────────────
 
-async fn handle_sessions(
-    db: &Arc<surrealdb::Surreal<surrealdb::engine::local::Db>>,
-) -> crate::Result<String> {
+async fn handle_sessions(db: &Arc<Database>) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
     let active = repo.list_active().await?;
 
@@ -260,7 +259,7 @@ async fn handle_session_start(
 async fn handle_session_pause(
     session_id: Option<&str>,
     user_id: &str,
-    db: &Arc<surrealdb::Surreal<surrealdb::engine::local::Db>>,
+    db: &Arc<Database>,
 ) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
 
@@ -274,7 +273,7 @@ async fn handle_session_pause(
 async fn handle_session_resume(
     session_id: Option<&str>,
     user_id: &str,
-    db: &Arc<surrealdb::Surreal<surrealdb::engine::local::Db>>,
+    db: &Arc<Database>,
 ) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
 
@@ -288,7 +287,7 @@ async fn handle_session_resume(
 async fn handle_session_clear(
     session_id: Option<&str>,
     user_id: &str,
-    db: &Arc<surrealdb::Surreal<surrealdb::engine::local::Db>>,
+    db: &Arc<Database>,
 ) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
 
@@ -324,7 +323,7 @@ async fn handle_session_checkpoint(
     session_id: Option<&str>,
     label: Option<&str>,
     user_id: &str,
-    db: &Arc<surrealdb::Surreal<surrealdb::engine::local::Db>>,
+    db: &Arc<Database>,
 ) -> crate::Result<String> {
     let session_repo = SessionRepo::new(Arc::clone(db));
     let checkpoint_repo = CheckpointRepo::new(Arc::clone(db));
@@ -347,10 +346,7 @@ async fn handle_session_checkpoint(
     ))
 }
 
-async fn handle_session_restore(
-    checkpoint_id: &str,
-    db: &Arc<surrealdb::Surreal<surrealdb::engine::local::Db>>,
-) -> crate::Result<String> {
+async fn handle_session_restore(checkpoint_id: &str, db: &Arc<Database>) -> crate::Result<String> {
     let checkpoint_repo = CheckpointRepo::new(Arc::clone(db));
 
     let (checkpoint, divergences) =
@@ -383,7 +379,7 @@ async fn handle_session_restore(
 async fn handle_session_checkpoints(
     session_id: Option<&str>,
     user_id: &str,
-    db: &Arc<surrealdb::Surreal<surrealdb::engine::local::Db>>,
+    db: &Arc<Database>,
 ) -> crate::Result<String> {
     let session_repo = SessionRepo::new(Arc::clone(db));
     let checkpoint_repo = CheckpointRepo::new(Arc::clone(db));

@@ -1,18 +1,19 @@
-//! Continuation prompt repository for `SurrealDB` persistence.
+//! Continuation prompt repository for `SQLite` persistence.
 
 use std::sync::Arc;
 
 use crate::models::prompt::{ContinuationPrompt, PromptDecision};
-use crate::{AppError, Result};
+use crate::Result;
 
 use super::db::Database;
 
-/// Repository wrapper around `SurrealDB` for continuation prompt records.
+/// Repository wrapper around `SQLite` for continuation prompt records.
 #[derive(Clone)]
 pub struct PromptRepo {
     db: Arc<Database>,
 }
 
+#[allow(clippy::unused_async)] // todo!() stubs lack .await — Phase 3 will add real queries
 impl PromptRepo {
     /// Create a new repository instance.
     #[must_use]
@@ -25,12 +26,9 @@ impl PromptRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the database insert fails.
-    pub async fn create(&self, prompt: &ContinuationPrompt) -> Result<ContinuationPrompt> {
-        self.db
-            .create(("continuation_prompt", prompt.id.as_str()))
-            .content(prompt)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to create continuation prompt".into()))
+    pub async fn create(&self, _prompt: &ContinuationPrompt) -> Result<ContinuationPrompt> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T026)")
     }
 
     /// Retrieve a prompt by identifier.
@@ -38,10 +36,9 @@ impl PromptRepo {
     /// # Errors
     ///
     /// Returns `AppError::NotFound` if the prompt does not exist.
-    pub async fn get_by_id(&self, id: &str) -> Result<ContinuationPrompt> {
-        let prompt: Option<ContinuationPrompt> =
-            self.db.select(("continuation_prompt", id)).await?;
-        prompt.ok_or_else(|| AppError::NotFound("continuation prompt not found".into()))
+    pub async fn get_by_id(&self, _id: &str) -> Result<ContinuationPrompt> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T026)")
     }
 
     /// Retrieve the pending prompt for a session, if any.
@@ -51,19 +48,10 @@ impl PromptRepo {
     /// Returns `AppError::Db` if the query fails.
     pub async fn get_pending_for_session(
         &self,
-        session_id: &str,
+        _session_id: &str,
     ) -> Result<Option<ContinuationPrompt>> {
-        let mut response = self
-            .db
-            .query(
-                "SELECT * FROM continuation_prompt \
-                 WHERE session_id = $sid AND decision IS NONE \
-                 LIMIT 1",
-            )
-            .bind(("sid", session_id))
-            .await?;
-        let prompts: Vec<ContinuationPrompt> = response.take(0)?;
-        Ok(prompts.into_iter().next())
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T026)")
     }
 
     /// Update the decision and optional instruction on a prompt.
@@ -73,18 +61,12 @@ impl PromptRepo {
     /// Returns `AppError::Db` if the update fails.
     pub async fn update_decision(
         &self,
-        id: &str,
-        decision: PromptDecision,
-        instruction: Option<String>,
+        _id: &str,
+        _decision: PromptDecision,
+        _instruction: Option<String>,
     ) -> Result<ContinuationPrompt> {
-        let mut current = self.get_by_id(id).await?;
-        current.decision = Some(decision);
-        current.instruction = instruction;
-        self.db
-            .update(("continuation_prompt", id))
-            .content(&current)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to update prompt decision".into()))
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T026)")
     }
 
     /// List all pending prompts (no decision yet) across sessions.
@@ -93,12 +75,7 @@ impl PromptRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_pending(&self) -> Result<Vec<ContinuationPrompt>> {
-        let mut response = self
-            .db
-            .query("SELECT * FROM continuation_prompt WHERE decision IS NONE")
-            .await?;
-        response
-            .take::<Vec<ContinuationPrompt>>(0)
-            .map_err(AppError::from)
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T026)")
     }
 }

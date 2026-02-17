@@ -31,23 +31,23 @@
 
 ### Tests (write first, confirm they fail)
 
-- [ ] T004 [US2] Write test for file-backed `connect()` and `bootstrap_schema()` in tests/contract/schema_tests.rs — verify all 5 tables are created with correct columns
-- [ ] T005 [US3] Write test for `connect_memory()` and `bootstrap_schema()` in tests/unit/session_repo_tests.rs — verify in-memory pool works and tables exist
+- [X] T004 [US2] Write test for file-backed `connect()` and `bootstrap_schema()` in tests/contract/schema_tests.rs — verify all 5 tables are created with correct columns
+- [X] T005 [US3] Write test for `connect_memory()` and `bootstrap_schema()` in tests/unit/session_repo_tests.rs — verify in-memory pool works and tables exist
 
 ### Implementation
 
-- [ ] T006 [P] [US3] Replace `From<surrealdb::Error>` with `From<sqlx::Error>` in src/errors.rs
-- [ ] T007 [P] [US2] Update `Database` type alias from `Surreal<Db>` to `SqlitePool` and update re-exports in src/persistence/mod.rs
-- [ ] T008 [US2] Rewrite src/persistence/db.rs: implement `connect(path)` (file-backed, WAL, max_connections=1, create_if_missing, auto-create parent dirs) and `connect_memory()` (sqlite::memory:, min_connections=1). Design satisfies EC-003 (concurrent access via single-writer pool + WAL) and EC-005 (disk full/permissions → AppError::Db). EC-001 (locked file) and EC-004 (corrupt DB) produce AppError::Db on connect or first query — no auto-repair
-- [ ] T009 [US2] Rewrite src/persistence/schema.rs: replace SurrealQL DEFINE TABLE/FIELD with SQLite DDL via `sqlx::raw_sql()` per contracts/schema.sql.md
-- [ ] T010 [P] [US2] Remove `deserialize_surreal_id` helper and all `surrealdb::sql::Thing` references from src/models/mod.rs
-- [ ] T011 [P] [US2] Update Session model field types in src/models/session.rs: `nudge_count` u32→i64, `stall_paused` serde attrs, remove SurrealDB ID serde attributes
-- [ ] T012 [P] [US2] Update ApprovalRequest model field types in src/models/approval.rs: remove SurrealDB ID serde attributes
-- [ ] T013 [P] [US2] Update ContinuationPrompt model field types in src/models/prompt.rs: `elapsed_seconds` Option<u64>→Option<i64>, `actions_taken` Option<u32>→Option<i64>
-- [ ] T014 [P] [US2] Update StallAlert model field types in src/models/stall.rs: `idle_seconds` u64→i64, `nudge_count` u32→i64
-- [ ] T015 [US2] Update src/main.rs: change `connect()` call to use new signature with config path
-- [ ] T016 [P] [US2] Update `AppState.db` type from `Arc<Surreal<Db>>` to `Arc<SqlitePool>` in src/mcp/handler.rs
-- [ ] T017 [P] [US2] Update `ToolContext.db` type from `Arc<Surreal<Db>>` to `Arc<SqlitePool>` in src/mcp/context.rs
+- [X] T006 [P] [US3] Replace `From<surrealdb::Error>` with `From<sqlx::Error>` in src/errors.rs
+- [X] T007 [P] [US2] Update `Database` type alias from `Surreal<Db>` to `SqlitePool` and update re-exports in src/persistence/mod.rs
+- [X] T008 [US2] Rewrite src/persistence/db.rs: implement `connect(path)` (file-backed, WAL, max_connections=1, create_if_missing, auto-create parent dirs) and `connect_memory()` (sqlite::memory:, min_connections=1). Design satisfies EC-003 (concurrent access via single-writer pool + WAL) and EC-005 (disk full/permissions → AppError::Db). EC-001 (locked file) and EC-004 (corrupt DB) produce AppError::Db on connect or first query — no auto-repair
+- [X] T009 [US2] Rewrite src/persistence/schema.rs: replace SurrealQL DEFINE TABLE/FIELD with SQLite DDL via `sqlx::raw_sql()` per contracts/schema.sql.md
+- [X] T010 [P] [US2] Remove `deserialize_surreal_id` helper and all `surrealdb::sql::Thing` references from src/models/mod.rs
+- [X] T011 [P] [US2] Update Session model field types in src/models/session.rs: `nudge_count` u32→i64, `stall_paused` serde attrs, remove SurrealDB ID serde attributes
+- [X] T012 [P] [US2] Update ApprovalRequest model field types in src/models/approval.rs: remove SurrealDB ID serde attributes
+- [X] T013 [P] [US2] Update ContinuationPrompt model field types in src/models/prompt.rs: `elapsed_seconds` Option<u64>→Option<i64>, `actions_taken` Option<u32>→Option<i64>
+- [X] T014 [P] [US2] Update StallAlert model field types in src/models/stall.rs: `idle_seconds` u64→i64, `nudge_count` u32→i64
+- [X] T015 [US2] Update src/main.rs: change `connect()` call to use new signature with config path
+- [X] T016 [P] [US2] Update `AppState.db` type from `Arc<Surreal<Db>>` to `Arc<SqlitePool>` in src/mcp/handler.rs
+- [X] T017 [P] [US2] Update `ToolContext.db` type from `Arc<Surreal<Db>>` to `Arc<SqlitePool>` in src/mcp/context.rs
 
 **Checkpoint**: `cargo check` passes. Schema bootstrap creates all 5 tables. In-memory connect works. T004 and T005 pass. US2 and US3 are complete.
 

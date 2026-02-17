@@ -27,11 +27,6 @@ pub enum StallAlertStatus {
 #[serde(rename_all = "snake_case")]
 pub struct StallAlert {
     /// Unique record identifier.
-    #[serde(
-        skip_serializing,
-        default,
-        deserialize_with = "super::deserialize_surreal_id"
-    )]
     pub id: String,
     /// Owning session identifier.
     pub session_id: String,
@@ -42,7 +37,7 @@ pub struct StallAlert {
     /// Elapsed idle time when alert was created.
     pub idle_seconds: i64,
     /// Number of nudge attempts for this alert.
-    pub nudge_count: u32,
+    pub nudge_count: i64,
     /// Current lifecycle status.
     pub status: StallAlertStatus,
     /// Custom nudge message from operator.

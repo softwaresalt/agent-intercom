@@ -1,49 +1,36 @@
 use std::sync::Arc;
 
-use monocoque_agent_rc::config::GlobalConfig;
 use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
 use monocoque_agent_rc::persistence::{db, session_repo::SessionRepo};
 
-fn config_for_tests() -> GlobalConfig {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let toml = format!(
-        r#"
-default_workspace_root = '{root}'
-http_port = 3000
-ipc_name = "monocoque-agent-rc"
-max_concurrent_sessions = 2
-host_cli = "claude"
-host_cli_args = ["--stdio"]
-authorized_user_ids = ["U123", "U456"]
+/// T005: In-memory `connect_memory()` creates pool with all 5 tables.
+#[tokio::test]
+async fn in_memory_connect_creates_five_tables() {
+    let pool = db::connect_memory()
+        .await
+        .expect("in-memory connect should succeed");
 
-[slack]
-channel_id = "C123"
+    let tables = [
+        "session",
+        "approval_request",
+        "checkpoint",
+        "continuation_prompt",
+        "stall_alert",
+    ];
 
-[timeouts]
-approval_seconds = 3600
-prompt_seconds = 1800
-wait_seconds = 0
-
-[stall]
-enabled = true
-inactivity_threshold_seconds = 300
-escalation_threshold_seconds = 120
-max_retries = 3
-default_nudge_message = "continue"
-
-[commands]
-status = "git status"
-"#,
-        root = temp.path().to_str().expect("utf8 path"),
-    );
-
-    GlobalConfig::from_toml_str(&toml).expect("valid config")
+    for table in tables {
+        let query = format!("SELECT COUNT(*) AS cnt FROM {table}");
+        let row: (i64,) = sqlx::query_as(&query)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| panic!("table '{table}' should be queryable: {e}"));
+        assert_eq!(row.0, 0, "table '{table}' should start empty");
+    }
 }
 
 #[tokio::test]
 async fn create_and_update_session() {
-    let config = config_for_tests();
-    let db = db::connect(&config, true).await.expect("db connect");
+    let db = db::connect_memory().await.expect("db connect");
     let repo = SessionRepo::new(Arc::new(db));
 
     let session = Session::new(

@@ -64,8 +64,8 @@ fn sample_request(session_id: &str) -> ApprovalRequest {
 
 #[tokio::test]
 async fn approval_flow_creates_db_record() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = ApprovalRepo::new(database);
 
     let request = sample_request("session-1");
@@ -81,8 +81,8 @@ async fn approval_flow_creates_db_record() {
 
 #[tokio::test]
 async fn approval_flow_accept_updates_status() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = ApprovalRepo::new(database);
 
     let request = sample_request("session-2");
@@ -103,8 +103,8 @@ async fn approval_flow_accept_updates_status() {
 
 #[tokio::test]
 async fn approval_flow_reject_updates_status() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = ApprovalRepo::new(database);
 
     let request = sample_request("session-3");
@@ -150,8 +150,8 @@ async fn approval_flow_oneshot_resolves_on_reject_with_reason() {
 
 #[tokio::test]
 async fn approval_flow_timeout_expires_request() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = ApprovalRepo::new(database);
 
     let request = sample_request("session-timeout");
@@ -177,8 +177,8 @@ async fn approval_flow_timeout_expires_request() {
 
 #[tokio::test]
 async fn approval_flow_pending_for_session_query() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = ApprovalRepo::new(database);
 
     let request = sample_request("session-pending");

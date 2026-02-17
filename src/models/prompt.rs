@@ -35,11 +35,6 @@ pub enum PromptDecision {
 #[serde(rename_all = "snake_case")]
 pub struct ContinuationPrompt {
     /// Unique record identifier.
-    #[serde(
-        skip_serializing,
-        default,
-        deserialize_with = "super::deserialize_surreal_id"
-    )]
     pub id: String,
     /// Owning session identifier.
     pub session_id: String,

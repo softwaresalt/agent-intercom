@@ -13,11 +13,6 @@ use super::progress::ProgressItem;
 #[serde(rename_all = "snake_case")]
 pub struct Checkpoint {
     /// Unique record identifier.
-    #[serde(
-        skip_serializing,
-        default,
-        deserialize_with = "super::deserialize_surreal_id"
-    )]
     pub id: String,
     /// Owning session identifier.
     pub session_id: String,

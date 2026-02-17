@@ -77,7 +77,8 @@ async fn run(args: Cli) -> Result<()> {
     info!("configuration loaded");
 
     // ── Initialize database ─────────────────────────────
-    let db = Arc::new(db::connect(&config, false).await?);
+    let db_path = config.db_path().to_string_lossy().to_string();
+    let db = Arc::new(db::connect(&db_path).await?);
     info!("database connected");
 
     // ── Start retention service ──────────────────────────

@@ -1,21 +1,19 @@
-//! Session repository for `SurrealDB` persistence.
+//! Session repository for `SQLite` persistence.
 
 use std::sync::Arc;
 
-use chrono::Utc;
-use serde::Deserialize;
-
 use crate::models::session::{Session, SessionMode, SessionStatus};
-use crate::{AppError, Result};
+use crate::Result;
 
 use super::db::Database;
 
-/// Repository wrapper around `SurrealDB` for session records.
+/// Repository wrapper around `SQLite` for session records.
 #[derive(Clone)]
 pub struct SessionRepo {
     db: Arc<Database>,
 }
 
+#[allow(clippy::unused_async)] // todo!() stubs lack .await — Phase 3 will add real queries
 impl SessionRepo {
     /// Create a new repository instance.
     #[must_use]
@@ -28,12 +26,9 @@ impl SessionRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the database insert fails.
-    pub async fn create(&self, session: &Session) -> Result<Session> {
-        self.db
-            .create(("session", session.id.as_str()))
-            .content(session)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to create session".into()))
+    pub async fn create(&self, _session: &Session) -> Result<Session> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Retrieve a session by identifier.
@@ -41,9 +36,9 @@ impl SessionRepo {
     /// # Errors
     ///
     /// Returns `AppError::NotFound` if the session does not exist.
-    pub async fn get_by_id(&self, id: &str) -> Result<Session> {
-        let session: Option<Session> = self.db.select(("session", id)).await?;
-        session.ok_or_else(|| AppError::NotFound("session not found".into()))
+    pub async fn get_by_id(&self, _id: &str) -> Result<Session> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Update session status and `updated_at` timestamp, respecting state machine.
@@ -51,20 +46,9 @@ impl SessionRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the transition is invalid or persistence fails.
-    pub async fn update_status(&self, id: &str, status: SessionStatus) -> Result<Session> {
-        let mut current = self.get_by_id(id).await?;
-        if !current.can_transition_to(status) {
-            return Err(AppError::Db("invalid session status transition".into()));
-        }
-
-        current.status = status;
-        current.updated_at = Utc::now();
-
-        self.db
-            .update(("session", id))
-            .content(&current)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to update session status".into()))
+    pub async fn update_status(&self, _id: &str, _status: SessionStatus) -> Result<Session> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Update only the last activity timestamp and optional tool name.
@@ -74,18 +58,11 @@ impl SessionRepo {
     /// Returns `AppError::Db` if the update fails.
     pub async fn update_last_activity(
         &self,
-        id: &str,
-        last_tool: Option<String>,
+        _id: &str,
+        _last_tool: Option<String>,
     ) -> Result<Session> {
-        let mut current = self.get_by_id(id).await?;
-        current.updated_at = Utc::now();
-        current.last_tool = last_tool;
-
-        self.db
-            .update(("session", id))
-            .content(&current)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to update session activity".into()))
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// List active sessions (status == active).
@@ -94,11 +71,8 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_active(&self) -> Result<Vec<Session>> {
-        let mut response = self
-            .db
-            .query("SELECT * FROM session WHERE status = 'active'")
-            .await?;
-        response.take::<Vec<Session>>(0).map_err(AppError::from)
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Update the progress snapshot on a session.
@@ -108,17 +82,11 @@ impl SessionRepo {
     /// Returns `AppError::Db` if the update fails.
     pub async fn update_progress_snapshot(
         &self,
-        id: &str,
-        snapshot: Option<Vec<crate::models::progress::ProgressItem>>,
+        _id: &str,
+        _snapshot: Option<Vec<crate::models::progress::ProgressItem>>,
     ) -> Result<Session> {
-        let mut current = self.get_by_id(id).await?;
-        current.progress_snapshot = snapshot;
-        current.updated_at = Utc::now();
-        self.db
-            .update(("session", id))
-            .content(&current)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to update progress snapshot".into()))
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Terminate a session, setting status and `terminated_at`.
@@ -126,19 +94,9 @@ impl SessionRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the transition is invalid or persistence fails.
-    pub async fn set_terminated(&self, id: &str, status: SessionStatus) -> Result<Session> {
-        let mut current = self.get_by_id(id).await?;
-        if !current.can_transition_to(status) {
-            return Err(AppError::Db("invalid terminal status transition".into()));
-        }
-        current.status = status;
-        current.terminated_at = Some(Utc::now());
-        current.updated_at = Utc::now();
-        self.db
-            .update(("session", id))
-            .content(&current)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to set session terminated".into()))
+    pub async fn set_terminated(&self, _id: &str, _status: SessionStatus) -> Result<Session> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Count active sessions (status == active).
@@ -147,12 +105,8 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn count_active(&self) -> Result<u64> {
-        let mut response = self
-            .db
-            .query("SELECT count() AS count FROM session WHERE status = 'active' GROUP ALL")
-            .await?;
-        let count_row: Option<CountRow> = response.take(0)?;
-        Ok(count_row.map_or(0, |row| row.count))
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Retrieve the most recently interrupted session.
@@ -161,15 +115,8 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn get_most_recent_interrupted(&self) -> Result<Option<Session>> {
-        let mut response = self
-            .db
-            .query(
-                "SELECT * FROM session WHERE status = 'interrupted' \
-                 ORDER BY updated_at DESC LIMIT 1",
-            )
-            .await?;
-        let sessions: Vec<Session> = response.take(0)?;
-        Ok(sessions.into_iter().next())
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// List all sessions with status `interrupted`.
@@ -178,11 +125,8 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_interrupted(&self) -> Result<Vec<Session>> {
-        let mut response = self
-            .db
-            .query("SELECT * FROM session WHERE status = 'interrupted'")
-            .await?;
-        response.take::<Vec<Session>>(0).map_err(AppError::from)
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// List all sessions with status `active` or `paused`.
@@ -191,11 +135,8 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_active_or_paused(&self) -> Result<Vec<Session>> {
-        let mut response = self
-            .db
-            .query("SELECT * FROM session WHERE status = 'active' OR status = 'paused'")
-            .await?;
-        response.take::<Vec<Session>>(0).map_err(AppError::from)
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
 
     /// Update the operational mode for a session.
@@ -203,19 +144,8 @@ impl SessionRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the update fails.
-    pub async fn update_mode(&self, id: &str, mode: SessionMode) -> Result<Session> {
-        let mut current = self.get_by_id(id).await?;
-        current.mode = mode;
-        current.updated_at = Utc::now();
-        self.db
-            .update(("session", id))
-            .content(&current)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to update session mode".into()))
+    pub async fn update_mode(&self, _id: &str, _mode: SessionMode) -> Result<Session> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T023)")
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct CountRow {
-    count: u64,
 }

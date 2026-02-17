@@ -37,7 +37,8 @@
 			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json$/": {
 				"approve": true,
 				"matchCommandLine": true
-			}
+			},
+			"git restore": true
 		},
 		"powershell.cwd": "monocoque-agent-rc",
     "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,

@@ -49,8 +49,8 @@ default_nudge_message = "Please continue"
 #[tokio::test]
 async fn stall_alert_created_on_silence() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let config = test_config(tmp.path());
-    let database = db::connect(&config, true).await.expect("db connect");
+    let _config = test_config(tmp.path());
+    let database = db::connect_memory().await.expect("db connect");
     let db = Arc::new(database);
 
     // Create an active session.
@@ -122,8 +122,8 @@ async fn stall_alert_created_on_silence() {
 #[tokio::test]
 async fn nudge_updates_alert_and_increments_count() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let config = test_config(tmp.path());
-    let database = db::connect(&config, true).await.expect("db connect");
+    let _config = test_config(tmp.path());
+    let database = db::connect_memory().await.expect("db connect");
     let db = Arc::new(database);
 
     // Create an active session and a pending stall alert.
@@ -167,8 +167,8 @@ async fn nudge_updates_alert_and_increments_count() {
 #[tokio::test]
 async fn self_recovery_clears_active_alert() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let config = test_config(tmp.path());
-    let database = db::connect(&config, true).await.expect("db connect");
+    let _config = test_config(tmp.path());
+    let database = db::connect_memory().await.expect("db connect");
     let db = Arc::new(database);
 
     let session_repo = SessionRepo::new(Arc::clone(&db));

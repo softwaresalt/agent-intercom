@@ -62,8 +62,8 @@ fn sample_prompt(session_id: &str) -> ContinuationPrompt {
 
 #[tokio::test]
 async fn prompt_flow_creates_db_record() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p1");
@@ -80,8 +80,8 @@ async fn prompt_flow_creates_db_record() {
 
 #[tokio::test]
 async fn prompt_flow_continue_updates_decision() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p2");
@@ -103,8 +103,8 @@ async fn prompt_flow_continue_updates_decision() {
 
 #[tokio::test]
 async fn prompt_flow_refine_updates_decision_with_instruction() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p3");
@@ -135,8 +135,8 @@ async fn prompt_flow_refine_updates_decision_with_instruction() {
 
 #[tokio::test]
 async fn prompt_flow_stop_updates_decision() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p4");
@@ -212,8 +212,8 @@ async fn prompt_flow_timeout_returns_continue() {
 
 #[tokio::test]
 async fn prompt_flow_pending_for_session_query() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-pending-prompt");
@@ -229,8 +229,8 @@ async fn prompt_flow_pending_for_session_query() {
 
 #[tokio::test]
 async fn prompt_flow_all_prompt_types_persist() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let types = [

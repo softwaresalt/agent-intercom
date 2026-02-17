@@ -1,18 +1,19 @@
-//! Checkpoint repository for `SurrealDB` persistence.
+//! Checkpoint repository for `SQLite` persistence.
 
 use std::sync::Arc;
 
 use crate::models::checkpoint::Checkpoint;
-use crate::{AppError, Result};
+use crate::Result;
 
 use super::db::Database;
 
-/// Repository wrapper around `SurrealDB` for checkpoint records.
+/// Repository wrapper around `SQLite` for checkpoint records.
 #[derive(Clone)]
 pub struct CheckpointRepo {
     db: Arc<Database>,
 }
 
+#[allow(clippy::unused_async)] // todo!() stubs lack .await — Phase 3 will add real queries
 impl CheckpointRepo {
     /// Create a new repository instance.
     #[must_use]
@@ -25,12 +26,9 @@ impl CheckpointRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the database insert fails.
-    pub async fn create(&self, checkpoint: &Checkpoint) -> Result<Checkpoint> {
-        self.db
-            .create(("checkpoint", checkpoint.id.as_str()))
-            .content(checkpoint)
-            .await?
-            .ok_or_else(|| AppError::Db("failed to create checkpoint".into()))
+    pub async fn create(&self, _checkpoint: &Checkpoint) -> Result<Checkpoint> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T025)")
     }
 
     /// Retrieve a checkpoint by identifier.
@@ -38,9 +36,9 @@ impl CheckpointRepo {
     /// # Errors
     ///
     /// Returns `AppError::NotFound` if the checkpoint does not exist.
-    pub async fn get_by_id(&self, id: &str) -> Result<Checkpoint> {
-        let checkpoint: Option<Checkpoint> = self.db.select(("checkpoint", id)).await?;
-        checkpoint.ok_or_else(|| AppError::NotFound("checkpoint not found".into()))
+    pub async fn get_by_id(&self, _id: &str) -> Result<Checkpoint> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T025)")
     }
 
     /// List all checkpoints for a given session.
@@ -48,17 +46,9 @@ impl CheckpointRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the query fails.
-    pub async fn list_for_session(&self, session_id: &str) -> Result<Vec<Checkpoint>> {
-        let mut response = self
-            .db
-            .query(
-                "SELECT * FROM checkpoint \
-                 WHERE session_id = $sid \
-                 ORDER BY created_at DESC",
-            )
-            .bind(("sid", session_id))
-            .await?;
-        response.take::<Vec<Checkpoint>>(0).map_err(AppError::from)
+    pub async fn list_for_session(&self, _session_id: &str) -> Result<Vec<Checkpoint>> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T025)")
     }
 
     /// Delete all checkpoints for a given session.
@@ -66,11 +56,8 @@ impl CheckpointRepo {
     /// # Errors
     ///
     /// Returns `AppError::Db` if the delete fails.
-    pub async fn delete_for_session(&self, session_id: &str) -> Result<()> {
-        self.db
-            .query("DELETE FROM checkpoint WHERE session_id = $sid")
-            .bind(("sid", session_id))
-            .await?;
-        Ok(())
+    pub async fn delete_for_session(&self, _session_id: &str) -> Result<()> {
+        let _ = &self.db;
+        todo!("rewrite with sqlx in Phase 3 (T025)")
     }
 }

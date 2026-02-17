@@ -121,11 +121,11 @@ fn default_ipc_name() -> String {
     "monocoque-agent-rc".into()
 }
 
-/// Database configuration for the SQLite persistence layer.
+/// Database configuration for the `SQLite` persistence layer.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct DatabaseConfig {
-    /// Relative or absolute path to the SQLite database file.
+    /// Relative or absolute path to the `SQLite` database file.
     ///
     /// The `connect()` function auto-creates parent directories if they
     /// do not exist. Defaults to `data/monocoque.db`.
@@ -234,7 +234,7 @@ impl GlobalConfig {
         &self.default_workspace_root
     }
 
-    /// Configured path to the SQLite database file.
+    /// Configured path to the `SQLite` database file.
     #[must_use]
     pub fn db_path(&self) -> &Path {
         &self.database.path

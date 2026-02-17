@@ -7,8 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+use sqlx::SqlitePool;
 
 use crate::config::GlobalConfig;
 use crate::models::session::Session;
@@ -25,8 +24,8 @@ pub struct ToolContext {
     pub workspace_root: PathBuf,
     /// Global configuration.
     pub config: Arc<GlobalConfig>,
-    /// `SurrealDB` connection pool.
-    pub db: Arc<Surreal<Db>>,
+    /// `SQLite` connection pool.
+    pub db: Arc<SqlitePool>,
     /// Slack client (absent in local-only mode).
     pub slack: Option<Arc<SlackService>>,
 }
@@ -38,7 +37,7 @@ impl ToolContext {
         session: Session,
         workspace_root: PathBuf,
         config: Arc<GlobalConfig>,
-        db: Arc<Surreal<Db>>,
+        db: Arc<SqlitePool>,
         slack: Option<Arc<SlackService>>,
     ) -> Self {
         Self {

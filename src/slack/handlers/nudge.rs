@@ -63,9 +63,8 @@ pub async fn handle_nudge_action(
 
     // ── Load the alert to get the session_id ─────────────
     let alert: crate::models::stall::StallAlert = {
-        let db_ref: &surrealdb::Surreal<surrealdb::engine::local::Db> = &state.db;
-        let opt: Option<crate::models::stall::StallAlert> = db_ref
-            .select(("stall_alert", alert_id))
+        let opt = stall_repo
+            .get_by_id(alert_id)
             .await
             .map_err(|e| e.to_string())?;
         opt.ok_or_else(|| format!("stall alert {alert_id} not found"))?

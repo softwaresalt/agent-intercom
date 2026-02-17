@@ -13,8 +13,7 @@ use rmcp::model::{
     ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam, ReadResourceResult, Tool,
 };
 use rmcp::service::{RequestContext, RoleServer};
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+use sqlx::SqlitePool;
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, info_span};
 
@@ -65,8 +64,8 @@ pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 pub struct AppState {
     /// Global configuration.
     pub config: Arc<GlobalConfig>,
-    /// `SurrealDB` connection pool.
-    pub db: Arc<Surreal<Db>>,
+    /// `SQLite` connection pool.
+    pub db: Arc<SqlitePool>,
     /// Slack client service (absent in local-only mode).
     pub slack: Option<Arc<SlackService>>,
     /// Pending approval request senders keyed by `request_id`.
