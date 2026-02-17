@@ -46,7 +46,7 @@ src/
   ipc/                    # IPC server (named pipes / Unix sockets) for monocoque-ctl
     server.rs, socket.rs
   mcp/                    # MCP protocol layer
-    handler.rs            # AppState, AgentRemServer, ToolRouter wiring
+    handler.rs            # AppState, AgentRcServer, ToolRouter wiring
     context.rs            # Per-request context
     sse.rs                # HTTP/SSE transport (axum)
     transport.rs          # Stdio transport for direct agent connections
@@ -182,7 +182,7 @@ Never write production code before the corresponding test exists and has been ob
 
 ### MCP (rmcp 0.5)
 
-* Implements `ServerHandler` trait on `AgentRemServer` in `mcp/handler.rs`
+* Implements `ServerHandler` trait on `AgentRcServer` in `mcp/handler.rs`
 * Tools registered via `ToolRouter` / `ToolRoute::new_dyn()` — no `#[tool]` proc macros
 * All 9 tools always registered and visible; inapplicable calls return descriptive errors
 * Blocking tools (`ask_approval`, `forward_prompt`, `wait_for_instruction`) use `tokio::sync::oneshot` channels

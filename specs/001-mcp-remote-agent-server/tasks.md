@@ -91,9 +91,9 @@ tests/         # contract/, integration/, unit/
 
 ### MCP Server Foundation
 
-- [X] T029 Implement MCP server handler struct `AgentRemServer` in `src/mcp/handler.rs`: implement `rmcp::ServerHandler` trait with `call_tool`, `list_tools`, `list_resources`, `read_resource`, `on_initialized` methods; store reference to shared application state (config, DB, Slack client, session registry); tracing span on every tool call (FR-037)
+- [X] T029 Implement MCP server handler struct `AgentRcServer` in `src/mcp/handler.rs`: implement `rmcp::ServerHandler` trait with `call_tool`, `list_tools`, `list_resources`, `read_resource`, `on_initialized` methods; store reference to shared application state (config, DB, Slack client, session registry); tracing span on every tool call (FR-037)
 - [X] T030 Implement session context resolution in `src/mcp/context.rs`: given an MCP request context, resolve the active `Session` and its `workspace_root`; create `ToolContext` struct carrying session reference, workspace_root, peer handle, and shared state
-- [X] T031 [P] Implement stdio transport setup in `src/mcp/transport.rs`: wire `AgentRemServer` to `rmcp::transport::stdio` for the primary agent connection; create and auto-activate a default session on first tool call using `default_workspace_root` from GlobalConfig or `--workspace` CLI arg
+- [X] T031 [P] Implement stdio transport setup in `src/mcp/transport.rs`: wire `AgentRcServer` to `rmcp::transport::stdio` for the primary agent connection; create and auto-activate a default session on first tool call using `default_workspace_root` from GlobalConfig or `--workspace` CLI arg
 - [X] T032 [P] Implement HTTP/SSE transport setup in `src/mcp/sse.rs`: mount `rmcp::StreamableHttpService` onto an `axum::Router` via `nest_service("/mcp", service)`; bind to `config.http_port` on localhost; each SSE connection creates a new session with workspace_root from connection parameters
 - [X] T033 Create `src/mcp/mod.rs` re-exporting handler, context, transport, sse
 
@@ -103,7 +103,7 @@ tests/         # contract/, integration/, unit/
 
 ### Server Bootstrap
 
-- [X] T035 Implement server bootstrap in `src/main.rs`: load config (T005-T007), initialize DB and run schema (T016-T017), start retention service (T023), connect Slack client (T025), create `AgentRemServer` with shared state, start stdio transport (T031), start SSE transport with axum (T032), register Slack interaction handler (T027), register SIGTERM/SIGINT signal handler that triggers graceful shutdown (shutdown persistence logic in T081)
+- [X] T035 Implement server bootstrap in `src/main.rs`: load config (T005-T007), initialize DB and run schema (T016-T017), start retention service (T023), connect Slack client (T025), create `AgentRcServer` with shared state, start stdio transport (T031), start SSE transport with axum (T032), register Slack interaction handler (T027), register SIGTERM/SIGINT signal handler that triggers graceful shutdown (shutdown persistence logic in T081)
 - [X] T036 Update `src/lib.rs` to re-export all public modules: config, errors, models, persistence, slack, mcp, diff, policy, orchestrator, ipc
 - [X] T037 Verify full compilation with `cargo build` and `cargo clippy` pass cleanly
 
@@ -356,7 +356,7 @@ tests/         # contract/, integration/, unit/
 ### Implementation
 
 - [X] T091 Implement `slack://channel/{id}/recent` MCP resource handler in `src/mcp/resources/slack_channel.rs`: read recent messages from configured Slack channel using `conversations.history` API; return `{messages, has_more}` per mcp-resources.json contract; validate `id` matches `config.slack.channel_id` (FR-018)
-- [X] T092 Wire resource handler into `AgentRemServer::read_resource` in `src/mcp/handler.rs`
+- [X] T092 Wire resource handler into `AgentRcServer::read_resource` in `src/mcp/handler.rs`
 
 **Checkpoint**: Agent can read operator instructions from Slack channel
 

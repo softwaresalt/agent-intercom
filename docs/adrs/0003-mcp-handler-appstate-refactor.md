@@ -1,4 +1,4 @@
-# ADR-0003: MCP Server Handler Refactored from McpServer to AgentRemServer with AppState
+# ADR-0003: MCP Server Handler Refactored from McpServer to AgentRcServer with AppState
 
 **Status**: Accepted
 **Date**: 2026-02-11
@@ -13,19 +13,19 @@ Phase 1 created a minimal `McpServer` struct in `src/mcp/server.rs` that held on
 Renamed `server.rs` to `handler.rs` and replaced `McpServer` with two structs:
 
 - **`AppState`** — shared application state holding `Arc<GlobalConfig>`, `Arc<Surreal<Db>>`, and `Option<Arc<SlackService>>`. Constructed once during bootstrap and shared across all transport connections.
-- **`AgentRemServer`** — MCP `ServerHandler` implementation that holds `Arc<AppState>`. One instance per transport connection (stdio gets one, each SSE connection gets its own).
+- **`AgentRcServer`** — MCP `ServerHandler` implementation that holds `Arc<AppState>`. One instance per transport connection (stdio gets one, each SSE connection gets its own).
 
 All nine tool definitions now carry full JSON schemas matching the contract in `contracts/mcp-tools.json`. Tool handlers still return "not implemented" errors, but the router infrastructure is ready for Phase 3 wiring.
 
 Added three new modules:
 - `context.rs` — `ToolContext` struct bundling session + workspace + infrastructure for per-request use.
 - `transport.rs` — stdio transport setup using `rmcp::transport::io::stdio()`.
-- `sse.rs` — HTTP/SSE transport using `SseServer` with axum and per-connection `AgentRemServer` instances.
+- `sse.rs` — HTTP/SSE transport using `SseServer` with axum and per-connection `AgentRcServer` instances.
 
 ## Consequences
 
 **Positive**:
-- Clean separation between shared state (`AppState`) and per-connection server (`AgentRemServer`).
+- Clean separation between shared state (`AppState`) and per-connection server (`AgentRcServer`).
 - Tool schemas are contract-tested and match the spec.
 - Transport modules are independently testable.
 

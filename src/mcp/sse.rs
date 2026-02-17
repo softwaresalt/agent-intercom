@@ -18,7 +18,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use super::handler::{AgentRemServer, AppState};
+use super::handler::{AgentRcServer, AppState};
 use crate::{AppError, Result};
 
 /// Extract `channel_id` from a URI query string.
@@ -36,7 +36,7 @@ fn extract_channel_id(uri: &axum::http::Uri) -> Option<String> {
 
 /// Start the HTTP/SSE MCP transport on `config.http_port`.
 ///
-/// Each SSE connection creates a fresh [`AgentRemServer`] sharing the
+/// Each SSE connection creates a fresh [`AgentRcServer`] sharing the
 /// same [`AppState`].  When the client connects with a `channel_id`
 /// query parameter the per-session Slack channel is overridden.
 ///
@@ -59,14 +59,14 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
 
     // Shared inbox: the middleware writes the channel_id extracted from
     // the query string; the factory closure reads it when creating the
-    // per-session AgentRemServer.  A semaphore serialises SSE connection
+    // per-session AgentRcServer.  A semaphore serialises SSE connection
     // establishment so the inbox value is never clobbered by a concurrent
     // connection.
     let channel_inbox: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
     let connection_semaphore = Arc::new(Semaphore::new(1));
 
-    // Each inbound SSE connection gets its own AgentRemServer instance.
+    // Each inbound SSE connection gets its own AgentRcServer instance.
     let inbox_for_factory = Arc::clone(&channel_inbox);
     let server_ct = {
         let state = Arc::clone(&state);
@@ -78,7 +78,7 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
             if let Some(ref ch) = channel_override {
                 info!(channel_id = %ch, "SSE session with per-workspace channel override");
             }
-            AgentRemServer::with_channel_override(Arc::clone(&state), channel_override)
+            AgentRcServer::with_channel_override(Arc::clone(&state), channel_override)
         })
     };
 

@@ -39,7 +39,8 @@
 				"matchCommandLine": true
 			},
 			"git restore": true,
-			"Clear-Host": true
+			"Clear-Host": true,
+			"cargo build": true
 		},
 		"powershell.cwd": "monocoque-agent-rc",
     "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,

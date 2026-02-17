@@ -279,7 +279,7 @@ DELETE FROM session WHERE id = $id;
 
 **Decision**: Existing `extract_channel_id()` and `channel_id_override` implementation in `src/mcp/sse.rs` and `src/mcp/handler.rs` already satisfies FR-042 through FR-044. No new code required — only explicit specification, config documentation, and test coverage.
 
-**Rationale**: The SSE transport already extracts `channel_id` from the query string, passes it to `AgentRemServer::with_channel_override()`, and the `effective_channel_id()` method returns the override or the default. Each SSE connection gets its own `AgentRemServer` instance, ensuring session isolation. A semaphore-protected inbox pattern prevents race conditions during concurrent connection establishment.
+**Rationale**: The SSE transport already extracts `channel_id` from the query string, passes it to `AgentRcServer::with_channel_override()`, and the `effective_channel_id()` method returns the override or the default. Each SSE connection gets its own `AgentRcServer` instance, ensuring session isolation. A semaphore-protected inbox pattern prevents race conditions during concurrent connection establishment.
 
 **Verification needed**:
 

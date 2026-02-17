@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use monocoque_agent_rc::config::GlobalConfig;
-use monocoque_agent_rc::mcp::handler::{AgentRemServer, AppState};
+use monocoque_agent_rc::mcp::handler::{AgentRcServer, AppState};
 use monocoque_agent_rc::persistence::db;
 use tokio::sync::Mutex;
 
@@ -66,7 +66,7 @@ async fn test_state() -> Arc<AppState> {
 async fn channel_override_uses_specified_channel() {
     let state = test_state().await;
     let server =
-        AgentRemServer::with_channel_override(Arc::clone(&state), Some("C_OVERRIDE".into()));
+        AgentRcServer::with_channel_override(Arc::clone(&state), Some("C_OVERRIDE".into()));
 
     assert_eq!(server.effective_channel_id(), "C_OVERRIDE");
 }
@@ -74,7 +74,7 @@ async fn channel_override_uses_specified_channel() {
 #[tokio::test]
 async fn absent_channel_id_uses_config_default() {
     let state = test_state().await;
-    let server = AgentRemServer::with_channel_override(Arc::clone(&state), None);
+    let server = AgentRcServer::with_channel_override(Arc::clone(&state), None);
 
     assert_eq!(server.effective_channel_id(), "C_DEFAULT_CHANNEL");
 }
@@ -82,7 +82,7 @@ async fn absent_channel_id_uses_config_default() {
 #[tokio::test]
 async fn new_server_uses_config_default() {
     let state = test_state().await;
-    let server = AgentRemServer::new(Arc::clone(&state));
+    let server = AgentRcServer::new(Arc::clone(&state));
 
     assert_eq!(server.effective_channel_id(), "C_DEFAULT_CHANNEL");
 }
@@ -92,9 +92,9 @@ async fn two_sessions_with_different_overrides_route_independently() {
     let state = test_state().await;
 
     let server_a =
-        AgentRemServer::with_channel_override(Arc::clone(&state), Some("C_FRONTEND".into()));
+        AgentRcServer::with_channel_override(Arc::clone(&state), Some("C_FRONTEND".into()));
     let server_b =
-        AgentRemServer::with_channel_override(Arc::clone(&state), Some("C_BACKEND".into()));
+        AgentRcServer::with_channel_override(Arc::clone(&state), Some("C_BACKEND".into()));
 
     // Both share the same AppState but each session routes to its own channel.
     assert_eq!(server_a.effective_channel_id(), "C_FRONTEND");

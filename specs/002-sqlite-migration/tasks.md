@@ -120,9 +120,9 @@
 
 **Independent Test**: Grep codebase for `surrealdb` — zero matches. Compare release binary size.
 
-- [ ] T044 [US5] Remove any remaining `surrealdb` references from Cargo.toml (verify workspace deps, package deps, features sections are clean)
-- [ ] T045 [US5] Run `cargo build --release` and record both binary size and wall-clock build time for comparison with pre-migration baseline (validates SC-004 and SC-005)
-- [ ] T046 [US5] Search entire codebase for residual `surrealdb` references: `grep -r "surrealdb" src/ tests/ Cargo.toml ctl/` — must return zero results
+- [x] T044 [US5] Remove any remaining `surrealdb` references from Cargo.toml (verify workspace deps, package deps, features sections are clean)
+- [x] T045 [US5] Run `cargo build --release` and record both binary size and wall-clock build time for comparison with pre-migration baseline (validates SC-004 and SC-005)
+- [x] T046 [US5] Search entire codebase for residual `surrealdb` references: `grep -r "surrealdb" src/ tests/ Cargo.toml ctl/` — must return zero results
 
 **Checkpoint**: Zero SurrealDB references. Binary smaller than pre-migration. US5 is complete.
 

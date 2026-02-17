@@ -81,13 +81,13 @@ pub struct AppState {
 }
 
 /// MCP server implementation that exposes the nine monocoque-agent-rc tools.
-pub struct AgentRemServer {
+pub struct AgentRcServer {
     state: Arc<AppState>,
     /// Per-session Slack channel override supplied via SSE query parameter.
     channel_id_override: Option<String>,
 }
 
-impl AgentRemServer {
+impl AgentRcServer {
     /// Create a new MCP server bound to shared application state.
     #[must_use]
     pub fn new(state: Arc<AppState>) -> Self {
@@ -125,7 +125,7 @@ impl AgentRemServer {
     }
 
     fn tool_router() -> &'static ToolRouter<Self> {
-        static ROUTER: std::sync::OnceLock<ToolRouter<AgentRemServer>> = std::sync::OnceLock::new();
+        static ROUTER: std::sync::OnceLock<ToolRouter<AgentRcServer>> = std::sync::OnceLock::new();
         ROUTER.get_or_init(|| {
             let mut router = ToolRouter::new();
 
@@ -376,7 +376,7 @@ impl AgentRemServer {
     }
 }
 
-impl ServerHandler for AgentRemServer {
+impl ServerHandler for AgentRcServer {
     fn call_tool(
         &self,
         request: CallToolRequestParam,
