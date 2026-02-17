@@ -132,13 +132,13 @@
 
 **Purpose**: Quality gates, documentation, constitution amendment
 
-- [ ] T047 Run `cargo check` — zero errors
-- [ ] T048 Run `cargo clippy -- -D warnings` — zero warnings
-- [ ] T049 Run `cargo fmt --all -- --check` — no violations
-- [ ] T050 Run `cargo test` — all tests green (full suite)
-- [ ] T051 [P] Run quickstart.md validation: delete DB file, start server, verify auto-bootstrap
-- [ ] T052 [P] Update .specify/memory/constitution.md: amend Principle VI text from "SurrealDB in embedded mode" to "SQLite via sqlx" with version bump and sync impact report
-- [ ] T053 [P] Update Technical Constraints section in .specify/memory/constitution.md: change "Persistence: SurrealDB embedded" to "Persistence: SQLite via sqlx (bundled)"
+- [x] T047 Run `cargo check` — zero errors
+- [x] T048 Run `cargo clippy -- -D warnings` — zero warnings
+- [x] T049 Run `cargo fmt --all -- --check` — no violations
+- [x] T050 Run `cargo test` — all tests green (full suite)
+- [x] T051 [P] Run quickstart.md validation: delete DB file, start server, verify auto-bootstrap
+- [x] T052 [P] Update .specify/memory/constitution.md: amend Principle VI text from "SurrealDB in embedded mode" to "SQLite via sqlx" with version bump and sync impact report
+- [x] T053 [P] Update Technical Constraints section in .specify/memory/constitution.md: change "Persistence: SurrealDB embedded" to "Persistence: SQLite via sqlx (bundled)"
 
 ---
 

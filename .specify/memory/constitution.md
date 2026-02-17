@@ -1,22 +1,16 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 0.0.0 → 1.0.0
-Bump rationale: Initial adoption — new constitution (MAJOR)
+Version change: 1.0.0 → 1.1.0
+Bump rationale: Persistence layer migration SurrealDB → SQLite (MINOR)
 
-Added principles:
-  - I. Safety-First Rust
-  - II. MCP Protocol Fidelity
-  - III. Test-First Development (NON-NEGOTIABLE)
-  - IV. Security Boundary Enforcement
-  - V. Structured Observability
-  - VI. Single-Binary Simplicity
+Modified principles:
+  - VI. Single-Binary Simplicity — updated persistence reference
 
-Added sections:
-  - Technical Constraints
-  - Development Workflow
+Modified sections:
+  - Technical Constraints — persistence entry updated
 
-Removed sections: (none — initial version)
+Removed sections: (none)
 
 Templates requiring updates:
   - .specify/templates/plan-template.md ✅ aligned (Constitution Check
@@ -121,8 +115,8 @@ The project MUST produce a single workspace with two binaries
 managed via `Cargo.toml` workspace dependencies. New dependencies
 MUST be justified by a concrete requirement — do not add libraries
 speculatively. Prefer the standard library over external crates
-when the standard library solution is adequate. SurrealDB in
-embedded mode is the sole persistence layer; do not introduce
+when the standard library solution is adequate. SQLite via sqlx
+(bundled) is the sole persistence layer; do not introduce
 additional databases or caches.
 
 **Rationale**: Operational simplicity is critical for a tool that
@@ -139,8 +133,8 @@ file copy.
   and `transport-io` features
 - **HTTP/SSE**: Axum 0.8
 - **Slack**: `slack-morphism` with Socket Mode
-- **Persistence**: SurrealDB embedded (RocksDB for production,
-  in-memory for tests)
+- **Persistence**: SQLite via sqlx (bundled libsqlite3 for
+  production, in-memory for tests)
 - **Diff/Patch**: `diffy` 0.4
 - **File watching**: `notify` 6.x
 - **Formatting**: `rustfmt.toml` with `max_width = 100`,
