@@ -104,11 +104,11 @@
 
 ### Tests (write first, confirm they fail)
 
-- [ ] T042 [US4] Write retention purge test in tests/integration/retention_tests.rs: create expired sessions with children, run `purge_expired()`, verify cascading deletion order (stall_alerts → checkpoints → prompts → approvals → sessions)
+- [x] T042 [US4] Write retention purge test in tests/integration/retention_tests.rs: create expired sessions with children, run `purge_expired()`, verify cascading deletion order (stall_alerts → checkpoints → prompts → approvals → sessions)
 
 ### Implementation
 
-- [ ] T043 [US4] Rewrite src/persistence/retention.rs: replace SurrealQL DELETE with SQLite `DELETE FROM ... WHERE session_id IN (SELECT id FROM session WHERE terminated_at < ? AND terminated_at IS NOT NULL)` — cascade order: stall_alert, checkpoint, continuation_prompt, approval_request, session
+- [x] T043 [US4] Rewrite src/persistence/retention.rs: replace SurrealQL DELETE with SQLite `DELETE FROM ... WHERE session_id IN (SELECT id FROM session WHERE terminated_at < ? AND terminated_at IS NOT NULL)` — cascade order: stall_alert, checkpoint, continuation_prompt, approval_request, session
 
 **Checkpoint**: Retention purge test passes. Expired sessions and all children deleted. Active/recent sessions untouched. US4 is complete.
 

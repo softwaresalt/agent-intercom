@@ -7,5 +7,6 @@ mod integration {
     mod diff_apply_tests;
     mod nudge_flow_tests;
     mod prompt_flow_tests;
+    mod retention_tests;
     mod session_lifecycle_tests;
 }

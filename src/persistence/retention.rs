@@ -45,7 +45,63 @@ pub fn spawn_retention_task(
     })
 }
 
-#[allow(clippy::unused_async)] // todo!() stub — Phase 4 will add real queries
-async fn purge(_db: &Database, _retention_days: u32) -> Result<()> {
-    todo!("rewrite with sqlx in Phase 4 (T042/T043)")
+/// Purge terminated sessions older than `retention_days` and all their child
+/// records.
+///
+/// Deletion order (children before parent): `stall_alert` → `checkpoint` →
+/// `continuation_prompt` → `approval_request` → `session`.
+///
+/// # Errors
+///
+/// Returns an error if any of the delete queries fail.
+pub async fn purge(db: &Database, retention_days: u32) -> Result<()> {
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(retention_days));
+    let cutoff_str = cutoff.to_rfc3339();
+
+    // Children first — referential integrity.
+    sqlx::query(
+        "DELETE FROM stall_alert WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        "DELETE FROM checkpoint WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        "DELETE FROM continuation_prompt WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        "DELETE FROM approval_request WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    // Parent last.
+    let result =
+        sqlx::query("DELETE FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1")
+            .bind(&cutoff_str)
+            .execute(db)
+            .await?;
+
+    let purged = result.rows_affected();
+    if purged > 0 {
+        info!(count = purged, "purged expired sessions and child records");
+    }
+
+    Ok(())
 }
