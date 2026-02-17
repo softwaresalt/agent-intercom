@@ -99,11 +99,11 @@ impl Session {
         matches!(
             (self.status, next),
             (
-                SessionStatus::Created | SessionStatus::Paused,
+                SessionStatus::Created | SessionStatus::Paused | SessionStatus::Interrupted,
                 SessionStatus::Active
             ) | (
                 SessionStatus::Active,
-                SessionStatus::Paused | SessionStatus::Terminated | SessionStatus::Interrupted
+                SessionStatus::Paused | SessionStatus::Interrupted | SessionStatus::Terminated
             ) | (
                 SessionStatus::Paused,
                 SessionStatus::Terminated | SessionStatus::Interrupted

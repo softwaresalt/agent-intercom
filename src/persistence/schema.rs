@@ -84,6 +84,11 @@ CREATE TABLE IF NOT EXISTS stall_alert (
     slack_ts        TEXT,
     created_at      TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_approval_session ON approval_request(session_id);
+CREATE INDEX IF NOT EXISTS idx_checkpoint_session ON checkpoint(session_id);
+CREATE INDEX IF NOT EXISTS idx_prompt_session ON continuation_prompt(session_id);
+CREATE INDEX IF NOT EXISTS idx_stall_session ON stall_alert(session_id);
 ";
 
     sqlx::raw_sql(ddl).execute(pool).await?;

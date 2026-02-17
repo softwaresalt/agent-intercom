@@ -138,7 +138,10 @@ fn is_valid_transition(from: SessionStatus, to: SessionStatus) -> bool {
         ) | (
             SessionStatus::Active,
             SessionStatus::Paused | SessionStatus::Interrupted | SessionStatus::Terminated
-        ) | (SessionStatus::Paused, SessionStatus::Terminated)
+        ) | (
+            SessionStatus::Paused,
+            SessionStatus::Terminated | SessionStatus::Interrupted
+        )
     )
 }
 
