@@ -126,7 +126,7 @@ The `load_credential()` function in `src/config.rs` already implements:
 The SSE transport in `src/mcp/sse.rs` already implements:
 - `extract_channel_id()` parses `channel_id` from URI query string
 - Semaphore-protected inbox pattern passes channel_id to the factory closure
-- `AgentRemServer::with_channel_override()` stores per-session channel
+- `AgentRcServer::with_channel_override()` stores per-session channel
 - `effective_channel_id()` returns override or default
 - All tool handlers use `effective_channel_id()` consistently
 

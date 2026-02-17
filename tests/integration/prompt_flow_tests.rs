@@ -62,8 +62,8 @@ fn sample_prompt(session_id: &str) -> ContinuationPrompt {
 
 #[tokio::test]
 async fn prompt_flow_creates_db_record() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p1");
@@ -80,8 +80,8 @@ async fn prompt_flow_creates_db_record() {
 
 #[tokio::test]
 async fn prompt_flow_continue_updates_decision() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p2");
@@ -89,22 +89,24 @@ async fn prompt_flow_continue_updates_decision() {
     repo.create(&prompt).await.expect("create");
 
     // Simulate Continue decision.
-    let updated = repo
-        .update_decision(&prompt_id, PromptDecision::Continue, None)
+    repo.update_decision(&prompt_id, PromptDecision::Continue, None)
         .await
         .expect("update decision");
-    assert_eq!(updated.decision, Some(PromptDecision::Continue));
-    assert!(updated.instruction.is_none());
 
     // Verify DB state.
-    let fetched = repo.get_by_id(&prompt_id).await.expect("fetch");
+    let fetched = repo
+        .get_by_id(&prompt_id)
+        .await
+        .expect("fetch")
+        .expect("prompt should exist");
     assert_eq!(fetched.decision, Some(PromptDecision::Continue));
+    assert!(fetched.instruction.is_none());
 }
 
 #[tokio::test]
 async fn prompt_flow_refine_updates_decision_with_instruction() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p3");
@@ -113,30 +115,31 @@ async fn prompt_flow_refine_updates_decision_with_instruction() {
 
     // Simulate Refine with instruction.
     let instruction = "Focus on error handling first".to_owned();
-    let updated = repo
-        .update_decision(
-            &prompt_id,
-            PromptDecision::Refine,
-            Some(instruction.clone()),
-        )
-        .await
-        .expect("update decision");
-    assert_eq!(updated.decision, Some(PromptDecision::Refine));
-    assert_eq!(
-        updated.instruction.as_deref(),
-        Some("Focus on error handling first")
-    );
+    repo.update_decision(
+        &prompt_id,
+        PromptDecision::Refine,
+        Some(instruction.clone()),
+    )
+    .await
+    .expect("update decision");
 
     // Verify DB state.
-    let fetched = repo.get_by_id(&prompt_id).await.expect("fetch");
+    let fetched = repo
+        .get_by_id(&prompt_id)
+        .await
+        .expect("fetch")
+        .expect("prompt should exist");
     assert_eq!(fetched.decision, Some(PromptDecision::Refine));
-    assert_eq!(fetched.instruction, Some(instruction));
+    assert_eq!(
+        fetched.instruction.as_deref(),
+        Some("Focus on error handling first")
+    );
 }
 
 #[tokio::test]
 async fn prompt_flow_stop_updates_decision() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-p4");
@@ -144,11 +147,16 @@ async fn prompt_flow_stop_updates_decision() {
     repo.create(&prompt).await.expect("create");
 
     // Simulate Stop decision.
-    let updated = repo
-        .update_decision(&prompt_id, PromptDecision::Stop, None)
+    repo.update_decision(&prompt_id, PromptDecision::Stop, None)
         .await
         .expect("update decision");
-    assert_eq!(updated.decision, Some(PromptDecision::Stop));
+
+    let stopped = repo
+        .get_by_id(&prompt_id)
+        .await
+        .expect("fetch")
+        .expect("prompt should exist");
+    assert_eq!(stopped.decision, Some(PromptDecision::Stop));
 }
 
 #[tokio::test]
@@ -212,8 +220,8 @@ async fn prompt_flow_timeout_returns_continue() {
 
 #[tokio::test]
 async fn prompt_flow_pending_for_session_query() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let prompt = sample_prompt("session-pending-prompt");
@@ -229,8 +237,8 @@ async fn prompt_flow_pending_for_session_query() {
 
 #[tokio::test]
 async fn prompt_flow_all_prompt_types_persist() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = PromptRepo::new(database);
 
     let types = [

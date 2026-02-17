@@ -50,8 +50,8 @@ default_nudge_message = "continue"
 
 #[tokio::test]
 async fn full_lifecycle_start_pause_resume_terminate() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = SessionRepo::new(database);
 
     // Create and activate a session.
@@ -97,7 +97,7 @@ async fn full_lifecycle_start_pause_resume_terminate() {
 #[tokio::test]
 async fn max_concurrent_sessions_enforcement() {
     let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = SessionRepo::new(database);
 
     // Create and activate sessions up to the limit (2).
@@ -119,15 +119,15 @@ async fn max_concurrent_sessions_enforcement() {
 
     // Verify limit would be exceeded — checked by the orchestrator.
     assert!(
-        count >= u64::from(config.max_concurrent_sessions),
+        count >= i64::from(config.max_concurrent_sessions),
         "active sessions should be at or above the max limit"
     );
 }
 
 #[tokio::test]
 async fn owner_binding_verified_at_session_level() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = SessionRepo::new(database);
 
     let session = Session::new(
@@ -139,7 +139,11 @@ async fn owner_binding_verified_at_session_level() {
     let created = repo.create(&session).await.expect("create");
 
     // Fetch session and verify owner binding.
-    let fetched = repo.get_by_id(&created.id).await.expect("fetch");
+    let fetched = repo
+        .get_by_id(&created.id)
+        .await
+        .expect("fetch")
+        .expect("session should exist");
     assert_eq!(fetched.owner_user_id, "U_OWNER");
 
     // Simulate owner-check: a different user should be rejected.
@@ -152,8 +156,8 @@ async fn owner_binding_verified_at_session_level() {
 
 #[tokio::test]
 async fn checkpoint_stores_file_hashes() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let session_repo = SessionRepo::new(Arc::clone(&database));
     let checkpoint_repo = CheckpointRepo::new(database);
 
@@ -197,7 +201,8 @@ async fn checkpoint_stores_file_hashes() {
     let fetched = checkpoint_repo
         .get_by_id(&saved.id)
         .await
-        .expect("fetch checkpoint");
+        .expect("fetch checkpoint")
+        .expect("checkpoint should exist");
     assert_eq!(fetched.file_hashes.len(), 2);
     assert_eq!(
         fetched.file_hashes.get("src/main.rs"),
@@ -213,8 +218,8 @@ async fn checkpoint_stores_file_hashes() {
 
 #[tokio::test]
 async fn checkpoint_restore_detects_divergence() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let checkpoint_repo = CheckpointRepo::new(database);
 
     // Simulate a checkpoint with known hashes.
@@ -241,7 +246,11 @@ async fn checkpoint_restore_detects_divergence() {
     current_hashes.insert("src/lib.rs".to_owned(), "hash_original_lib".to_owned());
 
     // Verify divergence detection.
-    let fetched = checkpoint_repo.get_by_id(&saved.id).await.expect("fetch");
+    let fetched = checkpoint_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("checkpoint should exist");
     let mut diverged: Vec<String> = fetched
         .file_hashes
         .iter()
@@ -255,8 +264,8 @@ async fn checkpoint_restore_detects_divergence() {
 
 #[tokio::test]
 async fn checkpoint_list_for_session() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let checkpoint_repo = CheckpointRepo::new(database);
 
     let session_id = "session-list-1";
@@ -286,8 +295,8 @@ async fn checkpoint_list_for_session() {
 
 #[tokio::test]
 async fn invalid_status_transition_rejected() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db connect"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let repo = SessionRepo::new(database);
 
     let session = Session::new(

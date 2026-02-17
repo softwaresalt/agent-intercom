@@ -49,8 +49,8 @@ default_nudge_message = "Please continue"
 #[tokio::test]
 async fn stall_alert_created_on_silence() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let config = test_config(tmp.path());
-    let database = db::connect(&config, true).await.expect("db connect");
+    let _config = test_config(tmp.path());
+    let database = db::connect_memory().await.expect("db connect");
     let db = Arc::new(database);
 
     // Create an active session.
@@ -122,8 +122,8 @@ async fn stall_alert_created_on_silence() {
 #[tokio::test]
 async fn nudge_updates_alert_and_increments_count() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let config = test_config(tmp.path());
-    let database = db::connect(&config, true).await.expect("db connect");
+    let _config = test_config(tmp.path());
+    let database = db::connect_memory().await.expect("db connect");
     let db = Arc::new(database);
 
     // Create an active session and a pending stall alert.
@@ -148,27 +148,38 @@ async fn nudge_updates_alert_and_increments_count() {
     let saved = stall_repo.create(&alert).await.expect("create alert");
 
     // Simulate nudge: increment count, set status to Nudged.
-    let updated = stall_repo
+    stall_repo
         .increment_nudge_count(&saved.id)
         .await
         .expect("nudge increment");
 
+    let updated = stall_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("alert should exist");
     assert_eq!(updated.nudge_count, 1);
     assert_eq!(updated.status, StallAlertStatus::Nudged);
 
     // Second nudge.
-    let updated2 = stall_repo
+    stall_repo
         .increment_nudge_count(&saved.id)
         .await
         .expect("nudge increment 2");
+
+    let updated2 = stall_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("alert should exist");
     assert_eq!(updated2.nudge_count, 2);
 }
 
 #[tokio::test]
 async fn self_recovery_clears_active_alert() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let config = test_config(tmp.path());
-    let database = db::connect(&config, true).await.expect("db connect");
+    let _config = test_config(tmp.path());
+    let database = db::connect_memory().await.expect("db connect");
     let db = Arc::new(database);
 
     let session_repo = SessionRepo::new(Arc::clone(&db));
@@ -186,11 +197,16 @@ async fn self_recovery_clears_active_alert() {
     let saved = stall_repo.create(&alert).await.expect("create alert");
 
     // Simulate self-recovery: update status.
-    let recovered = stall_repo
+    stall_repo
         .update_status(&saved.id, StallAlertStatus::SelfRecovered)
         .await
         .expect("self recover");
 
+    let recovered = stall_repo
+        .get_by_id(&saved.id)
+        .await
+        .expect("fetch")
+        .expect("alert should exist");
     assert_eq!(recovered.status, StallAlertStatus::SelfRecovered);
 
     // Active alert query should now return None.

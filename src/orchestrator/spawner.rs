@@ -49,7 +49,7 @@ pub async fn spawn_session(
 
     // Enforce max concurrent sessions (FR-023).
     let active_count = session_repo.count_active().await?;
-    if active_count >= u64::from(config.max_concurrent_sessions) {
+    if active_count >= i64::from(config.max_concurrent_sessions) {
         return Err(AppError::Config(format!(
             "concurrent session limit reached ({}/{})",
             active_count, config.max_concurrent_sessions

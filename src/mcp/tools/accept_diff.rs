@@ -13,7 +13,7 @@ use tracing::{info, info_span, warn, Instrument};
 
 use crate::diff::patcher::apply_patch;
 use crate::diff::writer::write_full_file;
-use crate::mcp::handler::AgentRemServer;
+use crate::mcp::handler::AgentRcServer;
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
@@ -50,7 +50,7 @@ fn error_result(code: &str, message: &str) -> CallToolResult {
 /// Returns tool-level error codes for domain validation failures.
 #[allow(clippy::too_many_lines)] // Sequential validation + apply flow.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRemServer>,
+    context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().to_owned();
@@ -71,7 +71,16 @@ pub async fn handle(
         let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
 
         // ── Look up the approval request ─────────────────────
-        let Ok(approval) = approval_repo.get_by_id(&input.request_id).await else {
+        let Some(approval) = approval_repo
+            .get_by_id(&input.request_id)
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("approval query failed: {err}"),
+                    None,
+                )
+            })?
+        else {
             return Ok(error_result(
                 "request_not_found",
                 "no approval request found with the given id",
@@ -97,7 +106,16 @@ pub async fn handle(
 
         // ── Resolve session for workspace root ───────────────
         let session_repo = SessionRepo::new(Arc::clone(&state.db));
-        let Ok(session) = session_repo.get_by_id(&approval.session_id).await else {
+        let Some(session) = session_repo
+            .get_by_id(&approval.session_id)
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("session query failed: {err}"),
+                    None,
+                )
+            })?
+        else {
             return Err(rmcp::ErrorData::internal_error(
                 "owning session not found",
                 None,

@@ -1,52 +1,19 @@
-//! Contract tests for `SurrealDB` schema (T104).
+//! Contract tests for `SQLite` schema bootstrap (T004, T104-migrated).
 //!
-//! Verify that table creation, field definitions, and ASSERT constraints
-//! match the data-model.md specification.
+//! Verify that table creation and column definitions match the
+//! contracts/schema.sql.md specification.
 
-use std::sync::Arc;
-
-use monocoque_agent_rc::config::GlobalConfig;
 use monocoque_agent_rc::persistence::db;
 
-fn config_for_tests() -> GlobalConfig {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let toml = format!(
-        r#"
-default_workspace_root = '{root}'
-http_port = 3000
-ipc_name = "test"
-max_concurrent_sessions = 1
-host_cli = "claude"
-authorized_user_ids = ["U123"]
-
-[slack]
-channel_id = "C123"
-
-[timeouts]
-approval_seconds = 3600
-prompt_seconds = 1800
-wait_seconds = 0
-
-[stall]
-enabled = false
-inactivity_threshold_seconds = 300
-escalation_threshold_seconds = 120
-max_retries = 3
-default_nudge_message = "continue"
-"#,
-        root = temp.path().to_str().expect("utf8 path"),
-    );
-
-    GlobalConfig::from_toml_str(&toml).expect("valid config")
-}
-
+/// T004: File-backed `connect()` creates all 5 tables with correct columns.
 #[tokio::test]
-async fn schema_creates_five_tables() {
-    let config = config_for_tests();
-    let db = db::connect(&config, true).await.expect("db connect");
-    let db = Arc::new(db);
+async fn file_backed_connect_creates_five_tables() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("test.db");
+    let pool = db::connect(db_path.to_str().expect("utf8"))
+        .await
+        .expect("file-backed connect should succeed");
 
-    // Attempt to query each table — should succeed without error.
     let tables = [
         "session",
         "approval_request",
@@ -56,65 +23,86 @@ async fn schema_creates_five_tables() {
     ];
 
     for table in tables {
-        let query = format!("SELECT * FROM {table} LIMIT 1");
-        let result: surrealdb::Result<surrealdb::Response> = db.query(&query).await;
-        assert!(
-            result.is_ok(),
-            "table '{table}' should exist and be queryable"
-        );
+        let query = format!("SELECT COUNT(*) AS cnt FROM {table}");
+        let row: (i64,) = sqlx::query_as(&query)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| panic!("table '{table}' should be queryable: {e}"));
+        assert_eq!(row.0, 0, "table '{table}' should start empty");
     }
 }
 
+/// T004 addendum: verify session table has expected columns.
 #[tokio::test]
-async fn session_table_accepts_valid_record() {
-    let config = config_for_tests();
-    let db = db::connect(&config, true).await.expect("db connect");
+async fn session_table_has_expected_columns() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("cols.db");
+    let pool = db::connect(db_path.to_str().expect("utf8"))
+        .await
+        .expect("connect");
 
-    let result: surrealdb::Result<surrealdb::Response> = db
-        .query(
-            r"CREATE session:test SET
-                owner_user_id = 'U123',
-                workspace_root = '/test',
-                status = 'created',
-                prompt = 'hello',
-                mode = 'remote',
-                created_at = time::now(),
-                updated_at = time::now(),
-                last_tool = NONE,
-                nudge_count = 0,
-                stall_paused = false,
-                terminated_at = NONE,
-                progress_snapshot = NONE",
-        )
-        .await;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('session') ORDER BY cid")
+            .fetch_all(&pool)
+            .await
+            .expect("pragma_table_info");
 
-    assert!(result.is_ok(), "valid session should be insertable");
+    let column_names: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    let expected = [
+        "id",
+        "owner_user_id",
+        "workspace_root",
+        "status",
+        "prompt",
+        "mode",
+        "created_at",
+        "updated_at",
+        "terminated_at",
+        "last_tool",
+        "nudge_count",
+        "stall_paused",
+        "progress_snapshot",
+    ];
+
+    assert_eq!(
+        column_names, expected,
+        "session table columns should match schema.sql.md"
+    );
 }
 
+/// T004 addendum: verify `approval_request` table has expected columns.
 #[tokio::test]
-async fn approval_request_table_accepts_valid_record() {
-    let config = config_for_tests();
-    let db = db::connect(&config, true).await.expect("db connect");
+async fn approval_request_table_has_expected_columns() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("ar.db");
+    let pool = db::connect(db_path.to_str().expect("utf8"))
+        .await
+        .expect("connect");
 
-    let result: surrealdb::Result<surrealdb::Response> = db
-        .query(
-            r"CREATE approval_request:test SET
-                session_id = 'session:test',
-                title = 'test',
-                description = NONE,
-                diff_content = '--- a\n+++ b',
-                file_path = 'src/main.rs',
-                risk_level = 'low',
-                status = 'pending',
-                original_hash = 'abc123',
-                slack_ts = NONE,
-                created_at = time::now(),
-                consumed_at = NONE",
-        )
-        .await;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('approval_request') ORDER BY cid")
+            .fetch_all(&pool)
+            .await
+            .expect("pragma_table_info");
 
-    assert!(
-        result.is_ok(),
-        "valid approval_request should be insertable"
+    let column_names: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    let expected = [
+        "id",
+        "session_id",
+        "title",
+        "description",
+        "diff_content",
+        "file_path",
+        "risk_level",
+        "status",
+        "original_hash",
+        "slack_ts",
+        "created_at",
+        "consumed_at",
+    ];
+
+    assert_eq!(
+        column_names, expected,
+        "approval_request table columns should match schema.sql.md"
     );
 }

@@ -7,10 +7,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::info;
 
 use super::db::Database;
 use crate::Result;
@@ -38,7 +37,7 @@ pub fn spawn_retention_task(
                 }
                 _ = interval.tick() => {
                     if let Err(err) = purge(&db, retention_days).await {
-                        error!(?err, "retention purge failed");
+                        tracing::error!(?err, "retention purge failed");
                     }
                 }
             }
@@ -46,36 +45,63 @@ pub fn spawn_retention_task(
     })
 }
 
-async fn purge(db: &Database, retention_days: u32) -> Result<()> {
-    let cutoff = Utc::now() - chrono::Duration::days(i64::from(retention_days));
+/// Purge terminated sessions older than `retention_days` and all their child
+/// records.
+///
+/// Deletion order (children before parent): `stall_alert` → `checkpoint` →
+/// `continuation_prompt` → `approval_request` → `session`.
+///
+/// # Errors
+///
+/// Returns an error if any of the delete queries fail.
+pub async fn purge(db: &Database, retention_days: u32) -> Result<()> {
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(retention_days));
     let cutoff_str = cutoff.to_rfc3339();
 
-    // Delete children first to maintain referential integrity.
-    let child_tables = [
-        "approval_request",
-        "checkpoint",
-        "continuation_prompt",
-        "stall_alert",
-    ];
-    for table in child_tables {
-        // SAFETY: `table` values are compile-time string literals defined above,
-        // not user input, so interpolation here is not a SQL injection vector.
-        let query = format!(
-            "DELETE FROM {table} WHERE session_id IN \
-             (SELECT VALUE id FROM session \
-              WHERE status = 'terminated' AND terminated_at < $cutoff)"
-        );
-        db.query(&query).bind(("cutoff", &cutoff_str)).await?;
-    }
-
-    // Delete expired sessions.
-    db.query(
-        "DELETE FROM session \
-         WHERE status = 'terminated' AND terminated_at < $cutoff",
+    // Children first — referential integrity.
+    sqlx::query(
+        "DELETE FROM stall_alert WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
     )
-    .bind(("cutoff", &cutoff_str))
+    .bind(&cutoff_str)
+    .execute(db)
     .await?;
 
-    info!(retention_days, "retention purge completed");
+    sqlx::query(
+        "DELETE FROM checkpoint WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        "DELETE FROM continuation_prompt WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        "DELETE FROM approval_request WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    // Parent last.
+    let result =
+        sqlx::query("DELETE FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1")
+            .bind(&cutoff_str)
+            .execute(db)
+            .await?;
+
+    let purged = result.rows_affected();
+    if purged > 0 {
+        info!(count = purged, "purged expired sessions and child records");
+    }
+
     Ok(())
 }

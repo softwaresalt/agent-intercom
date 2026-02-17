@@ -35,7 +35,10 @@ pub async fn create_checkpoint(
     let _guard = span.enter();
 
     // Load the current session.
-    let session = session_repo.get_by_id(session_id).await?;
+    let session = session_repo
+        .get_by_id(session_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("session {session_id} not found")))?;
 
     // Compute file hashes for the workspace root.
     let file_hashes = hash_workspace_files(Path::new(&session.workspace_root))?;
@@ -82,7 +85,10 @@ pub async fn restore_checkpoint(
     let span = info_span!("restore_checkpoint", checkpoint_id);
     let _guard = span.enter();
 
-    let checkpoint = checkpoint_repo.get_by_id(checkpoint_id).await?;
+    let checkpoint = checkpoint_repo
+        .get_by_id(checkpoint_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("checkpoint {checkpoint_id} not found")))?;
 
     // Compute current file hashes for the workspace.
     let current_hashes = hash_workspace_files(Path::new(&checkpoint.workspace_root))?;

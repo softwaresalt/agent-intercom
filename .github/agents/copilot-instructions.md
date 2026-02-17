@@ -3,6 +3,10 @@
 Auto-generated from all feature plans. Last updated: 2026-02-10
 
 ## Active Technologies
+- [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (002-sqlite-migration)
+- [if applicable, e.g., PostgreSQL, CoreData, files or N/A] (002-sqlite-migration)
+- Rust stable, edition 2021 + sqlx 0.8 (runtime-tokio, sqlite, json, chrono, macros), axum 0.8, rmcp 0.5, slack-morphism 2.17, tokio 1.37 (002-sqlite-migration)
+- SQLite (file-backed via sqlx bundled libsqlite3; WAL journal mode; single-writer pool max_connections=1) (002-sqlite-migration)
 
 - Rust (stable, edition 2021) + `rmcp` 0.5, `slack-morphism` 2.17, `axum` 0.8, `tokio` 1.37, `serde`/`serde_json`, `diffy` 0.4, `notify` 6.1, `interprocess` 2.0, `clap` 4.5, `tracing`/`tracing-subscriber` 0.3 (001-mcp-remote-agent-server)
 
@@ -22,6 +26,8 @@ cargo test; cargo clippy
 Rust (stable, edition 2021): Follow standard conventions
 
 ## Recent Changes
+- 002-sqlite-migration: Added Rust stable, edition 2021 + sqlx 0.8 (runtime-tokio, sqlite, json, chrono, macros), axum 0.8, rmcp 0.5, slack-morphism 2.17, tokio 1.37
+- 002-sqlite-migration: Added [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
 
 - 001-mcp-remote-agent-server: Added Rust (stable, edition 2021) + `rmcp` 0.5, `slack-morphism` 2.17, `axum` 0.8, `tokio` 1.37, `serde`/`serde_json`, `diffy` 0.4, `notify` 6.1, `interprocess` 2.0, `clap` 4.5, `tracing`/`tracing-subscriber` 0.3
 

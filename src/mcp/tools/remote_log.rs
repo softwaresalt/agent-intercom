@@ -11,7 +11,7 @@ use rmcp::model::CallToolResult;
 use slack_morphism::prelude::{SlackChannelId, SlackTs};
 use tracing::{info, info_span, warn, Instrument};
 
-use crate::mcp::handler::AgentRemServer;
+use crate::mcp::handler::AgentRcServer;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
@@ -41,7 +41,7 @@ const VALID_LEVELS: &[&str] = &["info", "success", "warning", "error"];
 ///
 /// Returns `rmcp::ErrorData` on validation or infrastructure failures.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRemServer>,
+    context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().to_owned();

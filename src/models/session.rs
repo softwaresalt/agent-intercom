@@ -34,16 +34,11 @@ pub enum SessionMode {
     Hybrid,
 }
 
-/// Session domain entity persisted in `SurrealDB`.
+/// Session domain entity persisted in `SQLite`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Session {
     /// Unique record identifier.
-    #[serde(
-        skip_serializing,
-        default,
-        deserialize_with = "super::deserialize_surreal_id"
-    )]
     pub id: String,
     /// Owning Slack user ID; immutable after creation.
     pub owner_user_id: String,
@@ -62,7 +57,7 @@ pub struct Session {
     /// Most recent tool called.
     pub last_tool: Option<String>,
     /// Consecutive nudge attempts for current stall.
-    pub nudge_count: u32,
+    pub nudge_count: i64,
     /// Whether stall detection is currently paused.
     pub stall_paused: bool,
     /// Timestamp when the session was terminated.
@@ -104,11 +99,11 @@ impl Session {
         matches!(
             (self.status, next),
             (
-                SessionStatus::Created | SessionStatus::Paused,
+                SessionStatus::Created | SessionStatus::Paused | SessionStatus::Interrupted,
                 SessionStatus::Active
             ) | (
                 SessionStatus::Active,
-                SessionStatus::Paused | SessionStatus::Terminated | SessionStatus::Interrupted
+                SessionStatus::Paused | SessionStatus::Interrupted | SessionStatus::Terminated
             ) | (
                 SessionStatus::Paused,
                 SessionStatus::Terminated | SessionStatus::Interrupted

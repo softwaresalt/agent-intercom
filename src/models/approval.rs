@@ -39,11 +39,6 @@ pub enum ApprovalStatus {
 #[serde(rename_all = "snake_case")]
 pub struct ApprovalRequest {
     /// Unique record identifier.
-    #[serde(
-        skip_serializing,
-        default,
-        deserialize_with = "super::deserialize_surreal_id"
-    )]
     pub id: String,
     /// Owning session identifier.
     pub session_id: String,

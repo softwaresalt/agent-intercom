@@ -8,3 +8,6 @@ pub mod retention;
 pub mod schema;
 pub mod session_repo;
 pub mod stall_repo;
+
+/// Re-export the database pool type for convenience.
+pub use sqlx::SqlitePool;

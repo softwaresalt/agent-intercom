@@ -9,7 +9,7 @@ use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
 use tracing::{info, info_span, Instrument};
 
-use crate::mcp::handler::{AgentRemServer, AppState};
+use crate::mcp::handler::{AgentRcServer, AppState};
 use crate::models::session::Session;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::checkpoint_repo::CheckpointRepo;
@@ -31,7 +31,7 @@ struct RecoverStateInput {
 /// Returns `rmcp::ErrorData` on persistence failures.
 #[allow(clippy::too_many_lines)] // Recovery logic is inherently multi-step.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRemServer>,
+    context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
@@ -86,7 +86,7 @@ async fn resolve_session(
     session_id: Option<&str>,
 ) -> Result<Option<Session>, rmcp::ErrorData> {
     if let Some(sid) = session_id {
-        repo.get_by_id(sid).await.map(Some).map_err(|err| {
+        repo.get_by_id(sid).await.map_err(|err| {
             rmcp::ErrorData::internal_error(format!("failed to query session {sid}: {err}"), None)
         })
     } else {

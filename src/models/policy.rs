@@ -18,7 +18,7 @@ pub struct FilePatterns {
 
 /// Workspace auto-approve configuration loaded from `.monocoque/settings.json`.
 ///
-/// In-memory only — not persisted to `SurrealDB`.
+/// In-memory only — not persisted to `SQLite`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkspacePolicy {

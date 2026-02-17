@@ -1,6 +1,6 @@
 //! Stdio transport setup for the primary agent connection.
 //!
-//! Wires [`AgentRemServer`] to stdin/stdout for direct invocation
+//! Wires [`AgentRcServer`] to stdin/stdout for direct invocation
 //! by agentic IDEs (Claude Code, GitHub Copilot CLI, Cursor, VS Code).
 
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use rmcp::transport::io::stdio;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use super::handler::{AgentRemServer, AppState};
+use super::handler::{AgentRcServer, AppState};
 use crate::{AppError, Result};
 
 /// Serve the MCP server over stdio until the cancellation token fires.
@@ -19,7 +19,7 @@ use crate::{AppError, Result};
 ///
 /// Returns `AppError::Config` if the transport fails to initialize.
 pub async fn serve_stdio(state: Arc<AppState>, ct: CancellationToken) -> Result<()> {
-    let server = AgentRemServer::new(state);
+    let server = AgentRcServer::new(state);
     let transport = stdio();
 
     info!("starting stdio MCP transport");

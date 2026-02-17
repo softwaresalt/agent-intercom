@@ -13,7 +13,7 @@ use slack_morphism::prelude::{SlackBlock, SlackChannelId};
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
 
-use crate::mcp::handler::{AgentRemServer, ApprovalResponse};
+use crate::mcp::handler::{AgentRcServer, ApprovalResponse};
 use crate::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
@@ -50,7 +50,7 @@ fn default_risk_level() -> RiskLevel {
 /// Returns `rmcp::ErrorData` on validation or infrastructure failures.
 #[allow(clippy::too_many_lines)] // Approval flow is inherently sequential with many steps.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRemServer>,
+    context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().to_owned();

@@ -74,8 +74,8 @@ async fn create_interrupted_session(repo: &SessionRepo) -> Session {
 
 #[tokio::test]
 async fn recover_interrupted_session_with_pending_approval() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let session_repo = SessionRepo::new(Arc::clone(&database));
     let approval_repo = ApprovalRepo::new(Arc::clone(&database));
 
@@ -96,14 +96,10 @@ async fn recover_interrupted_session_with_pending_approval() {
         .expect("create approval");
 
     // Query interrupted sessions — should find our session.
-    let mut response = database
-        .query(
-            "SELECT * FROM session WHERE status = 'interrupted' \
-             ORDER BY updated_at DESC LIMIT 1",
-        )
+    let interrupted = session_repo
+        .list_interrupted()
         .await
-        .expect("query");
-    let interrupted: Vec<Session> = response.take(0).expect("take");
+        .expect("list interrupted");
     assert_eq!(interrupted.len(), 1);
     assert_eq!(interrupted[0].id, session.id);
 
@@ -121,8 +117,8 @@ async fn recover_interrupted_session_with_pending_approval() {
 
 #[tokio::test]
 async fn recover_interrupted_session_with_pending_prompt() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let session_repo = SessionRepo::new(Arc::clone(&database));
     let prompt_repo = PromptRepo::new(Arc::clone(&database));
 
@@ -156,8 +152,8 @@ async fn recover_interrupted_session_with_pending_prompt() {
 
 #[tokio::test]
 async fn recover_session_includes_progress_snapshot() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let session_repo = SessionRepo::new(Arc::clone(&database));
 
     // Create a session with a progress snapshot.
@@ -207,8 +203,8 @@ async fn recover_session_includes_progress_snapshot() {
 
 #[tokio::test]
 async fn recover_session_includes_last_checkpoint() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let session_repo = SessionRepo::new(Arc::clone(&database));
     let checkpoint_repo = CheckpointRepo::new(Arc::clone(&database));
 
@@ -242,18 +238,15 @@ async fn recover_session_includes_last_checkpoint() {
 
 #[tokio::test]
 async fn clean_state_when_no_interrupted_sessions() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db"));
+    let session_repo = SessionRepo::new(Arc::clone(&database));
 
     // Query interrupted sessions — should be empty.
-    let mut response = database
-        .query(
-            "SELECT * FROM session WHERE status = 'interrupted' \
-             ORDER BY updated_at DESC LIMIT 1",
-        )
+    let interrupted = session_repo
+        .list_interrupted()
         .await
-        .expect("query");
-    let interrupted: Vec<Session> = response.take(0).expect("take");
+        .expect("list interrupted");
     assert!(
         interrupted.is_empty(),
         "no interrupted sessions should exist in clean state"
@@ -262,8 +255,8 @@ async fn clean_state_when_no_interrupted_sessions() {
 
 #[tokio::test]
 async fn recover_finds_most_recent_interrupted_session() {
-    let config = test_config();
-    let database = Arc::new(db::connect(&config, true).await.expect("db"));
+    let _config = test_config();
+    let database = Arc::new(db::connect_memory().await.expect("db"));
     let session_repo = SessionRepo::new(Arc::clone(&database));
 
     // Create two interrupted sessions.
@@ -275,21 +268,22 @@ async fn recover_finds_most_recent_interrupted_session() {
     let session2 = create_interrupted_session(&session_repo).await;
 
     // The most recently interrupted should come first.
-    let mut response = database
-        .query(
-            "SELECT * FROM session WHERE status = 'interrupted' \
-             ORDER BY updated_at DESC LIMIT 1",
-        )
+    let most_recent = session_repo
+        .get_most_recent_interrupted()
         .await
-        .expect("query");
-    let most_recent: Vec<Session> = response.take(0).expect("take");
-    assert_eq!(most_recent.len(), 1);
+        .expect("get most recent interrupted");
+    assert!(most_recent.is_some(), "should find an interrupted session");
     assert_eq!(
-        most_recent[0].id, session2.id,
+        most_recent.as_ref().unwrap().id,
+        session2.id,
         "most recently interrupted session should be returned"
     );
 
     // Can also recover a specific session by ID.
-    let specific = session_repo.get_by_id(&session1.id).await.expect("get");
+    let specific = session_repo
+        .get_by_id(&session1.id)
+        .await
+        .expect("get")
+        .expect("session should exist");
     assert_eq!(specific.status, SessionStatus::Interrupted);
 }

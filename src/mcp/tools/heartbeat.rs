@@ -9,7 +9,7 @@ use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
 use tracing::{info, info_span, Instrument};
 
-use crate::mcp::handler::AgentRemServer;
+use crate::mcp::handler::AgentRcServer;
 use crate::models::progress::{validate_snapshot, ProgressItem};
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::client::SlackMessage;
@@ -29,7 +29,7 @@ struct HeartbeatInput {
 ///
 /// Returns `rmcp::ErrorData` on validation or persistence failures.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRemServer>,
+    context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().to_owned();

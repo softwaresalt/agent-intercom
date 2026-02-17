@@ -121,6 +121,30 @@ fn default_ipc_name() -> String {
     "monocoque-agent-rc".into()
 }
 
+/// Database configuration for the `SQLite` persistence layer.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct DatabaseConfig {
+    /// Relative or absolute path to the `SQLite` database file.
+    ///
+    /// The `connect()` function auto-creates parent directories if they
+    /// do not exist. Defaults to `data/monocoque.db`.
+    #[serde(default = "default_db_path")]
+    pub path: PathBuf,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from("data/monocoque.db"),
+        }
+    }
+}
+
+fn default_db_path() -> PathBuf {
+    PathBuf::from("data/monocoque.db")
+}
+
 /// Global configuration parsed from `config.toml`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -155,6 +179,9 @@ pub struct GlobalConfig {
     /// Days after session termination before data is purged.
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
+    /// Database configuration.
+    #[serde(default)]
+    pub database: DatabaseConfig,
 }
 
 impl GlobalConfig {
@@ -207,10 +234,10 @@ impl GlobalConfig {
         &self.default_workspace_root
     }
 
-    /// Derived path for persisted `SurrealDB` data when using `RocksDB`.
+    /// Configured path to the `SQLite` database file.
     #[must_use]
-    pub fn db_path(&self) -> PathBuf {
-        self.default_workspace_root.join(".monocoque").join("db")
+    pub fn db_path(&self) -> &Path {
+        &self.database.path
     }
 
     /// Validate that a Slack user is authorized to manage sessions.
