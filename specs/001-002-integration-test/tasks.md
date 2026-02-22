@@ -33,17 +33,17 @@
 
 ### Tests (TDD — write first, verify compilation, then run)
 
-- [ ] T004 [P] [US6] Write `register_loads_initial_policy` test (S045) in `tests/integration/policy_watcher_tests.rs` — Create tempdir with `.monocoque/settings.json`, call `PolicyWatcher::register()`, assert `get_policy()` returns parsed policy
-- [ ] T005 [P] [US6] Write `policy_file_modification_detected` test (S046) in `tests/integration/policy_watcher_tests.rs` — Modify settings.json after register, poll `get_policy()` with 50ms interval / 2s timeout until updated policy reflected
-- [ ] T006 [P] [US6] Write `policy_file_deletion_falls_back_to_deny_all` test (S047) in `tests/integration/policy_watcher_tests.rs` — Delete settings.json, poll until `get_policy()` returns `WorkspacePolicy::default()`
-- [ ] T007 [P] [US6] Write `malformed_policy_file_uses_deny_all` test (S048) in `tests/integration/policy_watcher_tests.rs` — Write invalid JSON to settings.json, verify deny-all default
-- [ ] T008 [P] [US6] Write `unregister_stops_watching` test (S049) in `tests/integration/policy_watcher_tests.rs` — Unregister workspace, modify file, verify policy does NOT update
-- [ ] T009 [P] [US6] Write `multiple_workspaces_independent_policies` test (S050) in `tests/integration/policy_watcher_tests.rs` — Register two workspaces, modify one, verify only modified workspace's policy changes
+- [X] T004 [P] [US6] Write `register_loads_initial_policy` test (S045) in `tests/integration/policy_watcher_tests.rs` — Create tempdir with `.monocoque/settings.json`, call `PolicyWatcher::register()`, assert `get_policy()` returns parsed policy
+- [X] T005 [P] [US6] Write `policy_file_modification_detected` test (S046) in `tests/integration/policy_watcher_tests.rs` — Modify settings.json after register, poll `get_policy()` with 50ms interval / 2s timeout until updated policy reflected
+- [X] T006 [P] [US6] Write `policy_file_deletion_falls_back_to_deny_all` test (S047) in `tests/integration/policy_watcher_tests.rs` — Delete settings.json, poll until `get_policy()` returns `WorkspacePolicy::default()`
+- [X] T007 [P] [US6] Write `malformed_policy_file_uses_deny_all` test (S048) in `tests/integration/policy_watcher_tests.rs` — Write invalid JSON to settings.json, verify deny-all default
+- [X] T008 [P] [US6] Write `unregister_stops_watching` test (S049) in `tests/integration/policy_watcher_tests.rs` — Unregister workspace, modify file, verify policy does NOT update
+- [X] T009 [P] [US6] Write `multiple_workspaces_independent_policies` test (S050) in `tests/integration/policy_watcher_tests.rs` — Register two workspaces, modify one, verify only modified workspace's policy changes
 
 ### Verification
 
-- [ ] T010 [US6] Run `cargo test --test integration policy_watcher_tests` and verify all 6 tests pass
-- [ ] T011 [US6] Run `cargo clippy -- -D warnings` and verify zero warnings from new test code
+- [X] T010 [US6] Run `cargo test --test integration policy_watcher_tests` and verify all 6 tests pass
+- [X] T011 [US6] Run `cargo clippy -- -D warnings` and verify zero warnings from new test code
 
 **Checkpoint**: Policy hot-reload tests complete. FR-007 satisfied. `cargo test --test integration policy_watcher_tests` passes.
 
