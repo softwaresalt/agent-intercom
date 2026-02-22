@@ -496,7 +496,16 @@ async fn handle_show_file(
     } else {
         // Post via Slack file upload when Slack client is available.
         if let Some(ref slack) = state.slack {
-            let channel = SlackChannelId::new(state.config.slack.channel_id.clone());
+            let ch = &state.config.slack.channel_id;
+            if ch.is_empty() {
+                // No global channel configured; fall through to truncated inline response.
+                let truncated = &content[..3400];
+                return Ok(format!(
+                    "```{lang}\n{truncated}\n```\n_(truncated — {total} bytes total)_",
+                    total = content.len()
+                ));
+            }
+            let channel = SlackChannelId::new(ch.clone());
             let filename = resolved
                 .file_name()
                 .map_or("file.txt".to_owned(), |n| n.to_string_lossy().to_string());

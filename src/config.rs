@@ -18,6 +18,11 @@ use crate::{AppError, Result};
 #[serde(rename_all = "snake_case")]
 pub struct SlackConfig {
     /// Default channel where notifications are posted.
+    ///
+    /// Intentionally left empty in `config.toml`. The channel is always
+    /// supplied per-workspace via the `?channel_id=` SSE query parameter
+    /// in `mcp.json`. Server-level notifications are skipped when empty.
+    #[serde(default)]
     pub channel_id: String,
     /// App-level token used for Socket Mode (populated at runtime).
     #[serde(skip)]
@@ -154,6 +159,10 @@ pub struct GlobalConfig {
     /// Slack connectivity settings.
     pub slack: SlackConfig,
     /// Authorized Slack user IDs allowed to start sessions.
+    ///
+    /// Populated at runtime from the `SLACK_MEMBER_IDS` environment
+    /// variable via [`GlobalConfig::load_authorized_users`]. Not read from `config.toml`.
+    #[serde(skip)]
     pub authorized_user_ids: Vec<String>,
     /// Maximum concurrent agent sessions.
     #[serde(default = "default_max_concurrent_sessions")]
@@ -208,23 +217,58 @@ impl GlobalConfig {
         Ok(config)
     }
 
-    /// Load Slack credentials from OS keychain with env-var fallback.
+    /// Load Slack credentials from OS keychain with env-var fallback, and load
+    /// authorized user IDs from `SLACK_MEMBER_IDS`.
     ///
-    /// Tries the `monocoque-agent-rc` keyring service first, then falls
-    /// back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment variables.
-    /// `SLACK_TEAM_ID` is optional (FR-041) and will not cause an error if
-    /// absent.
+    /// Tries the `monocoque-agent-rc` keyring service first for Slack tokens,
+    /// then falls back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment
+    /// variables. `SLACK_TEAM_ID` is optional (FR-041) and will not cause an
+    /// error if absent.
+    ///
+    /// Authorized user IDs are always read from `SLACK_MEMBER_IDS`
+    /// (comma-separated Slack user IDs, e.g. `U0123456789,U9876543210`).
     ///
     /// # Errors
     ///
     /// Returns `AppError::Config` if neither keychain nor env vars provide
-    /// the required tokens (`slack_app_token`, `slack_bot_token`).
+    /// the required Slack tokens, or if `SLACK_MEMBER_IDS` is
+    /// absent or empty.
     pub async fn load_credentials(&mut self) -> Result<()> {
         let _span = tracing::info_span!("load_credentials").entered();
         self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
         self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
         // SLACK_TEAM_ID is optional per FR-041 — absence is not an error.
         self.slack.team_id = load_optional_credential("slack_team_id", "SLACK_TEAM_ID").await;
+        self.load_authorized_users()?;
+        Ok(())
+    }
+
+    /// Load authorized Slack user IDs from the `SLACK_MEMBER_IDS`
+    /// environment variable.
+    ///
+    /// The variable must contain a comma-separated list of Slack user IDs
+    /// (e.g., `U0123456789,U9876543210`). Whitespace around each entry is
+    /// trimmed and empty entries are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` if the variable is absent, empty, or
+    /// resolves to an empty list after trimming.
+    pub fn load_authorized_users(&mut self) -> Result<()> {
+        let raw = env::var("SLACK_MEMBER_IDS").unwrap_or_default();
+        let ids: Vec<String> = raw
+            .split(',')
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if ids.is_empty() {
+            return Err(AppError::Config(
+                "no authorized user IDs found: set SLACK_MEMBER_IDS to a \
+                 comma-separated list of Slack user IDs (e.g. U0123456789,U9876543210)"
+                    .into(),
+            ));
+        }
+        self.authorized_user_ids = ids;
         Ok(())
     }
 
@@ -257,12 +301,6 @@ impl GlobalConfig {
         if self.max_concurrent_sessions == 0 {
             return Err(AppError::Config(
                 "max_concurrent_sessions must be greater than zero".into(),
-            ));
-        }
-
-        if self.authorized_user_ids.is_empty() {
-            return Err(AppError::Config(
-                "authorized_user_ids must not be empty".into(),
             ));
         }
 

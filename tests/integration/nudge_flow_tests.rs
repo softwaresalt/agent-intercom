@@ -24,7 +24,6 @@ fn test_config(dir: &std::path::Path) -> monocoque_agent_rc::config::GlobalConfi
         r#"
 default_workspace_root = "{ws}"
 host_cli = "echo"
-authorized_user_ids = ["U_TEST"]
 
 [slack]
 channel_id = "C_TEST"

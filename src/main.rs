@@ -19,7 +19,7 @@ use monocoque_agent_rc::mcp::handler::{
 };
 use monocoque_agent_rc::mcp::{sse, transport};
 use monocoque_agent_rc::persistence::{db, retention};
-use monocoque_agent_rc::slack::client::SlackService;
+use monocoque_agent_rc::slack::client::{SlackRuntime, SlackService};
 use monocoque_agent_rc::{AppError, Result};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
@@ -28,11 +28,26 @@ enum LogFormat {
     Json,
 }
 
+/// Which MCP transport(s) to start.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
+enum Transport {
+    /// Stdio only (for direct agent invocation).
+    Stdio,
+    /// HTTP/SSE only (for remote clients).
+    Sse,
+    /// Both stdio and HTTP/SSE.
+    Both,
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "monocoque-agent-rc", about = "MCP remote agent server", version, long_about = None)]
 struct Cli {
     /// Path to the TOML configuration file.
-    #[arg(long)]
+    ///
+    /// Defaults to `config.toml` in the current working directory, which is
+    /// the expected layout for a portable installation (binary + config.toml
+    /// in the same folder).
+    #[arg(long, default_value = "config.toml")]
     config: PathBuf,
 
     /// Log output format (text or json).
@@ -42,6 +57,14 @@ struct Cli {
     /// Override the default workspace root for the primary agent.
     #[arg(long)]
     workspace: Option<PathBuf>,
+
+    /// Which MCP transport(s) to start: stdio, sse, or both.
+    ///
+    /// Use `sse` to run as an HTTP/SSE endpoint for remote clients.
+    /// Use `stdio` for direct agent invocation (e.g., from an IDE).
+    /// Defaults to `both`.
+    #[arg(long, value_enum, default_value_t = Transport::Both)]
+    transport: Transport,
 }
 
 fn main() -> Result<()> {
@@ -56,10 +79,16 @@ fn main() -> Result<()> {
         .block_on(run(args))
 }
 
+#[allow(clippy::too_many_lines)] // Startup sequence is inherently sequential.
 async fn run(args: Cli) -> Result<()> {
     // ── Load configuration ──────────────────────────────
-    let config_text = std::fs::read_to_string(&args.config)
-        .map_err(|err| AppError::Config(format!("cannot read config: {err}")))?;
+    let config_text = std::fs::read_to_string(&args.config).map_err(|err| {
+        AppError::Config(format!(
+            "cannot read config file '{}': {err} — copy config.toml from the release \
+             archive to the same directory as the binary, or pass --config <path>",
+            args.config.display()
+        ))
+    })?;
     let mut config = GlobalConfig::from_toml_str(&config_text)?;
 
     // Override workspace root from CLI if provided.
@@ -93,14 +122,14 @@ async fn run(args: Cli) -> Result<()> {
     let pending_waits: PendingWaits = PendingWaits::default();
 
     // Start Slack client if configured.
-    let (slack_service, _slack_runtime) = if config.slack.bot_token.is_empty() {
+    // NOTE: Socket mode is wired in a second phase (below) after AppState
+    // is fully constructed so that the interaction callbacks get the live
+    // pending_prompts / pending_approvals maps.
+    let (slack_service, mut slack_runtime) = if config.slack.bot_token.is_empty() {
         info!("slack not configured; running in local-only mode");
         (None, None)
     } else {
-        // Build a preliminary AppState without slack so we can pass it.
-        // The socket mode callbacks will receive AppState via user state injection.
-        // We start slack first without app_state, then rebuild with the Arc.
-        let (svc, runtime) = SlackService::start(&config.slack, None).map_err(|err| {
+        let (svc, runtime) = SlackService::start(&config.slack).map_err(|err| {
             error!(%err, "slack service start failed");
             err
         })?;
@@ -125,40 +154,129 @@ async fn run(args: Cli) -> Result<()> {
     // ── Check for interrupted sessions from prior crash (T082) ──
     check_interrupted_on_startup(&state).await;
 
-    // ── Start transports ────────────────────────────────
-    let stdio_ct = ct.clone();
-    let stdio_state = Arc::clone(&state);
-    let stdio_handle = tokio::spawn(async move {
-        if let Err(err) = transport::serve_stdio(stdio_state, stdio_ct).await {
-            error!(%err, "stdio transport failed");
-        }
-    });
-
-    let sse_ct = ct.clone();
-    let sse_state = Arc::clone(&state);
-    let sse_handle = tokio::spawn(async move {
-        if let Err(err) = sse::serve_sse(sse_state, sse_ct).await {
-            error!(%err, "sse transport failed");
-        }
-    });
-
-    info!("MCP server ready");
-
-    // ── Wait for shutdown signal ────────────────────────
-    shutdown_signal().await;
-    info!("shutdown signal received");
-    ct.cancel();
-
-    // ── Graceful shutdown: persist state (T081) ─────────
-    if let Err(err) = graceful_shutdown(&state).await {
-        error!(%err, "error during graceful shutdown persistence");
+    // ── Wire socket mode with the live AppState (T093/T094 fix) ────
+    // Start socket mode AFTER AppState is built so the interaction
+    // callbacks share the same pending_prompts/approvals/waits maps
+    // as the MCP transport and can resolve oneshot channels correctly.
+    if let (Some(ref svc), Some(ref mut rt)) = (&state.slack, slack_runtime.as_mut()) {
+        rt.socket_task = Some(svc.start_socket_mode(Arc::clone(&state)));
+        info!("slack socket mode started with live app state");
     }
 
-    // ── Wait for background tasks ───────────────────────
-    let _ = tokio::join!(stdio_handle, sse_handle, retention_handle);
+    // ── Start transports ────────────────────────────────
+    let start_stdio = matches!(args.transport, Transport::Stdio | Transport::Both);
+    let start_sse = matches!(args.transport, Transport::Sse | Transport::Both);
+
+    let stdio_handle = if start_stdio {
+        let stdio_ct = ct.clone();
+        let stdio_state = Arc::clone(&state);
+        Some(tokio::spawn(async move {
+            if let Err(err) = transport::serve_stdio(stdio_state, stdio_ct).await {
+                error!(%err, "stdio transport failed");
+            }
+        }))
+    } else {
+        info!(
+            "stdio transport disabled (--transport {})",
+            match args.transport {
+                Transport::Sse => "sse",
+                _ => "unknown",
+            }
+        );
+        None
+    };
+
+    let sse_handle = if start_sse {
+        let sse_ct = ct.clone();
+        let sse_state = Arc::clone(&state);
+        Some(tokio::spawn(async move {
+            if let Err(err) = sse::serve_sse(sse_state, sse_ct).await {
+                error!(%err, "sse transport failed");
+            }
+        }))
+    } else {
+        info!("SSE transport disabled (--transport stdio)");
+        None
+    };
+
+    info!(transport = ?args.transport, "MCP server ready");
+
+    // ── Wait for first shutdown signal ──────────────────
+    shutdown_signal().await;
+    info!("shutdown signal received — starting graceful shutdown");
+    ct.cancel();
+
+    // Spawn a background listener for a second Ctrl+C (force-exit).
+    tokio::spawn(async {
+        shutdown_signal().await;
+        error!("second shutdown signal received — forcing exit");
+        std::process::exit(1);
+    });
+
+    // ── Graceful shutdown with timeout ───────────────────
+    shutdown_with_timeout(
+        &state,
+        slack_runtime,
+        stdio_handle,
+        sse_handle,
+        retention_handle,
+    )
+    .await;
+
     info!("monocoque-agent-rc shut down");
 
     Ok(())
+}
+
+/// Maximum time to wait for graceful shutdown before force-exiting.
+const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Run the graceful shutdown sequence with a timeout.
+///
+/// Persists interrupted state, aborts Slack runtime tasks, and waits for
+/// transport and retention handles.  If the sequence exceeds
+/// [`SHUTDOWN_TIMEOUT`], it logs an error and returns immediately.
+async fn shutdown_with_timeout(
+    state: &AppState,
+    slack_runtime: Option<SlackRuntime>,
+    stdio_handle: Option<tokio::task::JoinHandle<()>>,
+    sse_handle: Option<tokio::task::JoinHandle<()>>,
+    retention_handle: tokio::task::JoinHandle<()>,
+) {
+    let shutdown_fut = async {
+        // 1. Persist interrupted state.
+        if let Err(err) = graceful_shutdown(state).await {
+            error!(%err, "error during graceful shutdown persistence");
+        }
+
+        // 2. Abort Slack runtime tasks (they have no cancellation token).
+        if let Some(ref rt) = slack_runtime {
+            if let Some(ref socket) = rt.socket_task {
+                socket.abort();
+            }
+            rt.queue_task.abort();
+            info!("slack runtime tasks aborted");
+        }
+
+        // 3. Wait for transport handles.
+        if let Some(h) = stdio_handle {
+            let _ = h.await;
+        }
+        if let Some(h) = sse_handle {
+            let _ = h.await;
+        }
+        let _ = retention_handle.await;
+    };
+
+    if tokio::time::timeout(SHUTDOWN_TIMEOUT, shutdown_fut)
+        .await
+        .is_err()
+    {
+        error!(
+            timeout_secs = SHUTDOWN_TIMEOUT.as_secs(),
+            "graceful shutdown timed out — exiting"
+        );
+    }
 }
 
 /// Mark all in-flight state as interrupted on graceful shutdown (T081).
@@ -227,22 +345,26 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
 
     // Post final notification to Slack.
     if let Some(ref slack) = state.slack {
-        let channel =
-            slack_morphism::prelude::SlackChannelId(state.config.slack.channel_id.clone());
-        let msg = monocoque_agent_rc::slack::client::SlackMessage::plain(
-            channel,
-            format!(
-                "⚠️ Server shutting down. {} session(s), {} approval(s), {} prompt(s) interrupted.",
-                live_sessions.len(),
-                pending_approvals.len(),
-                pending_prompts.len(),
-            ),
-        );
-        if let Err(err) = slack.enqueue(msg).await {
-            error!(%err, "failed to post shutdown notification to slack");
+        let ch = &state.config.slack.channel_id;
+        if ch.is_empty() {
+            info!("no global Slack channel configured; skipping shutdown notification");
+        } else {
+            let channel = slack_morphism::prelude::SlackChannelId(ch.clone());
+            let msg = monocoque_agent_rc::slack::client::SlackMessage::plain(
+                channel,
+                format!(
+                    "\u{26a0}\u{fe0f} Server shutting down. {} session(s), {} approval(s), {} prompt(s) interrupted.",
+                    live_sessions.len(),
+                    pending_approvals.len(),
+                    pending_prompts.len(),
+                ),
+            );
+            if let Err(err) = slack.enqueue(msg).await {
+                error!(%err, "failed to post shutdown notification to slack");
+            }
+            // Brief sleep to let the queue drain.
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
-        // Brief sleep to let the queue drain.
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 
     info!(
@@ -295,21 +417,25 @@ async fn check_interrupted_on_startup(state: &AppState) {
 
     // Post recovery summary to Slack.
     if let Some(ref slack) = state.slack {
-        let channel =
-            slack_morphism::prelude::SlackChannelId(state.config.slack.channel_id.clone());
-        let msg = monocoque_agent_rc::slack::client::SlackMessage::plain(
-            channel,
-            format!(
-                "🔄 Server restarted. Found {} interrupted session(s) \
-                 with {} pending approval(s) and {} pending prompt(s). \
-                 Agents can use `recover_state` to resume.",
-                interrupted.len(),
-                total_approvals,
-                total_prompts,
-            ),
-        );
-        if let Err(err) = slack.enqueue(msg).await {
-            error!(%err, "failed to post startup recovery notification");
+        let ch = &state.config.slack.channel_id;
+        if ch.is_empty() {
+            info!("no global Slack channel configured; skipping startup recovery notification");
+        } else {
+            let channel = slack_morphism::prelude::SlackChannelId(ch.clone());
+            let msg = monocoque_agent_rc::slack::client::SlackMessage::plain(
+                channel,
+                format!(
+                    "\u{1f504} Server restarted. Found {} interrupted session(s) \
+                     with {} pending approval(s) and {} pending prompt(s). \
+                     Agents can use `recover_state` to resume.",
+                    interrupted.len(),
+                    total_approvals,
+                    total_prompts,
+                ),
+            );
+            if let Err(err) = slack.enqueue(msg).await {
+                error!(%err, "failed to post startup recovery notification");
+            }
         }
     }
 }

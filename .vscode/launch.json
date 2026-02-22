@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug monocoque-agent-rc",
+      "cargo": {
+        "args": ["build", "--bin=monocoque-agent-rc"],
+        "filter": {
+          "name": "monocoque-agent-rc",
+          "kind": "bin"
+        }
+      },
+      "args": ["--config", "${workspaceFolder}/config.toml"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "info",
+        "SLACK_APP_TOKEN": "${env:SLACK_APP_TOKEN}",
+        "SLACK_BOT_TOKEN": "${env:SLACK_BOT_TOKEN}",
+        "SLACK_TEAM_ID": "${env:SLACK_TEAM_ID}"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug monocoque-ctl",
+      "cargo": {
+        "args": ["build", "--bin=monocoque-ctl"],
+        "filter": {
+          "name": "monocoque-ctl",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "debug"
+      }
+    }
+  ]
+}

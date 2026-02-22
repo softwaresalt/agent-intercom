@@ -15,7 +15,7 @@ Last updated: 2026-02-15
 | `axum` | 0.8 | HTTP/SSE transport (`StreamableHttpService` on `/mcp`) |
 | `slack-morphism` | 2.17 | Slack Socket Mode client |
 | `tokio` | 1.37 | Async runtime (full feature set) |
-| `surrealdb` | 1.5 | Embedded DB (`kv-rocksdb` prod, `kv-mem` tests) |
+| `sqlx` | 0.8 | SQLite async driver (file-based prod, in-memory tests) |
 | `diffy` | 0.4 | Unified diff parsing & patch application |
 | `interprocess` | 2.0 | IPC named pipes (Windows) / Unix domain sockets |
 | `clap` | 4.5 | CLI argument parsing |
@@ -29,6 +29,7 @@ Last updated: 2026-02-15
 | `tokio-util` | 0.7 | `CancellationToken` for graceful shutdown |
 | `reqwest` | 0.13 | HTTP client (rustls) |
 | `glob` | 0.3 | Glob pattern matching |
+| `toml` | 0.8 | TOML config file parsing |
 | `tempfile` | 3.10 | Atomic file writes |
 
 ## Project Structure
@@ -60,9 +61,9 @@ src/
     approval, checkpoint, policy, progress, prompt, session, stall
   orchestrator/           # Session lifecycle management
     session_manager, checkpoint_manager, spawner, stall_detector
-  persistence/            # SurrealDB repository layer
+  persistence/            # sqlite (sqlx) repository layer
     db.rs                 # connect(), schema bootstrap
-    schema.rs             # SCHEMAFULL table DDL
+    schema.rs             # SQL DDL (idempotent CREATE TABLE IF NOT EXISTS)
     approval_repo, checkpoint_repo, prompt_repo, session_repo,
     stall_repo, retention
   policy/                 # Workspace auto-approve rules
@@ -78,13 +79,14 @@ ctl/
 lib/
   hve-core/               # External library (separate project)
 tests/
-  unit/                   # Unit tests (12 modules)
+  unit/                   # Unit tests (15 modules)
   contract/               # Contract tests (10 modules)
-  integration/            # Integration tests (7 modules)
+  integration/            # Integration tests (8 modules)
 docs/
   adrs/                   # Architecture Decision Records (0001–0011)
 specs/
   001-mcp-remote-agent-server/   # Feature specification
+  002-sqlite-migration/          # Persistence migration spec
 config.toml              # Runtime configuration
 rustfmt.toml             # max_width = 100, edition = 2021
 ```
@@ -151,7 +153,7 @@ Never write production code before the corresponding test exists and has been ob
 ### Crate-Level Attributes
 
 * `#![forbid(unsafe_code)]` — no unsafe anywhere (both `src/main.rs` and `ctl/main.rs`)
-* `[workspace.lints.rust]`: `unsafe_code = "forbid"`, `missing_docs = "warn"`
+* `[workspace.lints.rust]`: `unsafe_code = "deny"`, `missing_docs = "warn"`
 * `[workspace.lints.clippy]`: `pedantic = "deny"`, `unwrap_used = "deny"`, `expect_used = "deny"`
 
 ### Error Handling
@@ -173,12 +175,11 @@ Never write production code before the corresponding test exists and has been ob
 * All public items require `///` doc comments
 * Module-level `//!` doc comments on every `mod.rs` or standalone module file
 
-### Database (SurrealDB)
+### Database (SQLite)
 
 * All DB access goes through `persistence/` repository modules — no raw queries elsewhere
-* Namespace: `monocoque`, database: `agent_rc`
-* `kv-rocksdb` for production, `kv-mem` for tests (controlled by `connect(config, use_memory)`)
-* Schema uses `SCHEMAFULL` tables with idempotent DDL in `persistence/schema.rs`
+* File-based SQLite for production, in-memory SQLite for tests (controlled by `connect(path, use_memory)`)
+* Schema uses idempotent DDL (`CREATE TABLE IF NOT EXISTS`) in `persistence/schema.rs`
 
 ### MCP (rmcp 0.5)
 
@@ -229,7 +230,7 @@ Never write production code before the corresponding test exists and has been ob
   * `unit/` — isolated logic tests (12 modules)
   * `contract/` — MCP tool response contract verification (10 modules)
   * `integration/` — end-to-end flows with real SSE/DB (7 modules)
-* Test DB: always use `kv-mem` backend
+* Test DB: always use in-memory SQLite (`":memory:"`)
 * Use `serial_test` crate for tests requiring sequential execution
 
 ## Architecture Reference
@@ -240,7 +241,7 @@ Never write production code before the corresponding test exists and has been ob
 | Transport (stdio) | `rmcp::transport::io::stdio()` for direct agent connections |
 | Transport (HTTP) | axum 0.8 with `StreamableHttpService` on `/mcp` |
 | Slack | `slack-morphism` 2.17 Socket Mode |
-| Database | SurrealDB 1.5 embedded — `kv-rocksdb` prod, `kv-mem` tests, `SCHEMAFULL` tables |
+| Database | SQLite via `sqlx` 0.8 — file-based prod, in-memory tests, idempotent DDL |
 | Configuration | TOML (`config.toml`) → `GlobalConfig`, credentials via keyring with env fallback |
 | Workspace policy | JSON auto-approve rules (`.monocoque/settings.json`), hot-reloaded via `notify` |
 | Diff safety | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via `tempfile` |
