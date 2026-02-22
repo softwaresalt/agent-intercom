@@ -1,6 +1,6 @@
 //! Unit tests for policy loader (T116).
 //!
-//! Validates `.monocoque/settings.json` parsing, malformed file fallback
+//! Validates `.agentrc/settings.json` parsing, malformed file fallback
 //! to deny-all, global allowlist enforcement (FR-011), and missing file
 //! handling.
 
@@ -11,10 +11,10 @@ use std::path::Path;
 use monocoque_agent_rc::models::approval::RiskLevel;
 use monocoque_agent_rc::policy::loader::PolicyLoader;
 
-/// Helper: write a policy JSON file under `workspace_root/.monocoque/settings.json`.
+/// Helper: write a policy JSON file under `workspace_root/.agentrc/settings.json`.
 fn write_policy(workspace_root: &Path, json: &str) {
-    let dir = workspace_root.join(".monocoque");
-    fs::create_dir_all(&dir).expect("create .monocoque dir");
+    let dir = workspace_root.join(".agentrc");
+    fs::create_dir_all(&dir).expect("create .agentrc dir");
     fs::write(dir.join("settings.json"), json).expect("write settings.json");
 }
 
@@ -163,7 +163,7 @@ fn all_commands_rejected_when_none_in_allowlist() {
 #[test]
 fn missing_policy_file_returns_deny_all() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // No .monocoque/settings.json created.
+    // No .agentrc/settings.json created.
 
     let global_commands = HashMap::new();
     let policy = PolicyLoader::load(dir.path(), &global_commands)
@@ -174,9 +174,9 @@ fn missing_policy_file_returns_deny_all() {
 }
 
 #[test]
-fn missing_monocoque_dir_returns_deny_all() {
+fn missing_agentrc_dir_returns_deny_all() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // Even the .monocoque directory doesn't exist.
+    // Even the .agentrc directory doesn't exist.
 
     let global_commands = HashMap::new();
     let policy = PolicyLoader::load(dir.path(), &global_commands)

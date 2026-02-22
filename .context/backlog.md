@@ -7,5 +7,5 @@
 - Enhance forward_prompt command: Both "Resume with Instructions" and "Refine" currently use placeholder strings ("(instruction via Slack)"). Slack modal support for collecting actual typed instructions is noted as future work in the handlers.
 - Not currently getting notifications to Slack of Approval requests, e.g. read a file outside the current workspace.
 - Not currently getting notifications to Slack of diff_acceptance approvals.
-- Not currently getting notifications to Slack of agent sesion continuation approvals.
-
+- Not currently getting notifications to Slack of agent session continuation approvals.
+- Consider upgrading rmcp crate to 0.13.0; breaking changes would require a full feature refactor to implement.

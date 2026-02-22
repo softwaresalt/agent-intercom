@@ -17,11 +17,11 @@ use monocoque_agent_rc::policy::watcher::PolicyWatcher;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Create a `.monocoque/settings.json` file in the given directory with the provided JSON body.
+/// Create a `.agentrc/settings.json` file in the given directory with the provided JSON body.
 fn write_policy_file(dir: &std::path::Path, json: &str) {
-    let monocoque = dir.join(".monocoque");
-    std::fs::create_dir_all(&monocoque).expect("create .monocoque dir");
-    std::fs::write(monocoque.join("settings.json"), json).expect("write settings.json");
+    let agentrc = dir.join(".agentrc");
+    std::fs::create_dir_all(&agentrc).expect("create .agentrc dir");
+    std::fs::write(agentrc.join("settings.json"), json).expect("write settings.json");
 }
 
 /// Poll `get_policy()` for the workspace root until the predicate returns `true`,
@@ -113,7 +113,7 @@ async fn policy_file_deletion_falls_back_to_deny_all() {
     assert!(initial.enabled, "initial policy should have enabled=true");
 
     // Delete the policy file.
-    let policy_path = root.join(".monocoque").join("settings.json");
+    let policy_path = root.join(".agentrc").join("settings.json");
     std::fs::remove_file(&policy_path).expect("remove settings.json");
 
     // Poll until the deny-all default is reflected (up to 2 s).
@@ -162,6 +162,10 @@ async fn unregister_stops_watching() {
 
     // Unregister — this removes the watcher and clears the cache entry.
     watcher.unregister(root).await;
+
+    // Allow time for the OS-level watcher deregistration to complete so no
+    // stale events fire after we write to disk.
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Modify the file — the watcher is gone so no hot-reload should fire.
     write_policy_file(root, r#"{"enabled": true}"#);

@@ -99,7 +99,7 @@ The stall detector monitors session inactivity. When no tool calls arrive within
 
 ### User Story 6 - Policy Hot-Reload via File Watcher (Priority: P2)
 
-Workspace auto-approve policies in `.monocoque/settings.json` are loaded and hot-reloaded when the file changes. The evaluator applies the latest policy to tool calls.
+Workspace auto-approve policies in `.agentrc/settings.json` are loaded and hot-reloaded when the file changes. The evaluator applies the latest policy to tool calls.
 
 **Why this priority**: Hot-reload enables operators to adjust policy without restarting the server. This is important for iterative trust calibration.
 
@@ -182,7 +182,7 @@ On server startup, `check_interrupted_on_startup()` scans for sessions that were
 - **FR-004**: Test suite MUST verify checkpoint creation captures file hashes and restore detects Modified, Deleted, and Added divergences.
 - **FR-005**: Test suite MUST verify stall detector escalation: Stalled → AutoNudge → Escalated event sequence.
 - **FR-006**: Test suite MUST verify stall detector reset, pause, and resume behaviours.
-- **FR-007**: Test suite MUST verify policy hot-reload updates the evaluator when `.monocoque/settings.json` changes.
+- **FR-007**: Test suite MUST verify policy hot-reload updates the evaluator when `.agentrc/settings.json` changes.
 - **FR-008**: Test suite MUST verify IPC server auth token enforcement (valid/invalid/missing).
 - **FR-009**: Test suite MUST verify graceful shutdown marks pending entities as Interrupted.
 - **FR-010**: Test suite MUST verify startup recovery scan finds interrupted sessions.

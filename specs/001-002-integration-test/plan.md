@@ -89,13 +89,13 @@ The following spec requirements are **already fully covered** by existing integr
 
 **Test plan** (6 tests):
 1. `register_loads_initial_policy` — Register watcher on workspace with valid policy file → `get_policy()` returns parsed policy
-2. `policy_file_modification_detected` — Modify `.monocoque/settings.json` after register → poll `get_policy()` until updated policy reflected (50ms poll, 2s timeout)
+2. `policy_file_modification_detected` — Modify `.agentrc/settings.json` after register → poll `get_policy()` until updated policy reflected (50ms poll, 2s timeout)
 3. `policy_file_deletion_falls_back_to_deny_all` — Delete policy file after register → poll until `get_policy()` returns deny-all default
 4. `malformed_policy_file_uses_deny_all` — Write malformed JSON → verify evaluator uses deny-all
 5. `unregister_stops_watching` — Call `unregister()` → modify file → verify policy does NOT update
 6. `multiple_workspaces_independent_policies` — Register two workspaces → modify one → verify only that workspace's policy changes
 
-**Infrastructure**: `tempfile::tempdir()` per test. Create `.monocoque/` subdirectory. Write initial `settings.json`. Use `PolicyWatcher::new()` with empty global commands (or test-specific allowlist).
+**Infrastructure**: `tempfile::tempdir()` per test. Create `.agentrc/` subdirectory. Write initial `settings.json`. Use `PolicyWatcher::new()` with empty global commands (or test-specific allowlist).
 
 ### Gap 2: IPC Server Command Dispatch (FR-008) — `ipc_server_tests.rs`
 

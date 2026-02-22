@@ -206,7 +206,7 @@ A watchdog notification triggered by detected agent inactivity.
 
 ### WorkspacePolicy (in-memory, per workspace root, not persisted)
 
-The auto-approve configuration loaded from `.monocoque/settings.json` relative to the session's `workspace_root`.
+The auto-approve configuration loaded from `.agentrc/settings.json` relative to the session's `workspace_root`.
 
 | Field | Type | Description |
 |-------|------|-------------|

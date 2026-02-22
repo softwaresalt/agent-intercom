@@ -60,7 +60,7 @@ The existing test suite covers most of the spec requirements. The gap analysis r
 **Rationale**: The `notify` crate's file watcher relies on OS-level filesystem events which can be delayed, batched, or missed in test environments. Tests need deterministic verification.
 
 **Approach**:
-1. Create a `tempdir` with `.monocoque/settings.json` containing initial policy.
+1. Create a `tempdir` with `.agentrc/settings.json` containing initial policy.
 2. Call `PolicyWatcher::register(workspace_root)` to start the watcher.
 3. Verify initial policy via `get_policy(workspace_root)`.
 4. Modify the policy file (overwrite with new content).

@@ -1,6 +1,6 @@
 //! Hot-reload file watcher for workspace policy files (T063).
 //!
-//! Watches `.monocoque/settings.json` for each active workspace root
+//! Watches `.agentrc/settings.json` for each active workspace root
 //! using the `notify` crate. On change events, reloads the policy via
 //! [`PolicyLoader`] and updates the in-memory cache (FR-010).
 //!
@@ -20,7 +20,7 @@ use crate::policy::loader::PolicyLoader;
 
 /// Relative path within a workspace root to the policy file.
 const POLICY_FILENAME: &str = "settings.json";
-const POLICY_DIR: &str = ".monocoque";
+const POLICY_DIR: &str = ".agentrc";
 
 /// Thread-safe in-memory policy cache keyed by workspace root.
 pub type PolicyCache = Arc<RwLock<HashMap<PathBuf, WorkspacePolicy>>>;
@@ -117,7 +117,7 @@ impl PolicyWatcher {
         )
         .map_err(|err| crate::AppError::Policy(format!("failed to create watcher: {err}")))?;
 
-        // Watch the .monocoque directory (create it if needed for the watch).
+        // Watch the .agentrc directory (create it if needed for the watch).
         if watch_dir.exists() {
             watcher
                 .watch(&watch_dir, RecursiveMode::NonRecursive)

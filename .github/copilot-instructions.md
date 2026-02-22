@@ -214,7 +214,7 @@ Never write production code before the corresponding test exists and has been ob
 
 ### Workspace Policy
 
-* Auto-approve rules in `.monocoque/settings.json` per workspace
+* Auto-approve rules in `.agentrc/settings.json` per workspace
 * Hot-reloaded via `notify` file watcher in `policy/watcher.rs`
 * Evaluated by `policy/evaluator.rs`
 
@@ -243,12 +243,76 @@ Never write production code before the corresponding test exists and has been ob
 | Slack | `slack-morphism` 2.17 Socket Mode |
 | Database | SQLite via `sqlx` 0.8 — file-based prod, in-memory tests, idempotent DDL |
 | Configuration | TOML (`config.toml`) → `GlobalConfig`, credentials via keyring with env fallback |
-| Workspace policy | JSON auto-approve rules (`.monocoque/settings.json`), hot-reloaded via `notify` |
+| Workspace policy | JSON auto-approve rules (`.agentrc/settings.json`), hot-reloaded via `notify` |
 | Diff safety | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via `tempfile` |
 | Path security | All paths canonicalized and validated via `starts_with(workspace_root)` |
 | IPC | `interprocess` 2.0 — named pipes (Windows) / Unix domain sockets for `monocoque-ctl` |
 | Shutdown | `CancellationToken` — persist state, notify Slack, terminate children gracefully |
 | ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0011) |
+
+## Remote Approval Workflow for File Changes
+
+When the monocoque-agent-rc MCP server is running, agents **must** route all file modifications through the remote approval workflow instead of writing files directly. This allows the operator to review and approve every change via Slack before it touches the filesystem.
+
+### Required Call Sequence
+
+```text
+1. check_auto_approve   →  Can this change bypass approval?
+2. ask_approval          →  Submit the proposal (blocks until operator responds)
+3. accept_diff           →  Apply the approved change to the filesystem
+```
+
+### Step 1 — `check_auto_approve`
+
+Call **before** every file write to check if the workspace policy allows the operation without human review.
+
+| Parameter   | Type     | Required | Description |
+|-------------|----------|----------|-------------|
+| `tool_name` | `string` | yes      | Name of the tool or command being executed |
+| `context`   | `object` | no       | `{ "file_path": "...", "risk_level": "..." }` |
+
+- If `auto_approved: true` → the agent may write the file directly (skip steps 2–3).
+- If `auto_approved: false` → proceed to step 2.
+
+### Step 2 — `ask_approval`
+
+Submit the proposed change for operator review. This call **blocks** until the operator taps Accept/Reject in Slack or the timeout elapses.
+
+| Parameter     | Type     | Required | Description |
+|---------------|----------|----------|-------------|
+| `title`       | `string` | yes      | Concise summary of the proposed change |
+| `diff`        | `string` | yes      | Standard unified diff or full file content |
+| `file_path`   | `string` | yes      | Target file path relative to workspace root |
+| `description` | `string` | no       | Additional context about the change |
+| `risk_level`  | `string` | no       | `low` (default), `high`, or `critical` |
+
+**Response:** `{ "status": "approved" | "rejected" | "timeout", "request_id": "...", "reason": "..." }`
+
+- `approved` → proceed to step 3 with the returned `request_id`.
+- `rejected` → do **not** apply the change. Adapt or abandon based on the `reason`.
+- `timeout` → treat as rejection. Do not retry automatically without operator guidance.
+
+### Step 3 — `accept_diff`
+
+Apply the approved change to the filesystem. Only call this after receiving `status: "approved"`.
+
+| Parameter    | Type      | Required | Description |
+|--------------|-----------|----------|-------------|
+| `request_id` | `string`  | yes      | The `request_id` from the `ask_approval` response |
+| `force`      | `boolean` | no       | `true` to overwrite even if the file changed since proposal |
+
+**Response:** `{ "status": "applied", "files_written": [{ "path": "...", "bytes": N }] }`
+
+If the server returns `patch_conflict` (file changed since proposal), the agent should re-read the file, regenerate the diff, and restart from step 2.
+
+### Rules
+
+1. **Never write files directly** when the MCP server is reachable. Always use the approval workflow.
+2. **One file per approval.** Submit each file change as a separate `ask_approval` call.
+3. **Use unified diffs** when modifying existing files. Use raw file content only for new files.
+4. **Set `risk_level`** to `high` or `critical` for changes to configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
+5. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.
+6. **Handle all response statuses.** Never assume approval — always branch on `approved`, `rejected`, and `timeout`.
 
 <!-- MANUAL ADDITIONS START -->
 

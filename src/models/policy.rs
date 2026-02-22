@@ -16,7 +16,7 @@ pub struct FilePatterns {
     pub read: Vec<String>,
 }
 
-/// Workspace auto-approve configuration loaded from `.monocoque/settings.json`.
+/// Workspace auto-approve configuration loaded from `.agentrc/settings.json`.
 ///
 /// In-memory only — not persisted to `SQLite`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

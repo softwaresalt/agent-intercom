@@ -1,6 +1,6 @@
 //! Workspace policy file loader (T061).
 //!
-//! Parses `.monocoque/settings.json` from a workspace root into a
+//! Parses `.agentrc/settings.json` from a workspace root into a
 //! [`WorkspacePolicy`]. On parse errors, returns a deny-all default
 //! and emits a tracing warning. Validates that workspace `commands`
 //! entries exist in the global allowlist (FR-011).
@@ -15,13 +15,13 @@ use crate::models::policy::WorkspacePolicy;
 use crate::Result;
 
 /// Relative path within a workspace root to the policy file.
-const POLICY_PATH: &str = ".monocoque/settings.json";
+const POLICY_PATH: &str = ".agentrc/settings.json";
 
 /// Loads and validates a workspace policy.
 pub struct PolicyLoader;
 
 impl PolicyLoader {
-    /// Load a [`WorkspacePolicy`] from `{workspace_root}/.monocoque/settings.json`.
+    /// Load a [`WorkspacePolicy`] from `{workspace_root}/.agentrc/settings.json`.
     ///
     /// # Behaviour
     ///

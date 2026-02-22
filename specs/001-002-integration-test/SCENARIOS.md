@@ -115,13 +115,13 @@ Validates workspace auto-approve policy loading, hot-reloading via file watcher,
 
 | Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
 |---|---|---|---|---|---|---|
-| S045 | Register loads initial policy | Valid `.monocoque/settings.json` in workspace | `PolicyWatcher::register(workspace_root)` | `get_policy()` returns parsed policy with correct tools/patterns | Policy in watcher cache | happy-path |
+| S045 | Register loads initial policy | Valid `.agentrc/settings.json` in workspace | `PolicyWatcher::register(workspace_root)` | `get_policy()` returns parsed policy with correct tools/patterns | Policy in watcher cache | happy-path |
 | S046 | File modification triggers policy update | Watcher registered, initial policy loaded | Overwrite `settings.json` with new content | `get_policy()` eventually returns updated policy (poll 50ms, timeout 2s) | Cache updated | happy-path |
 | S047 | File deletion falls back to deny-all | Watcher registered, policy file exists | Delete `settings.json` | `get_policy()` eventually returns `WorkspacePolicy::default()` (deny-all) | Cache cleared to default | edge-case |
 | S048 | Malformed JSON uses deny-all | Watcher registered | Write invalid JSON to `settings.json` | `get_policy()` returns deny-all default | Cache retains deny-all | error |
 | S049 | Unregister stops watching | Watcher registered | `unregister(workspace_root)` → modify file → poll | Policy does NOT update after unregister | Watcher removed from internal map | happy-path |
 | S050 | Multiple workspaces have independent policies | Two workspaces registered | Modify policy in workspace A only | Workspace A policy updated, workspace B unchanged | Independent cache entries | concurrent |
-| S051 | Missing policy directory loads deny-all | Workspace without `.monocoque/` directory | `PolicyWatcher::register(workspace_root)` | `get_policy()` returns deny-all default | No watcher error, deny-all cached | edge-case |
+| S051 | Missing policy directory loads deny-all | Workspace without `.agentrc/` directory | `PolicyWatcher::register(workspace_root)` | `get_policy()` returns deny-all default | No watcher error, deny-all cached | edge-case |
 | S052 | Evaluator applies updated policy to tool check | Policy modified to add tool "echo" | `PolicyEvaluator::check("echo", ...)` after hot-reload | Auto-approved for "echo" tool | No state changes | happy-path |
 
 ---

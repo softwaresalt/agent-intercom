@@ -1,7 +1,7 @@
 //! Integration tests for the `check_auto_approve` tool handler logic.
 //!
 //! Validates:
-//! - Workspace with `.monocoque/settings.json` policy file → correct evaluation
+//! - Workspace with `.agentrc/settings.json` policy file → correct evaluation
 //! - Missing policy file → deny-all (`auto_approved`: false)
 //! - Policy matches tool name → `auto_approved`: true
 //! - Policy with `risk_level` threshold enforcement
@@ -55,9 +55,9 @@ async fn auto_approve_matching_tool_approved() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    // Create .monocoque/settings.json with a permissive policy.
-    let monocoque_dir = root.join(".monocoque");
-    std::fs::create_dir_all(&monocoque_dir).expect("create dir");
+    // Create .agentrc/settings.json with a permissive policy.
+    let agentrc_dir = root.join(".agentrc");
+    std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["heartbeat", "remote_log"],
@@ -66,7 +66,7 @@ async fn auto_approve_matching_tool_approved() {
         "risk_level_threshold": "low"
     });
     std::fs::write(
-        monocoque_dir.join("settings.json"),
+        agentrc_dir.join("settings.json"),
         serde_json::to_string_pretty(&policy_json).expect("json"),
     )
     .expect("write policy");
@@ -87,8 +87,8 @@ async fn auto_approve_non_matching_tool_denied() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let monocoque_dir = root.join(".monocoque");
-    std::fs::create_dir_all(&monocoque_dir).expect("create dir");
+    let agentrc_dir = root.join(".agentrc");
+    std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["heartbeat"],
@@ -97,7 +97,7 @@ async fn auto_approve_non_matching_tool_denied() {
         "risk_level_threshold": "low"
     });
     std::fs::write(
-        monocoque_dir.join("settings.json"),
+        agentrc_dir.join("settings.json"),
         serde_json::to_string_pretty(&policy_json).expect("json"),
     )
     .expect("write policy");
@@ -119,8 +119,8 @@ async fn auto_approve_risk_level_blocks_high_risk() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let monocoque_dir = root.join(".monocoque");
-    std::fs::create_dir_all(&monocoque_dir).expect("create dir");
+    let agentrc_dir = root.join(".agentrc");
+    std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["ask_approval"],
@@ -129,7 +129,7 @@ async fn auto_approve_risk_level_blocks_high_risk() {
         "risk_level_threshold": "low"
     });
     std::fs::write(
-        monocoque_dir.join("settings.json"),
+        agentrc_dir.join("settings.json"),
         serde_json::to_string_pretty(&policy_json).expect("json"),
     )
     .expect("write policy");
@@ -156,8 +156,8 @@ async fn auto_approve_file_pattern_match() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let monocoque_dir = root.join(".monocoque");
-    std::fs::create_dir_all(&monocoque_dir).expect("create dir");
+    let agentrc_dir = root.join(".agentrc");
+    std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["ask_approval"],
@@ -166,7 +166,7 @@ async fn auto_approve_file_pattern_match() {
         "risk_level_threshold": "low"
     });
     std::fs::write(
-        monocoque_dir.join("settings.json"),
+        agentrc_dir.join("settings.json"),
         serde_json::to_string_pretty(&policy_json).expect("json"),
     )
     .expect("write policy");
@@ -193,9 +193,9 @@ async fn auto_approve_malformed_policy_denies_all() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let monocoque_dir = root.join(".monocoque");
-    std::fs::create_dir_all(&monocoque_dir).expect("create dir");
-    std::fs::write(monocoque_dir.join("settings.json"), "not valid json {{{")
+    let agentrc_dir = root.join(".agentrc");
+    std::fs::create_dir_all(&agentrc_dir).expect("create dir");
+    std::fs::write(agentrc_dir.join("settings.json"), "not valid json {{{")
         .expect("write policy");
 
     let commands = HashMap::new();
