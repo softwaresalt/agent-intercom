@@ -186,7 +186,7 @@ retention_days = 30
 
 [database]
 # SQLite database path (parent directories auto-created).
-path = "data/monocoque.db"
+path = "data/agent-rc.db"
 
 [slack]
 # Default Slack channel ID for notifications.

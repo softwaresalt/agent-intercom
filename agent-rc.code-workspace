@@ -68,7 +68,7 @@
     },
   "mcp": {
     "servers": {
-      "monocoque-agent-rc": {
+      "agent-rc": {
         "type": "sse",
         "url": "http://127.0.0.1:3000/sse?channel_id=C0AF15RHPF0"
       },

@@ -31,18 +31,21 @@ pub struct PolicyWatcher {
     watchers: Arc<Mutex<HashMap<PathBuf, RecommendedWatcher>>>,
     /// Shared policy cache updated on file changes.
     cache: PolicyCache,
-    /// Global commands allowlist for policy validation (FR-011).
-    global_commands: Arc<HashMap<String, String>>,
+}
+
+impl Default for PolicyWatcher {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PolicyWatcher {
-    /// Create a new policy watcher with the given global commands allowlist.
+    /// Create a new policy watcher.
     #[must_use]
-    pub fn new(global_commands: HashMap<String, String>) -> Self {
+    pub fn new() -> Self {
         Self {
             watchers: Arc::new(Mutex::new(HashMap::new())),
             cache: Arc::new(RwLock::new(HashMap::new())),
-            global_commands: Arc::new(global_commands),
         }
     }
 
@@ -70,7 +73,7 @@ impl PolicyWatcher {
             .unwrap_or_else(|_| workspace_root.to_owned());
 
         // ── Load initial policy ──────────────────────────────
-        let policy = PolicyLoader::load(&canonical, &self.global_commands)?;
+        let policy = PolicyLoader::load(&canonical)?;
         {
             let mut cache = self.cache.write().await;
             cache.insert(canonical.clone(), policy);
@@ -80,7 +83,6 @@ impl PolicyWatcher {
         // ── Set up file watcher ──────────────────────────────
         let watch_dir = canonical.join(POLICY_DIR);
         let cache = Arc::clone(&self.cache);
-        let global_commands = Arc::clone(&self.global_commands);
         let root = canonical.clone();
 
         let mut watcher = notify::recommended_watcher(
@@ -94,7 +96,7 @@ impl PolicyWatcher {
                             )
                             .entered();
 
-                            match PolicyLoader::load(&root, &global_commands) {
+                            match PolicyLoader::load(&root) {
                                 Ok(new_policy) => {
                                     // Use blocking write since we're in a sync callback.
                                     // This is safe because the RwLock is tokio-based but

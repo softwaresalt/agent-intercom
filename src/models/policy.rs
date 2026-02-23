@@ -25,9 +25,20 @@ pub struct WorkspacePolicy {
     /// Master switch for auto-approve.
     #[serde(default)]
     pub enabled: bool,
-    /// Shell commands that bypass approval (glob wildcards allowed).
-    #[serde(default)]
-    pub commands: Vec<String>,
+    /// Shell command patterns that bypass approval (regex).
+    ///
+    /// Each entry is a regular expression matched against the full command
+    /// line.  Plain command names (e.g. `"cargo test"`) still work because
+    /// they match themselves literally.  Use anchors (`^…$`) and
+    /// alternation to cover families of commands:
+    ///
+    /// ```json
+    /// "auto_approve_commands": [
+    ///   "^cargo (build|test|check|clippy|fmt)(\\s.*)?$"
+    /// ]
+    /// ```
+    #[serde(default, alias = "commands")]
+    pub auto_approve_commands: Vec<String>,
     /// MCP tool names that bypass approval.
     #[serde(default)]
     pub tools: Vec<String>,
@@ -57,7 +68,7 @@ impl Default for WorkspacePolicy {
     fn default() -> Self {
         Self {
             enabled: false,
-            commands: Vec::new(),
+            auto_approve_commands: Vec::new(),
             tools: Vec::new(),
             file_patterns: FilePatterns::default(),
             risk_level_threshold: default_risk_threshold(),

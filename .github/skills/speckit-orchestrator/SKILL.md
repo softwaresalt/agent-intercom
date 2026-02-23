@@ -1,4 +1,3 @@
-````skill
 ---
 name: speckit-orchestrator
 description: "Usage: Run spec workflow {feature-description}. Orchestrates the spec-kit feature specification lifecycle from specify through analysis, compacting context between stages, and hands off to build-orchestrator for implementation."
@@ -182,7 +181,7 @@ Before executing each stage, verify its prerequisites:
 
 | Stage         | Required Artifacts                                                                 |
 | ------------- | ---------------------------------------------------------------------------------- |
-| Specify       | `.specify/templates/spec-template.md` and `.specify/memory/constitution.md` exist   |
+| Specify       | `.specify/templates/spec-template.md` and `.specify/memory/constitution.md` exist  |
 | Clarify       | `specs/###-feature-name/spec.md` exists                                            |
 | Plan          | `specs/###-feature-name/spec.md` exists                                            |
 | Behavior      | `specs/###-feature-name/spec.md` and `plan.md` exist                               |
@@ -204,7 +203,7 @@ After each stage completes, verify its outputs:
 | Plan          | `plan.md`, `research.md` in feature dir                                            | Files exist and are non-empty     |
 | Behavior      | `SCENARIOS.md` in feature dir                                                      | File exists, contains S001+       |
 | Tasks         | `tasks.md` in feature dir                                                          | File exists, contains T001+       |
-| Analyze       | Analysis report output (displayed, not necessarily a file)                          | Report was generated              |
+| Analyze       | Analysis report output (displayed, not necessarily a file)                         | Report was generated              |
 
 ### Step 6: Context Compaction
 
@@ -269,7 +268,7 @@ Between each stage, report a brief transition summary:
 | Stage produces no output       | Retry stage once; if second attempt fails, halt with diagnostics      |
 | Entry gate failure (full mode) | Halt — indicates a silent failure in a prior stage                    |
 | Entry gate failure (from mode) | Report missing artifacts, suggest running prerequisite stages         |
-| Compaction failure              | Warn but continue — compaction is best-effort, not a hard gate        |
+| Compaction failure              | Warn but continue — compaction is best-effort, not a hard gate       |
 | Git operation failure          | Report the git error, suggest manual resolution, halt                 |
 
 ## How It Works
@@ -309,4 +308,4 @@ The specify stage creates the feature branch and directory. If the directory is 
 2. Check if the branch was checked out: `git branch --show-current`
 3. Look for the spec directory: `ls specs/`
 4. If missing, re-run the specify stage manually: `/speckit.specify {feature-description}`
-````
+5. If the issue persists, check the specify agent's instructions and ensure it is correctly creating branches and directories.

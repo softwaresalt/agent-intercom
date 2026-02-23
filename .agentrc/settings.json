@@ -1,0 +1,38 @@
+{
+  "enabled": true,
+
+  "auto_approve_commands": [
+    "^cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$",
+    "^& cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$",
+    "^cargo --(help|version|verbose|quiet|release|features)(\\s[^;|&`]*)?$",
+    "^git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$",
+    "^& git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$",
+    "^(Out-File|Set-Content|Add-Content|Get-Content|Get-ChildItem|Copy-Item|Move-Item|New-Item|Test-Path)(\\s[^;|&`]*)?$",
+    "^(echo|dir|mkdir|where\\.exe|vsWhere\\.exe|rustup|rustc|refreshenv)(\\s[^;|&`]*)?$",
+    "^cmd /c \"cargo (test|check|clippy|fmt|build|doc|bench)(\\s[^;|&`]*)?\"(\\s*[;&|]+\\s*echo\\s.*)?$",
+    "^pwsh -File \"lib/hve-core/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$",
+    "^pwsh -File \"\\.specify/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$",
+    "^Out-Null$"
+  ],
+
+  "tools": [
+    "heartbeat",
+    "remote_log",
+    "recover_state",
+    "check_auto_approve"
+  ],
+
+  "file_patterns": {
+    "write": [
+      "logs/**",
+      "tests/fixtures/**"
+    ],
+    "read": [
+      "**"
+    ]
+  },
+
+  "risk_level_threshold": "high",
+  "log_auto_approved": true,
+  "summary_interval_seconds": 300
+}

@@ -25,7 +25,7 @@ import urllib.request
 import uuid
 
 # ── Configuration ────────────────────────────────────────────────────────────
-DB_PATH       = r"D:\Source\GitHub\monocoque-agent-rc\data\monocoque.db"
+DB_PATH       = r"D:\Source\GitHub\monocoque-agent-rc\data\agent-rc.db"
 BASE_URL      = "http://localhost:3000"
 CHANNEL_ID    = "C0AG6S5D87N"  # workspace channel from .vscode/mcp.json
 WORKSPACE_ROOT = r"D:\Source\GitHub\monocoque-agent-rc"

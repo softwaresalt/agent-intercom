@@ -2,10 +2,8 @@
 //!
 //! Parses `.agentrc/settings.json` from a workspace root into a
 //! [`WorkspacePolicy`]. On parse errors, returns a deny-all default
-//! and emits a tracing warning. Validates that workspace `commands`
-//! entries exist in the global allowlist (FR-011).
+//! and emits a tracing warning.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -27,18 +25,14 @@ impl PolicyLoader {
     ///
     /// - **Missing file or directory**: returns `WorkspacePolicy::default()` (deny-all).
     /// - **Malformed JSON**: returns `WorkspacePolicy::default()` and logs a warning.
-    /// - **Valid JSON**: parses into `WorkspacePolicy`, then strips any `commands`
-    ///   entries that are absent from `global_commands` (FR-011).
+    /// - **Valid JSON**: parses into `WorkspacePolicy`.
     ///
     /// # Errors
     ///
     /// This function returns `Ok` in all cases — policy loading failures are
     /// non-fatal and degrade to deny-all. The `Result` wrapper is preserved
     /// for future extensibility (e.g., I/O errors on paths outside workspace).
-    pub fn load(
-        workspace_root: &Path,
-        global_commands: &HashMap<String, String>,
-    ) -> Result<WorkspacePolicy> {
+    pub fn load(workspace_root: &Path) -> Result<WorkspacePolicy> {
         let policy_file = workspace_root.join(POLICY_PATH);
 
         if !policy_file.exists() {
@@ -65,7 +59,7 @@ impl PolicyLoader {
             return Ok(WorkspacePolicy::default());
         }
 
-        let mut policy: WorkspacePolicy = match serde_json::from_str(&raw) {
+        let policy: WorkspacePolicy = match serde_json::from_str(&raw) {
             Ok(p) => p,
             Err(err) => {
                 warn!(
@@ -76,20 +70,6 @@ impl PolicyLoader {
                 return Ok(WorkspacePolicy::default());
             }
         };
-
-        // FR-011: workspace policy cannot introduce commands beyond the global allowlist.
-        let original_count = policy.commands.len();
-        policy
-            .commands
-            .retain(|cmd| global_commands.contains_key(cmd));
-
-        let stripped = original_count - policy.commands.len();
-        if stripped > 0 {
-            warn!(
-                stripped_count = stripped,
-                "stripped {stripped} workspace commands not present in global allowlist"
-            );
-        }
 
         Ok(policy)
     }

@@ -133,7 +133,7 @@ pub struct DatabaseConfig {
     /// Relative or absolute path to the `SQLite` database file.
     ///
     /// The `connect()` function auto-creates parent directories if they
-    /// do not exist. Defaults to `data/monocoque.db`.
+    /// do not exist. Defaults to `data/agent-rc.db`.
     #[serde(default = "default_db_path")]
     pub path: PathBuf,
 }
@@ -141,13 +141,13 @@ pub struct DatabaseConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            path: PathBuf::from("data/monocoque.db"),
+            path: PathBuf::from("data/agent-rc.db"),
         }
     }
 }
 
 fn default_db_path() -> PathBuf {
-    PathBuf::from("data/monocoque.db")
+    PathBuf::from("data/agent-rc.db")
 }
 
 /// Global configuration parsed from `config.toml`.

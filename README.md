@@ -82,7 +82,7 @@ host_cli = "/path/to/copilot"
 host_cli_args = ["--stdio"]
 
 [database]
-path = "data/monocoque.db"
+path = "data/agent-rc.db"
 
 [slack]
 channel_id = "{your-slack-channel-id}"

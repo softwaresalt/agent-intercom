@@ -112,7 +112,7 @@ As a developer, I benefit from a smaller compiled binary and faster build times 
 - **FR-015**: System MUST remove SurrealDB from `Cargo.toml` (both workspace and package dependency sections) after the migration is complete.
 - **FR-016**: System MUST update or rewrite all existing tests (unit, contract, integration) that reference SurrealDB types or APIs to use the new SQLite/sqlx equivalents.
 - **FR-017**: System MUST preserve the `Arc<Database>` propagation pattern used by `AppState` and ad-hoc repository construction in tool handlers and Slack commands.
-- **FR-018**: System MUST store the SQLite database file at a configurable path (default: `data/monocoque.db`). The connect function MUST auto-create parent directories if they do not exist.
+- **FR-018**: System MUST store the SQLite database file at a configurable path (default: `data/agent-rc.db`). The connect function MUST auto-create parent directories if they do not exist.
 - **FR-019**: System MUST enforce enum constraints (session status, risk level, approval status, prompt type, stall status) using defense-in-depth: (a) `CHECK` constraints in the SQLite DDL catch invalid values at the database level (see contracts/schema.sql.md), and (b) repository methods validate enum values before executing SQL to provide descriptive `AppError::Db` messages. Both layers are required.
 - **FR-020**: System MUST use parameterized queries (bind variables) for all dynamic values to prevent SQL injection.
 
@@ -143,7 +143,7 @@ All five entities are carried forward with identical domain semantics. Only the 
 - The `Arc<Database>` pattern is preserved. The `Database` type alias changes from `Surreal<Db>` to a `sqlx::SqlitePool` (or equivalent).
 - No data migration from an existing SurrealDB database is required. This is a clean replacement — any existing SurrealDB data is discarded.
 - The `GROUP ALL` aggregation used by `count_active()` translates directly to a standard SQL `SELECT COUNT(*)` query.
-- The `config.db_path()` method is updated to return a file path (default: `data/monocoque.db`) instead of a directory path.
+- The `config.db_path()` method is updated to return a file path (default: `data/agent-rc.db`) instead of a directory path.
 - `sqlx` runtime is set to `tokio` to match the existing async runtime.
 
 ## Success Criteria *(mandatory)*

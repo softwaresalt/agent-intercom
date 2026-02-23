@@ -8,5 +8,5 @@ $env:SLACK_TEAM_ID   = [System.Environment]::GetEnvironmentVariable("SLACK_TEAM_
 $env:SLACK_MEMBER_IDS = [System.Environment]::GetEnvironmentVariable("SLACK_MEMBER_IDS", "User")
 $env:RUST_LOG        = "info"
 
-Write-Host "Starting monocoque-agent-rc on http://127.0.0.1:3000 ..."
-.\target\debug\monocoque-agent-rc.exe --config config.toml --transport sse
+Write-Host "Starting monocoque-agent-rc (debug) on http://127.0.0.1:2000 ..."
+.\target\debug\monocoque-agent-rc.exe --config config.toml --transport sse --port 2000

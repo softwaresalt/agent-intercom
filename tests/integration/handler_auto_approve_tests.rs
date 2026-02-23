@@ -7,9 +7,7 @@
 //! - Policy with `risk_level` threshold enforcement
 //! - Policy `file_patterns` glob matching
 //! - No active session → error
-//! - Global command allowlist filtering
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use monocoque_agent_rc::models::policy::WorkspacePolicy;
@@ -29,8 +27,7 @@ async fn auto_approve_missing_policy_denies_all() {
     let session = create_active_session(&state.db, root).await;
     let workspace_root = std::path::PathBuf::from(&session.workspace_root);
 
-    let commands = HashMap::new();
-    let policy = PolicyLoader::load(&workspace_root, &commands).expect("load policy");
+    let policy = PolicyLoader::load(&workspace_root).expect("load policy");
 
     // Default (deny-all) policy.
     assert!(!policy.enabled, "missing policy should not be enabled");
@@ -41,9 +38,8 @@ async fn auto_approve_missing_policy_denies_all() {
 #[tokio::test]
 async fn auto_approve_disabled_policy_denies() {
     let policy = WorkspacePolicy::default();
-    let commands = HashMap::new();
 
-    let result = PolicyEvaluator::check("any_tool", &None, &policy, &commands);
+    let result = PolicyEvaluator::check("any_tool", &None, &policy);
     assert!(!result.auto_approved);
     assert!(result.matched_rule.is_none());
 }
@@ -61,7 +57,7 @@ async fn auto_approve_matching_tool_approved() {
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["heartbeat", "remote_log"],
-        "commands": [],
+        "auto_approve_commands": [],
         "file_patterns": { "write": [], "read": [] },
         "risk_level_threshold": "low"
     });
@@ -71,11 +67,10 @@ async fn auto_approve_matching_tool_approved() {
     )
     .expect("write policy");
 
-    let commands = HashMap::new();
-    let policy = PolicyLoader::load(root, &commands).expect("load policy");
+    let policy = PolicyLoader::load(root).expect("load policy");
     assert!(policy.enabled);
 
-    let result = PolicyEvaluator::check("heartbeat", &None, &policy, &commands);
+    let result = PolicyEvaluator::check("heartbeat", &None, &policy);
     assert!(result.auto_approved, "heartbeat should be auto-approved");
     assert!(result.matched_rule.is_some());
 }
@@ -92,7 +87,7 @@ async fn auto_approve_non_matching_tool_denied() {
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["heartbeat"],
-        "commands": [],
+        "auto_approve_commands": [],
         "file_patterns": { "write": [], "read": [] },
         "risk_level_threshold": "low"
     });
@@ -102,10 +97,9 @@ async fn auto_approve_non_matching_tool_denied() {
     )
     .expect("write policy");
 
-    let commands = HashMap::new();
-    let policy = PolicyLoader::load(root, &commands).expect("load policy");
+    let policy = PolicyLoader::load(root).expect("load policy");
 
-    let result = PolicyEvaluator::check("ask_approval", &None, &policy, &commands);
+    let result = PolicyEvaluator::check("ask_approval", &None, &policy);
     assert!(
         !result.auto_approved,
         "ask_approval should not be auto-approved"
@@ -124,7 +118,7 @@ async fn auto_approve_risk_level_blocks_high_risk() {
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["ask_approval"],
-        "commands": [],
+        "auto_approve_commands": [],
         "file_patterns": { "write": ["**/*.rs"], "read": [] },
         "risk_level_threshold": "low"
     });
@@ -134,15 +128,14 @@ async fn auto_approve_risk_level_blocks_high_risk() {
     )
     .expect("write policy");
 
-    let commands = HashMap::new();
-    let policy = PolicyLoader::load(root, &commands).expect("load policy");
+    let policy = PolicyLoader::load(root).expect("load policy");
 
     // High risk context should be blocked by low threshold.
     let ctx = AutoApproveContext {
         file_path: Some("src/main.rs".into()),
         risk_level: Some("high".into()),
     };
-    let result = PolicyEvaluator::check("ask_approval", &Some(ctx), &policy, &commands);
+    let result = PolicyEvaluator::check("ask_approval", &Some(ctx), &policy);
     assert!(
         !result.auto_approved,
         "high risk should be blocked by low threshold"
@@ -161,7 +154,7 @@ async fn auto_approve_file_pattern_match() {
     let policy_json = serde_json::json!({
         "enabled": true,
         "tools": ["ask_approval"],
-        "commands": [],
+        "auto_approve_commands": [],
         "file_patterns": { "write": ["src/**/*.rs"], "read": [] },
         "risk_level_threshold": "low"
     });
@@ -171,15 +164,14 @@ async fn auto_approve_file_pattern_match() {
     )
     .expect("write policy");
 
-    let commands = HashMap::new();
-    let policy = PolicyLoader::load(root, &commands).expect("load policy");
+    let policy = PolicyLoader::load(root).expect("load policy");
 
     // File matching the write pattern.
     let ctx = AutoApproveContext {
         file_path: Some("src/main.rs".into()),
         risk_level: Some("low".into()),
     };
-    let result = PolicyEvaluator::check("ask_approval", &Some(ctx), &policy, &commands);
+    let result = PolicyEvaluator::check("ask_approval", &Some(ctx), &policy);
     assert!(
         result.auto_approved,
         "file matching pattern should be approved"
@@ -197,8 +189,7 @@ async fn auto_approve_malformed_policy_denies_all() {
     std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     std::fs::write(agentrc_dir.join("settings.json"), "not valid json {{{").expect("write policy");
 
-    let commands = HashMap::new();
-    let policy = PolicyLoader::load(root, &commands).expect("load policy");
+    let policy = PolicyLoader::load(root).expect("load policy");
     assert!(
         !policy.enabled,
         "malformed policy should degrade to deny-all"

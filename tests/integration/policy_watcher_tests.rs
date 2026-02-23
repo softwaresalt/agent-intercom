@@ -10,7 +10,6 @@
 //!
 //! FR-007 — Policy Hot-Reload
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use monocoque_agent_rc::policy::watcher::PolicyWatcher;
@@ -54,17 +53,20 @@ async fn register_loads_initial_policy() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
 
-    write_policy_file(root, r#"{"enabled": true, "commands": ["cargo test"]}"#);
+    write_policy_file(
+        root,
+        r#"{"enabled": true, "auto_approve_commands": ["cargo test"]}"#,
+    );
 
-    // Include "cargo test" in the global allowlist so it is not filtered by FR-011.
-    let global = HashMap::from([("cargo test".to_owned(), "run tests".to_owned())]);
-    let watcher = PolicyWatcher::new(global);
+    let watcher = PolicyWatcher::new();
     watcher.register(root).await.expect("register");
 
     let policy = watcher.get_policy(root).await;
     assert!(policy.enabled, "initial policy should have enabled=true");
     assert!(
-        policy.commands.contains(&"cargo test".to_owned()),
+        policy
+            .auto_approve_commands
+            .contains(&"cargo test".to_owned()),
         "initial policy should include 'cargo test' command"
     );
 }
@@ -78,7 +80,7 @@ async fn policy_file_modification_detected() {
 
     write_policy_file(root, r#"{"enabled": false}"#);
 
-    let watcher = PolicyWatcher::new(HashMap::new());
+    let watcher = PolicyWatcher::new();
     watcher.register(root).await.expect("register");
 
     // Confirm initial state.
@@ -105,7 +107,7 @@ async fn policy_file_deletion_falls_back_to_deny_all() {
 
     write_policy_file(root, r#"{"enabled": true}"#);
 
-    let watcher = PolicyWatcher::new(HashMap::new());
+    let watcher = PolicyWatcher::new();
     watcher.register(root).await.expect("register");
 
     // Confirm enabled initially.
@@ -134,7 +136,7 @@ async fn malformed_policy_file_uses_deny_all() {
     // Write invalid JSON before registering.
     write_policy_file(root, r"{ this is not valid json }");
 
-    let watcher = PolicyWatcher::new(HashMap::new());
+    let watcher = PolicyWatcher::new();
     watcher
         .register(root)
         .await
@@ -157,7 +159,7 @@ async fn unregister_stops_watching() {
 
     write_policy_file(root, r#"{"enabled": false}"#);
 
-    let watcher = PolicyWatcher::new(HashMap::new());
+    let watcher = PolicyWatcher::new();
     watcher.register(root).await.expect("register");
 
     // Unregister — this removes the watcher and clears the cache entry.
@@ -194,7 +196,7 @@ async fn multiple_workspaces_independent_policies() {
     write_policy_file(root1, r#"{"enabled": false}"#);
     write_policy_file(root2, r#"{"enabled": false}"#);
 
-    let watcher = PolicyWatcher::new(HashMap::new());
+    let watcher = PolicyWatcher::new();
     watcher.register(root1).await.expect("register workspace 1");
     watcher.register(root2).await.expect("register workspace 2");
 

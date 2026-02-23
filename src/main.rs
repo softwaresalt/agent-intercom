@@ -58,6 +58,10 @@ struct Cli {
     #[arg(long)]
     workspace: Option<PathBuf>,
 
+    /// Override the HTTP port for the SSE transport.
+    #[arg(long)]
+    port: Option<u16>,
+
     /// Which MCP transport(s) to start: stdio, sse, or both.
     ///
     /// Use `sse` to run as an HTTP/SSE endpoint for remote clients.
@@ -97,6 +101,11 @@ async fn run(args: Cli) -> Result<()> {
             .canonicalize()
             .map_err(|err| AppError::Config(format!("invalid workspace override: {err}")))?;
         config.default_workspace_root = canonical;
+    }
+
+    // Override HTTP port from CLI if provided.
+    if let Some(port) = args.port {
+        config.http_port = port;
     }
 
     // Load Slack credentials from keyring / env vars.

@@ -780,7 +780,7 @@ The main configuration file is parsed into `GlobalConfig`. Path: specified via `
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `path` | `PathBuf` | No | `"data/monocoque.db"` | Path to the SQLite database file. Parent directories auto-created. |
+| `path` | `PathBuf` | No | `"data/agent-rc.db"` | Path to the SQLite database file. Parent directories auto-created. |
 
 #### `[slack]`
 
@@ -866,7 +866,7 @@ host_cli_args = ["--stdio"]
 retention_days = 30
 
 [database]
-path = "data/monocoque.db"
+path = "data/agent-rc.db"
 
 [slack]
 channel_id = "C0AFXFQP1TJ"

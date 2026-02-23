@@ -33,7 +33,7 @@ All tests use in-memory SQLite (`sqlite::memory:`). No disk cleanup needed.
 cargo run
 ```
 
-The database file is created automatically at the path specified by `db.path` in `config.toml` (default: `data/monocoque.db`). Parent directories are auto-created.
+The database file is created automatically at the path specified by `db.path` in `config.toml` (default: `data/agent-rc.db`). Parent directories are auto-created.
 
 ## Configuration
 
@@ -41,7 +41,7 @@ The database file is created automatically at the path specified by `db.path` in
 
 ```toml
 [database]
-path = "data/monocoque.db"          # SQLite file path (relative to working dir)
+path = "data/agent-rc.db"          # SQLite file path (relative to working dir)
 retention_days = 30                 # Same retention policy as before
 ```
 
@@ -50,7 +50,7 @@ The `[database]` section replaces the previous `[database]` section that configu
 ### Environment override
 
 ```text
-MONOCOQUE_DB_PATH=data/monocoque.db     # Override config.toml db path
+MONOCOQUE_DB_PATH=data/agent-rc.db     # Override config.toml db path
 ```
 
 ## Key differences from SurrealDB
