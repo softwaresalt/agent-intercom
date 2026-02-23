@@ -110,7 +110,7 @@ clippy = "cargo clippy"
 
 ### 4. (Optional) Create workspace auto-approve policy
 
-Create `.monocoque/settings.json` in your workspace root (each workspace can have its own policy):
+Create `.agentrc/settings.json` in your workspace root (each workspace can have its own policy):
 
 ```json
 {

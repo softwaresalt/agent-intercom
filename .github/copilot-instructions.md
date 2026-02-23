@@ -15,7 +15,7 @@ Last updated: 2026-02-15
 | `axum` | 0.8 | HTTP/SSE transport (`StreamableHttpService` on `/mcp`) |
 | `slack-morphism` | 2.17 | Slack Socket Mode client |
 | `tokio` | 1.37 | Async runtime (full feature set) |
-| `surrealdb` | 1.5 | Embedded DB (`kv-rocksdb` prod, `kv-mem` tests) |
+| `sqlx` | 0.8 | SQLite async driver (file-based prod, in-memory tests) |
 | `diffy` | 0.4 | Unified diff parsing & patch application |
 | `interprocess` | 2.0 | IPC named pipes (Windows) / Unix domain sockets |
 | `clap` | 4.5 | CLI argument parsing |
@@ -29,6 +29,7 @@ Last updated: 2026-02-15
 | `tokio-util` | 0.7 | `CancellationToken` for graceful shutdown |
 | `reqwest` | 0.13 | HTTP client (rustls) |
 | `glob` | 0.3 | Glob pattern matching |
+| `toml` | 0.8 | TOML config file parsing |
 | `tempfile` | 3.10 | Atomic file writes |
 
 ## Project Structure
@@ -60,9 +61,9 @@ src/
     approval, checkpoint, policy, progress, prompt, session, stall
   orchestrator/           # Session lifecycle management
     session_manager, checkpoint_manager, spawner, stall_detector
-  persistence/            # SurrealDB repository layer
+  persistence/            # sqlite (sqlx) repository layer
     db.rs                 # connect(), schema bootstrap
-    schema.rs             # SCHEMAFULL table DDL
+    schema.rs             # SQL DDL (idempotent CREATE TABLE IF NOT EXISTS)
     approval_repo, checkpoint_repo, prompt_repo, session_repo,
     stall_repo, retention
   policy/                 # Workspace auto-approve rules
@@ -78,13 +79,14 @@ ctl/
 lib/
   hve-core/               # External library (separate project)
 tests/
-  unit/                   # Unit tests (12 modules)
+  unit/                   # Unit tests (15 modules)
   contract/               # Contract tests (10 modules)
-  integration/            # Integration tests (7 modules)
+  integration/            # Integration tests (8 modules)
 docs/
   adrs/                   # Architecture Decision Records (0001–0011)
 specs/
   001-mcp-remote-agent-server/   # Feature specification
+  002-sqlite-migration/          # Persistence migration spec
 config.toml              # Runtime configuration
 rustfmt.toml             # max_width = 100, edition = 2021
 ```
@@ -151,7 +153,7 @@ Never write production code before the corresponding test exists and has been ob
 ### Crate-Level Attributes
 
 * `#![forbid(unsafe_code)]` — no unsafe anywhere (both `src/main.rs` and `ctl/main.rs`)
-* `[workspace.lints.rust]`: `unsafe_code = "forbid"`, `missing_docs = "warn"`
+* `[workspace.lints.rust]`: `unsafe_code = "deny"`, `missing_docs = "warn"`
 * `[workspace.lints.clippy]`: `pedantic = "deny"`, `unwrap_used = "deny"`, `expect_used = "deny"`
 
 ### Error Handling
@@ -173,12 +175,11 @@ Never write production code before the corresponding test exists and has been ob
 * All public items require `///` doc comments
 * Module-level `//!` doc comments on every `mod.rs` or standalone module file
 
-### Database (SurrealDB)
+### Database (SQLite)
 
 * All DB access goes through `persistence/` repository modules — no raw queries elsewhere
-* Namespace: `monocoque`, database: `agent_rc`
-* `kv-rocksdb` for production, `kv-mem` for tests (controlled by `connect(config, use_memory)`)
-* Schema uses `SCHEMAFULL` tables with idempotent DDL in `persistence/schema.rs`
+* File-based SQLite for production, in-memory SQLite for tests (controlled by `connect(path, use_memory)`)
+* Schema uses idempotent DDL (`CREATE TABLE IF NOT EXISTS`) in `persistence/schema.rs`
 
 ### MCP (rmcp 0.5)
 
@@ -213,7 +214,7 @@ Never write production code before the corresponding test exists and has been ob
 
 ### Workspace Policy
 
-* Auto-approve rules in `.monocoque/settings.json` per workspace
+* Auto-approve rules in `.agentrc/settings.json` per workspace
 * Hot-reloaded via `notify` file watcher in `policy/watcher.rs`
 * Evaluated by `policy/evaluator.rs`
 
@@ -229,7 +230,7 @@ Never write production code before the corresponding test exists and has been ob
   * `unit/` — isolated logic tests (12 modules)
   * `contract/` — MCP tool response contract verification (10 modules)
   * `integration/` — end-to-end flows with real SSE/DB (7 modules)
-* Test DB: always use `kv-mem` backend
+* Test DB: always use in-memory SQLite (`":memory:"`)
 * Use `serial_test` crate for tests requiring sequential execution
 
 ## Architecture Reference
@@ -240,14 +241,82 @@ Never write production code before the corresponding test exists and has been ob
 | Transport (stdio) | `rmcp::transport::io::stdio()` for direct agent connections |
 | Transport (HTTP) | axum 0.8 with `StreamableHttpService` on `/mcp` |
 | Slack | `slack-morphism` 2.17 Socket Mode |
-| Database | SurrealDB 1.5 embedded — `kv-rocksdb` prod, `kv-mem` tests, `SCHEMAFULL` tables |
+| Database | SQLite via `sqlx` 0.8 — file-based prod, in-memory tests, idempotent DDL |
 | Configuration | TOML (`config.toml`) → `GlobalConfig`, credentials via keyring with env fallback |
-| Workspace policy | JSON auto-approve rules (`.monocoque/settings.json`), hot-reloaded via `notify` |
+| Workspace policy | JSON auto-approve rules (`.agentrc/settings.json`), hot-reloaded via `notify` |
 | Diff safety | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via `tempfile` |
 | Path security | All paths canonicalized and validated via `starts_with(workspace_root)` |
 | IPC | `interprocess` 2.0 — named pipes (Windows) / Unix domain sockets for `monocoque-ctl` |
 | Shutdown | `CancellationToken` — persist state, notify Slack, terminate children gracefully |
 | ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0011) |
+
+## Remote Approval Workflow for File Changes
+
+When the monocoque-agent-rc MCP server is running, agents **must** route all file modifications through the remote approval workflow instead of writing files directly. This allows the operator to review and approve every change via Slack before it touches the filesystem.
+
+Additionally, **do not write multiple files in a single proposal.** Each file change must be proposed, reviewed, and approved separately to ensure clear audit trails and granular control.  Further, when modifying existing files, always generate a unified diff rather than sending the full file content. This provides better context for reviewers and reduces the risk of unintended changes.
+
+For terminal commands, **never chain multiple commands together**. Each command must be submitted separately to the `evaluate_command` tool for proper policy evaluation and approval. If the terminal command is **not** already auto-approved for the current workspace or current working directory**, it may be executed directly without approval, but still must not be chained with other commands unless those commands are effectively piping output.
+
+### Required Call Sequence
+
+```text
+1. check_auto_approve   →  Can this change bypass approval?
+2. ask_approval          →  Submit the proposal (blocks until operator responds)
+3. accept_diff           →  Apply the approved change to the filesystem
+```
+
+### Step 1 — `check_auto_approve`
+
+Call **before** every file write to check if the workspace policy allows the operation without human review.
+
+| Parameter   | Type     | Required | Description |
+|-------------|----------|----------|-------------|
+| `tool_name` | `string` | yes      | Name of the tool or command being executed |
+| `context`   | `object` | no       | `{ "file_path": "...", "risk_level": "..." }` |
+
+- If `auto_approved: true` → the agent may write the file directly (skip steps 2–3).
+- If `auto_approved: false` → proceed to step 2.
+
+### Step 2 — `ask_approval`
+
+Submit the proposed change for operator review. This call **blocks** until the operator taps Accept/Reject in Slack or the timeout elapses.
+
+| Parameter     | Type     | Required | Description |
+|---------------|----------|----------|-------------|
+| `title`       | `string` | yes      | Concise summary of the proposed change |
+| `diff`        | `string` | yes      | Standard unified diff or full file content |
+| `file_path`   | `string` | yes      | Target file path relative to workspace root |
+| `description` | `string` | no       | Additional context about the change |
+| `risk_level`  | `string` | no       | `low` (default), `high`, or `critical` |
+
+**Response:** `{ "status": "approved" | "rejected" | "timeout", "request_id": "...", "reason": "..." }`
+
+- `approved` → proceed to step 3 with the returned `request_id`.
+- `rejected` → do **not** apply the change. Adapt or abandon based on the `reason`.
+- `timeout` → treat as rejection. Do not retry automatically without operator guidance.
+
+### Step 3 — `accept_diff`
+
+Apply the approved change to the filesystem. Only call this after receiving `status: "approved"`.
+
+| Parameter    | Type      | Required | Description |
+|--------------|-----------|----------|-------------|
+| `request_id` | `string`  | yes      | The `request_id` from the `ask_approval` response |
+| `force`      | `boolean` | no       | `true` to overwrite even if the file changed since proposal |
+
+**Response:** `{ "status": "applied", "files_written": [{ "path": "...", "bytes": N }] }`
+
+If the server returns `patch_conflict` (file changed since proposal), the agent should re-read the file, regenerate the diff, and restart from step 2.
+
+### Rules
+
+1. **Never write files directly** when the MCP server is reachable. Always use the approval workflow.
+2. **One file per approval.** Submit each file change as a separate `ask_approval` call.
+3. **Use unified diffs** when modifying existing files. Use raw file content only for new files.
+4. **Set `risk_level`** to `high` or `critical` for changes to configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
+5. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.
+6. **Handle all response statuses.** Never assume approval — always branch on `approved`, `rejected`, and `timeout`.
 
 <!-- MANUAL ADDITIONS START -->
 

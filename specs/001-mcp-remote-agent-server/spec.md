@@ -310,7 +310,7 @@ The service is renamed from "monocoque-agent-rem" (remote) to "monocoque-agent-r
 * **FR-008**: System MUST forward agent continuation prompts to Slack with "Continue", "Refine", and "Stop" action buttons and return the operator's decision to the agent
 * **FR-009**: System MUST support a workspace-level auto-approve policy file that permits pre-authorized operations to bypass the remote approval gate
 * **FR-010**: System MUST hot-reload the workspace policy file when it changes, without requiring a server restart
-* **FR-011**: System MUST enforce that the workspace policy cannot expand permissions beyond what the global configuration allows
+* **FR-011** *(superseded by ADR-0012)*: ~~System MUST enforce that the workspace policy cannot expand permissions beyond what the global configuration allows~~ → Workspace auto-approve policy is entirely self-contained in `.agentrc/settings.json`; `config.commands` is exclusively for Slack slash-command aliases (FR-014). See `docs/adrs/0012-policy-workspace-self-contained-auto-approve.md`.
 * **FR-012**: System MUST allow the remote operator to start, pause, resume, terminate, checkpoint, and restore agent sessions via Slack slash commands
 * **FR-013**: System MUST bind each agent session to exactly one Slack user (the session owner) at creation time. Only the session owner may interact with that session's approvals, prompts, stall alerts, and slash commands. Interactions from non-owner users (even if listed in `authorized_user_ids`) are rejected for that session. The `authorized_user_ids` list determines who may create new sessions.
 * **FR-014**: System MUST execute only commands explicitly listed in the server configuration allowlist when triggered remotely, rejecting all others

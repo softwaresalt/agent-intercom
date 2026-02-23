@@ -13,6 +13,7 @@ use std::sync::Arc;
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::Response;
+use axum::routing::get;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -20,6 +21,13 @@ use tracing::{info, warn};
 
 use super::handler::{AgentRcServer, AppState};
 use crate::{AppError, Result};
+
+/// Handler for `GET /health` — returns 200 OK with a plain-text body.
+///
+/// Useful for probing liveness without initiating an SSE or MCP session.
+async fn health() -> &'static str {
+    "ok"
+}
 
 /// Extract `channel_id` from a URI query string.
 ///
@@ -56,6 +64,7 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
     };
 
     let (sse_server, router) = SseServer::new(config);
+    let router = router.route("/health", get(health));
 
     // Shared inbox: the middleware writes the channel_id extracted from
     // the query string; the factory closure reads it when creating the

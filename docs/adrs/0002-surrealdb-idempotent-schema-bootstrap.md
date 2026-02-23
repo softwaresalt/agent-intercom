@@ -1,6 +1,6 @@
 # ADR-0002: SurrealDB Idempotent Schema Bootstrap
 
-**Status**: Accepted (amended Phase 3)
+**Status**: Superseded — SurrealDB replaced by SQLite via sqlx (see specs/002-sqlite-migration)
 **Date**: 2026-02-11
 **Phase**: 2 (Foundational), Task T017
 

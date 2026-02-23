@@ -1,12 +1,10 @@
 //! Policy evaluator for workspace auto-approve rules (T062).
 //!
 //! Determines whether a given tool or command invocation can bypass the
-//! remote approval gate based on the workspace [`WorkspacePolicy`] and
-//! the global configuration. Global config always supersedes workspace
-//! policy (FR-011).
+//! remote approval gate based on the workspace [`WorkspacePolicy`].
+//! Auto-approve policy is entirely a workspace-local concern.
 
-use std::collections::HashMap;
-
+use regex::Regex;
 use tracing::{info, info_span};
 
 use crate::models::approval::RiskLevel;
@@ -39,7 +37,7 @@ impl PolicyEvaluator {
     /// Evaluation order:
     /// 1. If the policy is disabled, deny immediately.
     /// 2. Check risk level threshold — deny if exceeded.
-    /// 3. Match against `commands` (with global allowlist gate).
+    /// 3. Match against `auto_approve_commands`.
     /// 4. Match against `tools`.
     /// 5. Match against `file_patterns` (write/read globs).
     /// 6. If no rule matches, deny.
@@ -48,7 +46,6 @@ impl PolicyEvaluator {
         tool_name: &str,
         context: &Option<AutoApproveContext>,
         policy: &WorkspacePolicy,
-        global_commands: &HashMap<String, String>,
     ) -> AutoApproveResult {
         let _span = info_span!(
             "policy_evaluate",
@@ -75,11 +72,8 @@ impl PolicyEvaluator {
             }
         }
 
-        // ── 3. Command matching (FR-011: must be in global allowlist) ─
-        if policy.commands.contains(&tool_name.to_owned())
-            && global_commands.contains_key(tool_name)
-        {
-            let rule = format!("command:{tool_name}");
+        // ── 3. Command matching (regex) ──────────────────────
+        if let Some(rule) = match_command_pattern(&policy.auto_approve_commands, tool_name) {
             info!(matched_rule = %rule, "auto-approved via command rule");
             return approve(rule);
         }
@@ -165,6 +159,29 @@ fn try_glob_match(patterns: &[String], file_path: &str, kind: &str) -> Option<St
                     pattern = %pattern,
                     %err,
                     "invalid glob pattern in workspace policy, skipping"
+                );
+            }
+        }
+    }
+    None
+}
+
+/// Try each command pattern (regex) against the tool name / command line.
+///
+/// Returns the first matching rule as `command:<pattern>`.
+fn match_command_pattern(patterns: &[String], command: &str) -> Option<String> {
+    for pattern in patterns {
+        match Regex::new(pattern) {
+            Ok(re) => {
+                if re.is_match(command) {
+                    return Some(format!("command:{pattern}"));
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    pattern = %pattern,
+                    %err,
+                    "invalid regex in workspace policy commands, skipping"
                 );
             }
         }

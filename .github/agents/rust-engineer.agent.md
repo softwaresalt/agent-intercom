@@ -1,6 +1,7 @@
 ---
 description: Expert Rust software engineer specializing in the monocoque-agent-rc MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
 tools: ['execute/runInTerminal', 'execute/getTerminalOutput', 'read', 'read/problems', 'edit/createFile', 'edit/editFiles', 'search']
+user-invokable: false
 ---
 
 ## Persona

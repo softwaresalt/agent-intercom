@@ -18,6 +18,11 @@ use crate::{AppError, Result};
 #[serde(rename_all = "snake_case")]
 pub struct SlackConfig {
     /// Default channel where notifications are posted.
+    ///
+    /// Intentionally left empty in `config.toml`. The channel is always
+    /// supplied per-workspace via the `?channel_id=` SSE query parameter
+    /// in `mcp.json`. Server-level notifications are skipped when empty.
+    #[serde(default)]
     pub channel_id: String,
     /// App-level token used for Socket Mode (populated at runtime).
     #[serde(skip)]
@@ -128,7 +133,7 @@ pub struct DatabaseConfig {
     /// Relative or absolute path to the `SQLite` database file.
     ///
     /// The `connect()` function auto-creates parent directories if they
-    /// do not exist. Defaults to `data/monocoque.db`.
+    /// do not exist. Defaults to `data/agent-rc.db`.
     #[serde(default = "default_db_path")]
     pub path: PathBuf,
 }
@@ -136,13 +141,13 @@ pub struct DatabaseConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            path: PathBuf::from("data/monocoque.db"),
+            path: PathBuf::from("data/agent-rc.db"),
         }
     }
 }
 
 fn default_db_path() -> PathBuf {
-    PathBuf::from("data/monocoque.db")
+    PathBuf::from("data/agent-rc.db")
 }
 
 /// Global configuration parsed from `config.toml`.
@@ -154,6 +159,10 @@ pub struct GlobalConfig {
     /// Slack connectivity settings.
     pub slack: SlackConfig,
     /// Authorized Slack user IDs allowed to start sessions.
+    ///
+    /// Populated at runtime from the `SLACK_MEMBER_IDS` environment
+    /// variable via [`GlobalConfig::load_authorized_users`]. Not read from `config.toml`.
+    #[serde(skip)]
     pub authorized_user_ids: Vec<String>,
     /// Maximum concurrent agent sessions.
     #[serde(default = "default_max_concurrent_sessions")]
@@ -163,7 +172,11 @@ pub struct GlobalConfig {
     /// Default arguments for the host CLI.
     #[serde(default)]
     pub host_cli_args: Vec<String>,
-    /// Registry of allowed commands.
+    /// Registry of Slack slash-command aliases for the `/run` command (FR-014).
+    ///
+    /// Maps a short alias (e.g. `status`) to a shell command string (e.g. `git status -s`).
+    /// Invoked by the Slack command handler only — has no effect on MCP
+    /// auto-approve policy (see ADR-0012).
     #[serde(default)]
     pub commands: HashMap<String, String>,
     /// HTTP port for the SSE transport.
@@ -208,23 +221,65 @@ impl GlobalConfig {
         Ok(config)
     }
 
-    /// Load Slack credentials from OS keychain with env-var fallback.
+    /// Load Slack credentials from OS keychain with env-var fallback, and load
+    /// authorized user IDs from `SLACK_MEMBER_IDS`.
     ///
-    /// Tries the `monocoque-agent-rc` keyring service first, then falls
-    /// back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment variables.
-    /// `SLACK_TEAM_ID` is optional (FR-041) and will not cause an error if
-    /// absent.
+    /// Tries the `monocoque-agent-rc` keyring service first for Slack tokens,
+    /// then falls back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment
+    /// variables. `SLACK_TEAM_ID` is optional (FR-041) and will not cause an
+    /// error if absent.
+    ///
+    /// Authorized user IDs are always read from `SLACK_MEMBER_IDS`
+    /// (comma-separated Slack user IDs, e.g. `U0123456789,U9876543210`).
     ///
     /// # Errors
     ///
     /// Returns `AppError::Config` if neither keychain nor env vars provide
-    /// the required tokens (`slack_app_token`, `slack_bot_token`).
+    /// the required Slack tokens, or if `SLACK_MEMBER_IDS` is
+    /// absent or empty.
     pub async fn load_credentials(&mut self) -> Result<()> {
         let _span = tracing::info_span!("load_credentials").entered();
         self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
         self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
         // SLACK_TEAM_ID is optional per FR-041 — absence is not an error.
         self.slack.team_id = load_optional_credential("slack_team_id", "SLACK_TEAM_ID").await;
+        self.load_authorized_users()?;
+        Ok(())
+    }
+
+    /// Load authorized Slack user IDs from the `SLACK_MEMBER_IDS`
+    /// environment variable.
+    ///
+    /// The variable must contain a comma-separated list of Slack user IDs
+    /// (e.g., `U0123456789,U9876543210`). Whitespace around each entry is
+    /// trimmed and empty entries are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` if the variable is absent, empty, or
+    /// resolves to an empty list after trimming.
+    ///
+    /// # Note
+    ///
+    /// This function is `pub` to allow direct testing from the integration
+    /// test crate.  It is an internal implementation detail of
+    /// [`load_credentials`] and is not part of the public API contract.
+    #[doc(hidden)]
+    pub fn load_authorized_users(&mut self) -> Result<()> {
+        let raw = env::var("SLACK_MEMBER_IDS").unwrap_or_default();
+        let ids: Vec<String> = raw
+            .split(',')
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if ids.is_empty() {
+            return Err(AppError::Config(
+                "no authorized user IDs found: set SLACK_MEMBER_IDS to a \
+                 comma-separated list of Slack user IDs (e.g. U0123456789,U9876543210)"
+                    .into(),
+            ));
+        }
+        self.authorized_user_ids = ids;
         Ok(())
     }
 
@@ -257,12 +312,6 @@ impl GlobalConfig {
         if self.max_concurrent_sessions == 0 {
             return Err(AppError::Config(
                 "max_concurrent_sessions must be greater than zero".into(),
-            ));
-        }
-
-        if self.authorized_user_ids.is_empty() {
-            return Err(AppError::Config(
-                "authorized_user_ids must not be empty".into(),
             ));
         }
 

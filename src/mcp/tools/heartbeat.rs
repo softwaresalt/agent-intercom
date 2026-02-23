@@ -32,7 +32,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
-    let channel_id = context.service.effective_channel_id().to_owned();
+    let channel_id = context.service.effective_channel_id().map(str::to_owned);
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: HeartbeatInput =
@@ -117,7 +117,9 @@ pub async fn handle(
 
         // ── Optional: log status_message to Slack ────────────
         if let Some(ref msg) = input.status_message {
-            send_heartbeat_to_slack(&state, &channel_id, msg).await;
+            if let Some(ref ch) = channel_id {
+                send_heartbeat_to_slack(&state, ch, msg).await;
+            }
         }
 
         info!(

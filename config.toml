@@ -5,16 +5,18 @@
 #   SLACK_APP_TOKEN  - App-level token for Socket Mode (xapp-...)
 #   SLACK_TEAM_ID    - Slack workspace team ID (T...)
 #
-# Alternatively, store them in the OS keychain under service
+# Authorized operator IDs are loaded from an environment variable:
+#   SLACK_MEMBER_IDS  - Comma-separated Slack user IDs allowed to
+#                                    approve requests and issue commands
+#                                    (e.g. U0123456789,U9876543210)
+#
+# Alternatively, store Slack tokens in the OS keychain under service
 # "monocoque-agent-rc" with keys: slack_bot_token, slack_app_token, slack_team_id
 #
-# Per-workspace Slack channel override:
-#   Each VS Code workspace can target a different Slack channel by appending
-#   a `channel_id` query parameter to the SSE URL in .vscode/mcp.json:
-#
-#     "url": "http://127.0.0.1:3000/sse?channel_id=C_WORKSPACE_CHANNEL"
-#
-#   When omitted, the global `slack.channel_id` below is used as the default.
+# Per-workspace Slack channel:
+#   Each VS Code workspace MUST specify the target Slack channel by appending
+#   a `channel_id` query parameter to the SSE URL in .vscode/mcp.json.
+#   There is no global fallback — the channel_id is always workspace-specific.
 #
 #   Example .vscode/mcp.json for a workspace targeting a specific channel:
 #
@@ -27,20 +29,20 @@
 #       }
 #     }
 
-default_workspace_root = "/path/to/workspace"
+default_workspace_root = "D:/Source/GitHub/monocoque-agent-rc"
 http_port = 3000
 ipc_name = "monocoque-agent-rc"
 max_concurrent_sessions = 3
-host_cli = "claude"
+host_cli = "D:/Tools/ghcpcli/copilot.exe"
 host_cli_args = ["--stdio"]
 retention_days = 30
-authorized_user_ids = ["U_YOUR_SLACK_USER_ID"]
 
 [database]
-path = "data/monocoque.db"
+path = "data/agent-rc.db"
 
 [slack]
-channel_id = "C_YOUR_CHANNEL_ID"
+# No fields required here — credentials are loaded from environment variables
+# or the OS keychain; the channel is supplied per-workspace via mcp.json.
 
 [timeouts]
 approval_seconds = 3600

@@ -62,22 +62,13 @@ pub async fn handle(
 
         let workspace_root = std::path::PathBuf::from(&session.workspace_root);
 
-        // ── Load policy for this workspace ───────────────────
-        let policy =
-            PolicyLoader::load(&workspace_root, &state.config.commands).map_err(|err| {
-                rmcp::ErrorData::internal_error(
-                    format!("failed to load workspace policy: {err}"),
-                    None,
-                )
-            })?;
+        // ── Load workspace policy from disk ──────────────────
+        let policy = PolicyLoader::load(&workspace_root).map_err(|err| {
+            rmcp::ErrorData::internal_error(format!("failed to load workspace policy: {err}"), None)
+        })?;
 
         // ── Evaluate policy ──────────────────────────────────
-        let result = PolicyEvaluator::check(
-            &input.tool_name,
-            &input.context,
-            &policy,
-            &state.config.commands,
-        );
+        let result = PolicyEvaluator::check(&input.tool_name, &input.context, &policy);
 
         info!(
             auto_approved = result.auto_approved,

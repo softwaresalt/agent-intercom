@@ -85,6 +85,8 @@ impl SlackMessage {
 pub struct SlackService {
     client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     bot_token: SlackApiToken,
+    /// App-level token used to authenticate Socket Mode connections.
+    app_token: SlackApiToken,
     queue_tx: mpsc::Sender<SlackMessage>,
 }
 
@@ -93,19 +95,23 @@ pub struct SlackRuntime {
     /// Background task that drains the outgoing message queue.
     pub queue_task: JoinHandle<()>,
     /// Background task running Slack Socket Mode.
-    pub socket_task: JoinHandle<()>,
+    ///
+    /// Populated by [`SlackService::start_socket_mode`] after
+    /// [`AppState`] has been fully constructed.
+    pub socket_task: Option<JoinHandle<()>>,
 }
 
 impl SlackService {
     /// Start the Slack client and background sender task.
     ///
+    /// This only initialises the HTTPS client and outgoing message queue.
+    /// The Socket Mode listener must be started separately by calling
+    /// [`start_socket_mode`] once [`AppState`] has been fully constructed.
+    ///
     /// # Errors
     ///
     /// Returns `AppError::Slack` if the HTTPS connector cannot be created.
-    pub fn start(
-        config: &SlackConfig,
-        app_state: Option<Arc<AppState>>,
-    ) -> Result<(Self, SlackRuntime)> {
+    pub fn start(config: &SlackConfig) -> Result<(Self, SlackRuntime)> {
         let connector = SlackClientHyperHttpsConnector::new()
             .map_err(|err| AppError::Slack(format!("failed to init slack connector: {err}")))?;
         let client = Arc::new(SlackClient::new(connector));
@@ -131,21 +137,34 @@ impl SlackService {
 
         let (queue_tx, queue_rx) = mpsc::channel(QUEUE_CAPACITY);
         let queue_task = Self::spawn_worker(client.clone(), bot_token.clone(), queue_rx);
-        let socket_task = Self::spawn_socket_mode(&client, app_token.clone(), app_state);
 
-        info!("slack service started with buffered queue and socket mode");
+        info!("slack service started; socket mode pending app_state injection");
 
         Ok((
             Self {
                 client,
                 bot_token,
+                app_token,
                 queue_tx,
             },
             SlackRuntime {
                 queue_task,
-                socket_task,
+                socket_task: None,
             },
         ))
+    }
+
+    /// Start the Socket Mode listener, injecting the fully-constructed
+    /// [`AppState`] so that Slack interaction callbacks can resolve
+    /// pending approval and prompt oneshot channels.
+    ///
+    /// Must be called once after [`AppState`] is built, passing the same
+    /// `Arc<AppState>` used by the MCP transport so that both sides share
+    /// the same `pending_approvals`, `pending_prompts`, and `pending_waits`
+    /// maps.
+    pub fn start_socket_mode(&self, app_state: Arc<AppState>) -> JoinHandle<()> {
+        info!("starting slack socket mode with live app state");
+        Self::spawn_socket_mode(&self.client, self.app_token.clone(), Some(app_state))
     }
 
     /// Enqueue a message for async delivery.
@@ -442,7 +461,14 @@ async fn repost_pending_messages(state: &AppState) {
 
     let Some(ref slack) = state.slack else { return };
 
-    let channel = SlackChannelId(state.config.slack.channel_id.clone());
+    // The channel is per-workspace (supplied via the SSE `?channel_id=` parameter),
+    // so there is no global server-level channel to re-post to on reconnect.
+    // Skip silently when the global channel is empty.
+    let channel_str = &state.config.slack.channel_id;
+    if channel_str.is_empty() {
+        return;
+    }
+    let channel = SlackChannelId(channel_str.clone());
 
     // Re-post pending approval requests.
     let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));

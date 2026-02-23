@@ -26,7 +26,6 @@ http_port = 0
 ipc_name = "test-lifecycle"
 max_concurrent_sessions = 2
 host_cli = "echo"
-authorized_user_ids = ["U_OWNER", "U_OTHER"]
 
 [slack]
 channel_id = "C_TEST"

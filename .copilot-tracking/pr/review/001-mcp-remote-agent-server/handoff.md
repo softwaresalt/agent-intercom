@@ -354,7 +354,7 @@ if user_id.is_empty() {
 * Category: Reliability
 * Severity: 🟡 Medium
 
-When `.monocoque` directory doesn't exist at registration time, the watcher is "deferred" but no mechanism creates it later. Policy changes after server start aren't detected until restart. Document this limitation or implement lazy watcher creation (e.g., watch the parent directory for directory creation events).
+When `.agentrc` directory doesn't exist at registration time, the watcher is "deferred" but no mechanism creates it later. Policy changes after server start aren't detected until restart. Document this limitation or implement lazy watcher creation (e.g., watch the parent directory for directory creation events).
 
 ---
 

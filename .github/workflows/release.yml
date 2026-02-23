@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            binary_suffix: ""
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            binary_suffix: ".exe"
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            binary_suffix: ""
+
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            binary_suffix: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare archive (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_NAME="monocoque-agent-rc-${TAG}-${{ matrix.target }}.tar.gz"
+          STAGING="staging-${{ matrix.target }}"
+          mkdir -p "${STAGING}"
+          cp "target/${{ matrix.target }}/release/monocoque-agent-rc${{ matrix.binary_suffix }}" "${STAGING}/"
+          cp "target/${{ matrix.target }}/release/monocoque-ctl${{ matrix.binary_suffix }}" "${STAGING}/"
+          cp config.toml "${STAGING}/config.toml.example"
+          cp README.md "${STAGING}/"
+          tar -czf "${ARCHIVE_NAME}" -C "${STAGING}" .
+          echo "ASSET=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
+
+      - name: Prepare archive (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $tag = "$env:GITHUB_REF_NAME"
+          $archiveName = "monocoque-agent-rc-$tag-${{ matrix.target }}.zip"
+          $staging = "staging-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\monocoque-agent-rc${{ matrix.binary_suffix }}" "$staging\"
+          Copy-Item "target\${{ matrix.target }}\release\monocoque-ctl${{ matrix.binary_suffix }}" "$staging\"
+          Copy-Item "config.toml" "$staging\config.toml.example"
+          Copy-Item "README.md" "$staging\"
+          Compress-Archive -Path "$staging\*" -DestinationPath $archiveName
+          "ASSET=$archiveName" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-pre') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

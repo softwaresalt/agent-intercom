@@ -49,7 +49,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
-    let channel_id = context.service.effective_channel_id().to_owned();
+    let channel_id = context.service.effective_channel_id().map(str::to_owned);
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: WaitInput =
@@ -77,8 +77,8 @@ pub async fn handle(
             .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
 
         // ── Post waiting status to Slack ─────────────────────
-        if let Some(ref slack) = state.slack {
-            let channel = SlackChannelId(channel_id.clone());
+        if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
+            let channel = SlackChannelId(ch.clone());
             let mut message_blocks = vec![blocks::text_section(&format!(
                 "\u{23f8}\u{fe0f} *Agent Waiting*\n{}",
                 &input.message,
@@ -150,8 +150,8 @@ pub async fn handle(
                     );
 
                     // Notify Slack of timeout.
-                    if let Some(ref slack) = state.slack {
-                        let channel = SlackChannelId(channel_id.clone());
+                    if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
+                        let channel = SlackChannelId(ch.clone());
                         let msg = SlackMessage {
                             channel,
                             text: Some(format!(

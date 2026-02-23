@@ -32,7 +32,6 @@ http_port = 0
 ipc_name = "test-recovery"
 max_concurrent_sessions = 3
 host_cli = "echo"
-authorized_user_ids = ["U_OWNER"]
 
 [slack]
 channel_id = "C_TEST"

@@ -23,6 +23,14 @@
 				"approve": true,
 				"matchCommandLine": true
 			},
+			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json -RequireTasks -IncludeTasks$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
+			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
 			"Test-Path": true,
 			"cargo test": true,
 			"git commit": true,
@@ -34,13 +42,13 @@
 			"Group-Object": true,
 			"cargo audit": true,
 			"git ls-remote": true,
-			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
 			"git restore": true,
 			"Clear-Host": true,
-			"cargo build": true
+			"cargo build": true,
+			"/^cargo metadata --format-version 1 2>\\$null \\| python -c \"import json,sys; data=json\\.load\\(sys\\.stdin\\); pkgs=\\[p for p in data\\['packages'\\] if p\\['name'\\]=='rmcp'\\]; print\\(pkgs\\[0\\]\\['manifest_path'\\] if pkgs else 'not found'\\)\"$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
 		},
 		"powershell.cwd": "monocoque-agent-rc",
     "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,
@@ -57,5 +65,26 @@
     "chat.instructionsFilesLocations": {
         ".github/instructions": true,
         "lib/hve-core/.github/instructions": true
+    },
+  "mcp": {
+    "servers": {
+      "agent-rc": {
+        "type": "sse",
+        "url": "http://127.0.0.1:3000/sse?channel_id=C0AF15RHPF0"
+      },
+      "context7": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@upstash/context7-mcp"]
+      },
+      "microsoft-docs": {
+        "type": "http",
+        "url": "https://learn.microsoft.com/api/mcp"
+      },
+      "tavily": {
+        "type": "http",
+        "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=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"
+      }
     }
+  }
 }

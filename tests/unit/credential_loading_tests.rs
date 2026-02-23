@@ -14,7 +14,6 @@ http_port = 3000
 ipc_name = "monocoque-agent-rc"
 max_concurrent_sessions = 1
 host_cli = "claude"
-authorized_user_ids = ["U123"]
 
 [slack]
 channel_id = "C123"
@@ -62,6 +61,7 @@ async fn env_var_only_credential_loading() {
         std::env::set_var("SLACK_APP_TOKEN", "xapp-test-app-token");
         std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-bot-token");
         std::env::set_var("SLACK_TEAM_ID", "T_TEST_TEAM");
+        std::env::set_var("SLACK_MEMBER_IDS", "U_TEST");
     }
 
     let result = config.load_credentials().await;
@@ -73,12 +73,14 @@ async fn env_var_only_credential_loading() {
     assert_eq!(config.slack.app_token, "xapp-test-app-token");
     assert_eq!(config.slack.bot_token, "xoxb-test-bot-token");
     assert_eq!(config.slack.team_id, "T_TEST_TEAM");
+    assert_eq!(config.authorized_user_ids, vec!["U_TEST"]);
 
     // Clean up.
     unsafe {
         std::env::remove_var("SLACK_APP_TOKEN");
         std::env::remove_var("SLACK_BOT_TOKEN");
         std::env::remove_var("SLACK_TEAM_ID");
+        std::env::remove_var("SLACK_MEMBER_IDS");
     }
 }
 
@@ -95,6 +97,7 @@ async fn missing_required_credential_error_names_both_sources() {
         std::env::remove_var("SLACK_APP_TOKEN");
         std::env::remove_var("SLACK_BOT_TOKEN");
         std::env::remove_var("SLACK_TEAM_ID");
+        std::env::remove_var("SLACK_MEMBER_IDS");
     }
 
     let result = config.load_credentials().await;
@@ -130,6 +133,7 @@ async fn optional_team_id_absent_is_not_error() {
         std::env::set_var("SLACK_APP_TOKEN", "xapp-test-app-token");
         std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-bot-token");
         std::env::remove_var("SLACK_TEAM_ID");
+        std::env::set_var("SLACK_MEMBER_IDS", "U_TEST");
     }
 
     let result = config.load_credentials().await;
@@ -147,6 +151,7 @@ async fn optional_team_id_absent_is_not_error() {
     unsafe {
         std::env::remove_var("SLACK_APP_TOKEN");
         std::env::remove_var("SLACK_BOT_TOKEN");
+        std::env::remove_var("SLACK_MEMBER_IDS");
     }
 }
 

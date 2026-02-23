@@ -71,8 +71,10 @@ pub async fn spawn_session(
     );
     let created = session_repo.create(&session).await?;
 
-    // Build the SSE endpoint URL for the spawned agent.
-    let sse_url = format!("http://localhost:{http_port}/mcp");
+    // Build the SSE endpoint URL for the spawned agent.  The `session_id`
+    // query parameter tells the MCP server to associate this connection with
+    // the pre-created session rather than auto-creating a new one.
+    let sse_url = format!("http://localhost:{http_port}/sse?session_id={}", created.id);
 
     // Spawn the host CLI process.
     let mut cmd = Command::new(&config.host_cli);

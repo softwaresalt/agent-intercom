@@ -155,11 +155,11 @@
 
 ## 9. Configuration Architecture
 
-**Decision**: TOML global config (`config.toml`) + JSON workspace policy (`.monocoque/settings.json`).
+**Decision**: TOML global config (`config.toml`) + JSON workspace policy (`.agentrc/settings.json`).
 
 **Rationale**: Follows the existing technical spec's architecture. TOML for the server's global configuration (Slack tokens, workspace root, authorized users, command allowlist, timeouts). JSON for per-workspace auto-approve policies with JSON Schema validation. `notify` crate watches the workspace policy file for hot-reload.
 
-**Hierarchy**: Global `config.toml` defines the absolute security boundary. Workspace `.monocoque/settings.json` can only reduce friction within that boundary, never expand it. Runtime mode overrides supersede workspace policy.
+**Hierarchy**: Global `config.toml` defines the absolute security boundary. Workspace `.agentrc/settings.json` can only reduce friction within that boundary, never expand it. Runtime mode overrides supersede workspace policy.
 
 ## 10. Credential Storage (OS Keychain)
 
@@ -239,7 +239,7 @@ DELETE FROM session WHERE id = $id;
 
 1. **Session model**: Add `workspace_root: PathBuf` field (required, set at creation).
 2. **Tool context**: Thread `workspace_root` from the active session through all tool handlers instead of reading from `GlobalConfig`.
-3. **Policy loading**: `PolicyEvaluator` loads `.monocoque/settings.json` relative to the session's workspace root. `notify` watcher is registered per unique workspace root.
+3. **Policy loading**: `PolicyEvaluator` loads `.agentrc/settings.json` relative to the session's workspace root. `notify` watcher is registered per unique workspace root.
 4. **Checkpoint model**: Captures `workspace_root` at checkpoint time for restore fidelity.
 5. **Session spawning**: `/monocoque session-start` accepts an optional workspace path argument. Spawned agents receive workspace root via `MONOCOQUE_WORKSPACE_ROOT` environment variable.
 6. **Path validation**: `validate_path()` already accepts `workspace_root: &Path` — no change needed.
@@ -324,7 +324,7 @@ DELETE FROM session WHERE id = $id;
 
 - `monocoque/nudge` notification method prefix (the `monocoque` namespace is the product, not the binary name)
 - `monocoque-ctl` binary name (it's the control CLI, not the agent binary)
-- `.monocoque/` workspace config directory name
+- `.agentrc/` workspace config directory name
 - `/monocoque` Slack slash command prefix
 - Repository name (that's a separate GitHub operation, out of scope for the code rename)
 

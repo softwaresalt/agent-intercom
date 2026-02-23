@@ -10,15 +10,18 @@ use rmcp::handler::server::{
 };
 use rmcp::model::{
     CallToolRequestParam, CallToolResult, ListResourceTemplatesResult, ListResourcesResult,
-    ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam, ReadResourceResult, Tool,
+    ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam, ReadResourceResult,
+    ServerCapabilities, ServerInfo, Tool,
 };
-use rmcp::service::{RequestContext, RoleServer};
+use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use sqlx::SqlitePool;
 use tokio::sync::{oneshot, Mutex};
-use tracing::{info, info_span};
+use tracing::{info, info_span, warn};
 
 use crate::config::GlobalConfig;
+use crate::models::session::{Session, SessionMode, SessionStatus};
 use crate::orchestrator::stall_detector::StallDetectorHandle;
+use crate::persistence::session_repo::SessionRepo;
 use crate::slack::client::SlackService;
 
 /// Response payload delivered through a pending approval oneshot channel.
@@ -80,11 +83,20 @@ pub struct AppState {
     pub ipc_auth_token: Option<String>,
 }
 
+/// Owner ID assigned to sessions created by direct (non-spawned) agent connections.
+///
+/// Distinguishes locally-initiated sessions from sessions spawned via the Slack
+/// `/spawn` command (which use the operator's real Slack user ID).  Used by
+/// `on_initialized` to clean up stale direct-connection sessions on reconnect.
+const LOCAL_AGENT_OWNER: &str = "agent:local";
+
 /// MCP server implementation that exposes the nine monocoque-agent-rc tools.
 pub struct AgentRcServer {
     state: Arc<AppState>,
     /// Per-session Slack channel override supplied via SSE query parameter.
     channel_id_override: Option<String>,
+    /// Pre-existing session ID supplied by the spawner via SSE query parameter.
+    session_id_override: Option<String>,
 }
 
 impl AgentRcServer {
@@ -94,6 +106,7 @@ impl AgentRcServer {
         Self {
             state,
             channel_id_override: None,
+            session_id_override: None,
         }
     }
 
@@ -103,19 +116,45 @@ impl AgentRcServer {
         Self {
             state,
             channel_id_override: channel_id,
+            session_id_override: None,
         }
     }
 
-    /// Return the effective Slack channel ID for this session.
+    /// Create a new MCP server with per-session SSE query-parameter overrides.
     ///
-    /// If a per-session override was supplied (e.g. via the `channel_id`
-    /// query parameter on the SSE URL), it takes precedence over the
-    /// global `config.slack.channel_id`.
+    /// Used by the SSE transport when both a Slack channel and a pre-created
+    /// session ID are supplied as query parameters.
     #[must_use]
-    pub fn effective_channel_id(&self) -> &str {
-        self.channel_id_override
-            .as_deref()
-            .unwrap_or(&self.state.config.slack.channel_id)
+    pub fn with_overrides(
+        state: Arc<AppState>,
+        channel_id: Option<String>,
+        session_id: Option<String>,
+    ) -> Self {
+        Self {
+            state,
+            channel_id_override: channel_id,
+            session_id_override: session_id,
+        }
+    }
+
+    /// Return the effective Slack channel ID for this session, if one is
+    /// configured.
+    ///
+    /// Returns `Some` when a per-session override was supplied via the
+    /// `?channel_id=` SSE query parameter. Returns `None` when no
+    /// channel is available (e.g. stdio / local connections without a
+    /// workspace `mcp.json` channel).  The global `config.slack.channel_id`
+    /// is treated as absent when it is empty.
+    #[must_use]
+    pub fn effective_channel_id(&self) -> Option<&str> {
+        self.channel_id_override.as_deref().or_else(|| {
+            let ch = &self.state.config.slack.channel_id;
+            if ch.is_empty() {
+                None
+            } else {
+                Some(ch.as_str())
+            }
+        })
     }
 
     /// Access the shared application state.
@@ -377,6 +416,138 @@ impl AgentRcServer {
 }
 
 impl ServerHandler for AgentRcServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+            ..Default::default()
+        }
+    }
+
+    /// Auto-create or activate a session when the MCP handshake completes.
+    ///
+    /// Two cases are handled:
+    /// 1. **Spawned agent** (`session_id_override` is `Some`): the session was
+    ///    already created and activated by the Slack `/spawn` command before the
+    ///    child process connected.  We verify it exists and log the connection.
+    /// 2. **Direct connection** (Copilot Chat, Cursor, stdio, etc.): no prior
+    ///    session exists, so we auto-create and activate one using the configured
+    ///    `default_workspace_root`.
+    fn on_initialized(
+        &self,
+        _context: NotificationContext<RoleServer>,
+    ) -> impl Future<Output = ()> + Send + '_ {
+        let state = Arc::clone(&self.state);
+        let session_id_override = self.session_id_override.clone();
+        let is_remote = self.channel_id_override.is_some();
+
+        async move {
+            let session_repo = SessionRepo::new(Arc::clone(&state.db));
+
+            // ── Case 1: Spawned agent with a pre-created session ─────────────
+            if let Some(ref sid) = session_id_override {
+                match session_repo.get_by_id(sid).await {
+                    Ok(Some(session)) => {
+                        info!(
+                            session_id = %sid,
+                            status = ?session.status,
+                            "spawned agent connected to pre-created session"
+                        );
+                    }
+                    Ok(None) => {
+                        warn!(session_id = %sid, "pre-created session not found in database");
+                    }
+                    Err(err) => {
+                        warn!(%err, session_id = %sid, "failed to look up pre-created session");
+                    }
+                }
+                return;
+            }
+
+            // ── Case 2: Direct connection — auto-create a session ────────────
+            //
+            // Before creating, terminate any stale active direct-connection
+            // sessions left behind by prior window reloads or reconnections.
+            // Only sessions owned by LOCAL_AGENT_OWNER are cleaned up — spawned
+            // sessions (owned by real Slack users) are left untouched.
+            match session_repo.list_active().await {
+                Ok(stale_sessions) => {
+                    for stale in &stale_sessions {
+                        if stale.owner_user_id == LOCAL_AGENT_OWNER {
+                            match session_repo
+                                .set_terminated(&stale.id, SessionStatus::Terminated)
+                                .await
+                            {
+                                Ok(_) => {
+                                    info!(
+                                        session_id = %stale.id,
+                                        "terminated stale direct-connection session"
+                                    );
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        %err,
+                                        session_id = %stale.id,
+                                        "failed to terminate stale session"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(%err, "failed to query active sessions for stale cleanup");
+                }
+            }
+
+            let workspace_root = state
+                .config
+                .default_workspace_root()
+                .to_string_lossy()
+                .into_owned();
+            let mode = if is_remote {
+                SessionMode::Remote
+            } else {
+                SessionMode::Local
+            };
+            let session = Session::new(
+                LOCAL_AGENT_OWNER.to_owned(),
+                workspace_root,
+                Some("Direct agent connection".to_owned()),
+                mode,
+            );
+
+            match session_repo.create(&session).await {
+                Ok(created) => {
+                    match session_repo
+                        .update_status(&created.id, SessionStatus::Active)
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                session_id = %created.id,
+                                mode = ?mode,
+                                "auto-created session activated on direct connection"
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                %err,
+                                session_id = %created.id,
+                                "failed to activate auto-created session"
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(%err, "failed to auto-create session on direct connection");
+                }
+            }
+        }
+    }
+
     fn call_tool(
         &self,
         request: CallToolRequestParam,
@@ -430,10 +601,14 @@ impl ServerHandler for AgentRcServer {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListResourcesResult, rmcp::ErrorData>> + Send + '_ {
-        let channel_id = self.effective_channel_id().to_owned();
-        std::future::ready(Ok(crate::mcp::resources::slack_channel::list_resources(
-            &channel_id,
-        )))
+        let result = match self.effective_channel_id() {
+            Some(channel_id) => crate::mcp::resources::slack_channel::list_resources(channel_id),
+            None => ListResourcesResult {
+                resources: vec![],
+                next_cursor: None,
+            },
+        };
+        std::future::ready(Ok(result))
     }
 
     fn list_resource_templates(
@@ -453,17 +628,20 @@ impl ServerHandler for AgentRcServer {
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ReadResourceResult, rmcp::ErrorData>> + Send + '_ {
         let state = Arc::clone(&self.state);
-        let effective_channel = self.effective_channel_id().to_owned();
+        let effective_channel = self.effective_channel_id().map(str::to_owned);
         async move {
-            crate::mcp::resources::slack_channel::read_resource(
-                &request,
-                &state,
-                &effective_channel,
-            )
-            .await
-            .map_err(|err| {
-                rmcp::ErrorData::internal_error(format!("resource read failed: {err}"), None)
-            })
+            let channel = effective_channel.ok_or_else(|| {
+                rmcp::ErrorData::invalid_params(
+                    "no Slack channel configured for this session; \
+                     supply ?channel_id= in the SSE URL",
+                    None,
+                )
+            })?;
+            crate::mcp::resources::slack_channel::read_resource(&request, &state, &channel)
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(format!("resource read failed: {err}"), None)
+                })
         }
     }
 }

@@ -277,7 +277,7 @@ fn progress_status_serialization() {
 fn workspace_policy_from_json() {
     let json = r#"{
         "enabled": true,
-        "commands": ["cargo test"],
+        "auto_approve_commands": ["cargo test"],
         "tools": ["write_file"],
         "file_patterns": {
             "write": ["src/**/*.rs"],
@@ -291,7 +291,7 @@ fn workspace_policy_from_json() {
     let policy: WorkspacePolicy = serde_json::from_str(json).expect("deserialize");
 
     assert!(policy.enabled);
-    assert_eq!(policy.commands, vec!["cargo test"]);
+    assert_eq!(policy.auto_approve_commands, vec!["cargo test"]);
     assert_eq!(policy.risk_level_threshold, RiskLevel::High);
     assert_eq!(policy.summary_interval_seconds, 600);
 }
@@ -301,7 +301,7 @@ fn workspace_policy_defaults() {
     let policy: WorkspacePolicy = serde_json::from_str("{}").expect("deserialize empty");
 
     assert!(!policy.enabled);
-    assert!(policy.commands.is_empty());
+    assert!(policy.auto_approve_commands.is_empty());
     assert!(policy.tools.is_empty());
     assert_eq!(policy.risk_level_threshold, RiskLevel::Low);
     assert_eq!(policy.summary_interval_seconds, 300);
@@ -313,7 +313,7 @@ fn workspace_policy_partial_json() {
     let policy: WorkspacePolicy = serde_json::from_str(json).expect("deserialize partial");
 
     assert!(policy.enabled);
-    assert!(policy.commands.is_empty());
+    assert!(policy.auto_approve_commands.is_empty());
     assert_eq!(policy.risk_level_threshold, RiskLevel::Low);
 }
 

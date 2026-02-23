@@ -50,7 +50,7 @@ pub async fn handle(
     context: ToolCallContext<'_, AgentRcServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
-    let channel_id = context.service.effective_channel_id().to_owned();
+    let channel_id = context.service.effective_channel_id().map(str::to_owned);
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: ForwardPromptInput = serde_json::from_value(serde_json::Value::Object(args))
@@ -96,8 +96,8 @@ pub async fn handle(
         })?;
 
         // ── Post to Slack ────────────────────────────────────
-        if let Some(ref slack) = state.slack {
-            let channel = SlackChannelId(channel_id.clone());
+        if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
+            let channel = SlackChannelId(ch.clone());
             let message_blocks = build_prompt_blocks(
                 &input.prompt_text,
                 input.prompt_type,
@@ -161,8 +161,8 @@ pub async fn handle(
                     .update_decision(&prompt_id, PromptDecision::Continue, None)
                     .await;
 
-                if let Some(ref slack) = state.slack {
-                    let channel = SlackChannelId(channel_id.clone());
+                if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
+                    let channel = SlackChannelId(ch.clone());
                     let msg = SlackMessage {
                         channel,
                         text: Some(format!(

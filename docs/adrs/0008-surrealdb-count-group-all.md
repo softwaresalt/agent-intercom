@@ -1,6 +1,6 @@
 # ADR-0008: SurrealDB COUNT() Requires GROUP ALL for Single Aggregate
 
-**Status**: Accepted
+**Status**: Superseded — SurrealDB replaced by SQLite via sqlx (see specs/002-sqlite-migration)
 **Date**: 2026-02-11
 **Phase**: 9 (User Story 7), Tasks T119, T068
 

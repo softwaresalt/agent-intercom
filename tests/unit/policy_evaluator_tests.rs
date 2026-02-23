@@ -1,10 +1,7 @@
 //! Unit tests for policy evaluator (T117).
 //!
 //! Validates command matching, tool matching, file pattern glob matching,
-//! `risk_level_threshold` enforcement, and global config superseding
-//! workspace config.
-
-use std::collections::HashMap;
+//! and `risk_level_threshold` enforcement.
 
 use monocoque_agent_rc::models::approval::RiskLevel;
 use monocoque_agent_rc::models::policy::{FilePatterns, WorkspacePolicy};
@@ -14,7 +11,7 @@ use monocoque_agent_rc::policy::evaluator::{AutoApproveContext, PolicyEvaluator}
 fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> WorkspacePolicy {
     WorkspacePolicy {
         enabled,
-        commands: commands.iter().map(|s| (*s).to_owned()).collect(),
+        auto_approve_commands: commands.iter().map(|s| (*s).to_owned()).collect(),
         tools: tools.iter().map(|s| (*s).to_owned()).collect(),
         file_patterns: FilePatterns::default(),
         risk_level_threshold: RiskLevel::Low,
@@ -23,45 +20,118 @@ fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> WorkspacePolicy {
     }
 }
 
-/// Helper to build a global commands allowlist.
-fn allowlist(commands: &[&str]) -> HashMap<String, String> {
-    commands
-        .iter()
-        .map(|c| ((*c).to_owned(), (*c).to_owned()))
-        .collect()
-}
-
 // ─── Command matching ─────────────────────────────────────────────────
 
 #[test]
 fn command_in_policy_is_auto_approved() {
-    let wp = policy(true, &["cargo test"], &[]);
-    let global = allowlist(&["cargo test"]);
+    let wp = policy(true, &["^cargo test$"], &[]);
 
-    let result = PolicyEvaluator::check("cargo test", &None, &wp, &global);
+    let result = PolicyEvaluator::check("cargo test", &None, &wp);
     assert!(result.auto_approved);
-    assert_eq!(result.matched_rule.as_deref(), Some("command:cargo test"));
+    assert_eq!(result.matched_rule.as_deref(), Some("command:^cargo test$"));
 }
 
 #[test]
 fn command_not_in_policy_is_denied() {
-    let wp = policy(true, &["cargo test"], &[]);
-    let global = allowlist(&["cargo test", "cargo clippy"]);
+    let wp = policy(true, &["^cargo test$"], &[]);
 
-    let result = PolicyEvaluator::check("cargo clippy", &None, &wp, &global);
+    let result = PolicyEvaluator::check("cargo clippy", &None, &wp);
     assert!(!result.auto_approved);
     assert!(result.matched_rule.is_none());
 }
 
-#[test]
-fn command_not_in_global_allowlist_denied_even_if_in_policy() {
-    let wp = policy(true, &["rm -rf /"], &[]);
-    let global = HashMap::new(); // Empty global allowlist.
+// ─── Regex command matching ───────────────────────────────────────────
 
-    let result = PolicyEvaluator::check("rm -rf /", &None, &wp, &global);
+#[test]
+fn regex_pattern_matches_cargo_subcommands() {
+    let wp = policy(
+        true,
+        &[r"^cargo (build|test|check|clippy|fmt)(\s[^;|&`]*)?$"],
+        &[],
+    );
+
+    // Bare cargo subcommand
+    assert!(PolicyEvaluator::check("cargo test", &None, &wp).auto_approved);
+    // Cargo subcommand with arguments
+    assert!(PolicyEvaluator::check("cargo test --release", &None, &wp).auto_approved);
+    // Cargo subcommand with additional flags
+    assert!(PolicyEvaluator::check("cargo clippy -- -D warnings", &None, &wp).auto_approved);
+    // Different subcommand
+    assert!(PolicyEvaluator::check("cargo fmt", &None, &wp).auto_approved);
+}
+
+#[test]
+fn regex_pattern_rejects_disallowed_commands() {
+    let wp = policy(
+        true,
+        &[r"^cargo (build|test|check|clippy|fmt)(\s[^;|&`]*)?$"],
+        &[],
+    );
+
+    // Not in the allowed subcommands
+    assert!(!PolicyEvaluator::check("cargo install malware", &None, &wp).auto_approved);
+    // Chained with semicolons (blocked by character class)
+    assert!(!PolicyEvaluator::check("cargo test; rm -rf /", &None, &wp).auto_approved);
+    // Completely different command
+    assert!(!PolicyEvaluator::check("rm -rf /", &None, &wp).auto_approved);
+}
+
+#[test]
+fn regex_pattern_matches_piped_output() {
+    let wp = policy(
+        true,
+        &[
+            r"^cargo (build|test|check|clippy|fmt)(\s[^;|&`]*)?(\s*(>|>>|2>&1|\|\s*(Out-File|Set-Content|Out-String))\s*[^;|&`]*)*$",
+        ],
+        &[],
+    );
+
     assert!(
-        !result.auto_approved,
-        "global config must supersede workspace config (FR-011)"
+        PolicyEvaluator::check(
+            r"cargo test 2>&1 | Out-File logs\test-results.txt",
+            &None,
+            &wp,
+        )
+        .auto_approved
+    );
+    assert!(PolicyEvaluator::check("cargo check > logs/check.txt 2>&1", &None, &wp).auto_approved);
+}
+
+#[test]
+fn regex_pattern_matches_git_with_args() {
+    let wp = policy(
+        true,
+        &[r"^git (status|add|commit|diff|log|push)(\s[^;|&`]*)?$"],
+        &[],
+    );
+
+    assert!(PolicyEvaluator::check("git status", &None, &wp).auto_approved);
+    assert!(PolicyEvaluator::check("git commit -m \"fix: patch\"", &None, &wp).auto_approved);
+    assert!(PolicyEvaluator::check("git add src/main.rs", &None, &wp).auto_approved);
+    assert!(!PolicyEvaluator::check("git rebase main", &None, &wp).auto_approved);
+}
+
+#[test]
+fn invalid_regex_is_skipped() {
+    // Malformed regex (unmatched parenthesis) should be skipped, not panic
+    let wp = policy(true, &["^cargo (build|test", "^git status$"], &[]);
+
+    // The invalid regex is skipped, but the second pattern still matches
+    assert!(PolicyEvaluator::check("git status", &None, &wp).auto_approved);
+    // The invalid first pattern doesn't match (it's skipped)
+    assert!(!PolicyEvaluator::check("cargo build", &None, &wp).auto_approved);
+}
+
+#[test]
+fn multiple_regex_patterns_first_match_wins() {
+    let wp = policy(true, &[r"^cargo test$", r"^cargo (build|test|check)"], &[]);
+
+    let result = PolicyEvaluator::check("cargo test", &None, &wp);
+    assert!(result.auto_approved);
+    assert_eq!(
+        result.matched_rule.as_deref(),
+        Some("command:^cargo test$"),
+        "should match the first pattern"
     );
 }
 
@@ -70,9 +140,8 @@ fn command_not_in_global_allowlist_denied_even_if_in_policy() {
 #[test]
 fn tool_in_policy_is_auto_approved() {
     let wp = policy(true, &[], &["remote_log"]);
-    let global = HashMap::new();
 
-    let result = PolicyEvaluator::check("remote_log", &None, &wp, &global);
+    let result = PolicyEvaluator::check("remote_log", &None, &wp);
     assert!(result.auto_approved);
     assert_eq!(result.matched_rule.as_deref(), Some("tool:remote_log"));
 }
@@ -80,9 +149,8 @@ fn tool_in_policy_is_auto_approved() {
 #[test]
 fn tool_not_in_policy_is_denied() {
     let wp = policy(true, &[], &["remote_log"]);
-    let global = HashMap::new();
 
-    let result = PolicyEvaluator::check("ask_approval", &None, &wp, &global);
+    let result = PolicyEvaluator::check("ask_approval", &None, &wp);
     assert!(!result.auto_approved);
 }
 
@@ -98,13 +166,12 @@ fn write_file_pattern_matches() {
         },
         ..WorkspacePolicy::default()
     };
-    let global = HashMap::new();
     let ctx = Some(AutoApproveContext {
         file_path: Some("src/main.rs".to_owned()),
         risk_level: None,
     });
 
-    let result = PolicyEvaluator::check("write_file", &ctx, &wp, &global);
+    let result = PolicyEvaluator::check("write_file", &ctx, &wp);
     assert!(result.auto_approved);
     assert!(
         result
@@ -126,13 +193,12 @@ fn write_file_pattern_no_match() {
         },
         ..WorkspacePolicy::default()
     };
-    let global = HashMap::new();
     let ctx = Some(AutoApproveContext {
         file_path: Some("src/main.rs".to_owned()),
         risk_level: None,
     });
 
-    let result = PolicyEvaluator::check("write_file", &ctx, &wp, &global);
+    let result = PolicyEvaluator::check("write_file", &ctx, &wp);
     assert!(!result.auto_approved);
 }
 
@@ -146,13 +212,12 @@ fn read_file_pattern_matches() {
         },
         ..WorkspacePolicy::default()
     };
-    let global = HashMap::new();
     let ctx = Some(AutoApproveContext {
         file_path: Some("any/file.txt".to_owned()),
         risk_level: None,
     });
 
-    let result = PolicyEvaluator::check("read_file", &ctx, &wp, &global);
+    let result = PolicyEvaluator::check("read_file", &ctx, &wp);
     assert!(result.auto_approved);
 }
 
@@ -166,13 +231,12 @@ fn risk_exceeding_threshold_denied() {
         risk_level_threshold: RiskLevel::Low,
         ..WorkspacePolicy::default()
     };
-    let global = HashMap::new();
     let ctx = Some(AutoApproveContext {
         file_path: None,
         risk_level: Some("high".to_owned()),
     });
 
-    let result = PolicyEvaluator::check("ask_approval", &ctx, &wp, &global);
+    let result = PolicyEvaluator::check("ask_approval", &ctx, &wp);
     assert!(
         !result.auto_approved,
         "high risk should be denied when threshold is low"
@@ -187,13 +251,12 @@ fn risk_within_threshold_approved() {
         risk_level_threshold: RiskLevel::High,
         ..WorkspacePolicy::default()
     };
-    let global = HashMap::new();
     let ctx = Some(AutoApproveContext {
         file_path: None,
         risk_level: Some("low".to_owned()),
     });
 
-    let result = PolicyEvaluator::check("ask_approval", &ctx, &wp, &global);
+    let result = PolicyEvaluator::check("ask_approval", &ctx, &wp);
     assert!(result.auto_approved);
 }
 
@@ -205,13 +268,12 @@ fn critical_risk_always_denied() {
         risk_level_threshold: RiskLevel::High,
         ..WorkspacePolicy::default()
     };
-    let global = HashMap::new();
     let ctx = Some(AutoApproveContext {
         file_path: None,
         risk_level: Some("critical".to_owned()),
     });
 
-    let result = PolicyEvaluator::check("ask_approval", &ctx, &wp, &global);
+    let result = PolicyEvaluator::check("ask_approval", &ctx, &wp);
     assert!(
         !result.auto_approved,
         "critical risk should always be denied"
@@ -223,9 +285,8 @@ fn critical_risk_always_denied() {
 #[test]
 fn disabled_policy_denies_everything() {
     let wp = policy(false, &["cargo test"], &["remote_log"]);
-    let global = allowlist(&["cargo test"]);
 
-    let result = PolicyEvaluator::check("cargo test", &None, &wp, &global);
+    let result = PolicyEvaluator::check("cargo test", &None, &wp);
     assert!(
         !result.auto_approved,
         "disabled policy must deny all operations"
@@ -237,11 +298,10 @@ fn disabled_policy_denies_everything() {
 #[test]
 fn no_context_still_matches_commands_and_tools() {
     let wp = policy(true, &["cargo test"], &["remote_log"]);
-    let global = allowlist(&["cargo test"]);
 
-    let cmd_result = PolicyEvaluator::check("cargo test", &None, &wp, &global);
+    let cmd_result = PolicyEvaluator::check("cargo test", &None, &wp);
     assert!(cmd_result.auto_approved);
 
-    let tool_result = PolicyEvaluator::check("remote_log", &None, &wp, &global);
+    let tool_result = PolicyEvaluator::check("remote_log", &None, &wp);
     assert!(tool_result.auto_approved);
 }
