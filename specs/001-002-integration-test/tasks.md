@@ -104,10 +104,10 @@
 
 **Purpose**: Final validation across all test tiers
 
-- [ ] T029 Run full `cargo test` and verify zero failures across all tiers (unit + contract + integration)
-- [ ] T030 Run `cargo clippy -- -D warnings` and verify zero warnings across entire workspace
-- [ ] T031 Run `cargo fmt --all -- --check` and verify no formatting violations
-- [ ] T032 Verify existing tests (23 integration modules) are unaffected — zero regressions
+- [X] T029 Run full `cargo test` and verify zero failures across all tiers (unit + contract + integration)
+- [X] T030 Run `cargo clippy -- -D warnings` and verify zero warnings across entire workspace
+- [X] T031 Run `cargo fmt --all -- --check` and verify no formatting violations
+- [X] T032 Verify existing tests (23 integration modules) are unaffected — zero regressions
 
 **Checkpoint**: All quality gates pass. FR-012 and FR-013 satisfied.
 
