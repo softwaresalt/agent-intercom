@@ -254,6 +254,10 @@ Never write production code before the corresponding test exists and has been ob
 
 When the monocoque-agent-rc MCP server is running, agents **must** route all file modifications through the remote approval workflow instead of writing files directly. This allows the operator to review and approve every change via Slack before it touches the filesystem.
 
+Additionally, **do not write multiple files in a single proposal.** Each file change must be proposed, reviewed, and approved separately to ensure clear audit trails and granular control.  Further, when modifying existing files, always generate a unified diff rather than sending the full file content. This provides better context for reviewers and reduces the risk of unintended changes.
+
+For terminal commands, **never chain multiple commands together**. Each command must be submitted separately to the `evaluate_command` tool for proper policy evaluation and approval. If the terminal command is **not** already auto-approved for the current workspace or current working directory**, it may be executed directly without approval, but still must not be chained with other commands unless those commands are effectively piping output.
+
 ### Required Call Sequence
 
 ```text

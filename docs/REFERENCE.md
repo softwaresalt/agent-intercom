@@ -164,7 +164,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 **Behavior:**
 
 1. Resolves the active session's `workspace_root`.
-2. Loads the workspace policy from `.monocoque/settings.json`.
+2. Loads the workspace policy from `.agentrc/settings.json`.
 3. Evaluates the policy (see [Policy System](#10-policy-system) for evaluation order).
 4. Returns immediately with the result.
 
@@ -1185,7 +1185,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 ### 10.1 Policy File
 
-**Location:** `{workspace_root}/.monocoque/settings.json`
+**Location:** `{workspace_root}/.agentrc/settings.json`
 
 **Example:**
 
@@ -1206,7 +1206,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 ### 10.2 Policy Loader
 
-**File:** `.monocoque/settings.json` relative to workspace root.
+**File:** `.agentrc/settings.json` relative to workspace root.
 
 | Condition | Behavior |
 |---|---|
@@ -1238,11 +1238,11 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 **Library:** `notify` crate (recommended watcher).
 
 **Behavior:**
-- Watches the `.monocoque/` directory per workspace for file create/modify/remove events on `settings.json`.
+- Watches the `.agentrc/` directory per workspace for file create/modify/remove events on `settings.json`.
 - On change, reloads the policy via `PolicyLoader` and updates the in-memory cache.
 - Cache type: `PolicyCache = Arc<RwLock<HashMap<PathBuf, WorkspacePolicy>>>`.
 - Watchers are registered when sessions start and unregistered when sessions terminate.
-- If `.monocoque/` directory doesn't exist yet, the watcher is stored but deferred.
+- If `.agentrc/` directory doesn't exist yet, the watcher is stored but deferred.
 
 ---
 

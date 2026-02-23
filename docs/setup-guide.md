@@ -306,7 +306,7 @@ You should see an approval message with **Accept** and **Reject** buttons in you
 
 ## 8. Workspace Auto-Approve Policy (Optional)
 
-Create `.monocoque/settings.json` in your workspace root to define auto-approve rules:
+Create `.agentrc/settings.json` in your workspace root to define auto-approve rules:
 
 ```json
 {

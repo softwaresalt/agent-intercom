@@ -227,7 +227,7 @@ The server monitors agent activity and alerts you when an agent goes idle.
 
 ## Auto-Approve Policy
 
-Create `.monocoque/settings.json` in your workspace root to let low-risk operations bypass the approval gate.
+Create `.agentrc/settings.json` in your workspace root to let low-risk operations bypass the approval gate.
 
 ```json
 {

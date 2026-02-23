@@ -195,8 +195,7 @@ async fn auto_approve_malformed_policy_denies_all() {
 
     let agentrc_dir = root.join(".agentrc");
     std::fs::create_dir_all(&agentrc_dir).expect("create dir");
-    std::fs::write(agentrc_dir.join("settings.json"), "not valid json {{{")
-        .expect("write policy");
+    std::fs::write(agentrc_dir.join("settings.json"), "not valid json {{{").expect("write policy");
 
     let commands = HashMap::new();
     let policy = PolicyLoader::load(root, &commands).expect("load policy");
