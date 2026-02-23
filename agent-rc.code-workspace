@@ -23,6 +23,14 @@
 				"approve": true,
 				"matchCommandLine": true
 			},
+			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json -RequireTasks -IncludeTasks$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
+			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
 			"Test-Path": true,
 			"cargo test": true,
 			"git commit": true,
@@ -34,14 +42,10 @@
 			"Group-Object": true,
 			"cargo audit": true,
 			"git ls-remote": true,
-			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
 			"git restore": true,
 			"Clear-Host": true,
 			"cargo build": true,
-			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json -RequireTasks -IncludeTasks$/": {
+			"/^cargo metadata --format-version 1 2>\\$null \\| python -c \"import json,sys; data=json\\.load\\(sys\\.stdin\\); pkgs=\\[p for p in data\\['packages'\\] if p\\['name'\\]=='rmcp'\\]; print\\(pkgs\\[0\\]\\['manifest_path'\\] if pkgs else 'not found'\\)\"$/": {
 				"approve": true,
 				"matchCommandLine": true
 			}
