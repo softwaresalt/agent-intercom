@@ -19,6 +19,10 @@ The operator's expected action is stated in **bold**.
 
 **Expected:** `acknowledged: true` returned, status message posted to Slack channel.
 
+**Known failure modes:**
+- `"multiple active sessions found"` — Restart the server or close duplicate MCP connections. Record as FAIL and continue; this error does not mean the server is down, so subsequent scenarios may still pass.
+- Connection refused / timeout — Server is not running. Record as FAIL and continue; remaining scenarios will likely also fail.
+
 ---
 
 ## Scenario 2: Remote Log Delivery
@@ -73,6 +77,8 @@ The operator's expected action is stated in **bold**.
 
 **Expected:** Approved, file written to `tests/fixtures/hitl-test-file.txt`.
 
+**Error resilience:** `ask_approval` is a blocking call. If the server is unresponsive or the operator does not respond, this call will hang. If no response is received within a reasonable time, record as FAIL/TIMEOUT and continue to the next scenario.
+
 **Operator validates:**
 - [ ] Block Kit message appeared with title, diff preview, and Approve/Reject buttons
 - [ ] Buttons were replaced with approved status after clicking Approve
@@ -117,6 +123,8 @@ The operator's expected action is stated in **bold**.
 
 **Expected:** Operator's reply text is returned to the agent.
 
+**Error resilience:** `forward_prompt` is a blocking call. If the server is unresponsive or the operator does not reply, this call will hang indefinitely. If no response is received within a reasonable time, record as FAIL/TIMEOUT and continue to the next scenario.
+
 **Operator validates:**
 - [ ] Question appeared in Slack with a reply mechanism
 - [ ] Reply was straightforward to submit
@@ -134,6 +142,8 @@ The operator's expected action is stated in **bold**.
 4. Verify the response contains the operator's instruction text
 
 **Expected:** Operator's message is returned as the instruction.
+
+**Error resilience:** `wait_for_instruction` is a blocking call with a `timeout_seconds` parameter. If the operator does not respond within the timeout, the call should return a timeout response. If the MCP server itself is unresponsive and the call hangs beyond the timeout, record as FAIL/TIMEOUT and continue to the next scenario.
 
 **Operator validates:**
 - [ ] Waiting status message appeared in Slack

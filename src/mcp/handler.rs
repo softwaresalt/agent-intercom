@@ -460,6 +460,41 @@ impl ServerHandler for AgentRcServer {
             }
 
             // ── Case 2: Direct connection — auto-create a session ────────────
+            //
+            // Before creating, terminate any stale active direct-connection
+            // sessions left behind by prior window reloads or reconnections.
+            // Only sessions owned by "agent:local" are cleaned up — spawned
+            // sessions (owned by real Slack users) are left untouched.
+            match session_repo.list_active().await {
+                Ok(stale_sessions) => {
+                    for stale in &stale_sessions {
+                        if stale.owner_user_id == "agent:local" {
+                            match session_repo
+                                .set_terminated(&stale.id, SessionStatus::Terminated)
+                                .await
+                            {
+                                Ok(_) => {
+                                    info!(
+                                        session_id = %stale.id,
+                                        "terminated stale direct-connection session"
+                                    );
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        %err,
+                                        session_id = %stale.id,
+                                        "failed to terminate stale session"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(%err, "failed to query active sessions for stale cleanup");
+                }
+            }
+
             let workspace_root = state
                 .config
                 .default_workspace_root()

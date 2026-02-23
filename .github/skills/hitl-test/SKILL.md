@@ -42,12 +42,15 @@ Load scenarios from `.github/skills/hitl-test/scenarios.md`.
 
 For each scenario:
 
-1. Call `remote_log` with `message: "[TEST] Starting scenario {N}: {name}"`, `level: "info"`
-2. Execute the scenario steps exactly as defined in scenarios.md
-3. Validate the response against the expected outcomes listed in the scenario
-4. Record the result as PASS or FAIL with details about what matched or diverged
-5. Call `remote_log` with `message: "[TEST] Result: {PASS|FAIL} — {name} — {details}"`, `level: "success"` for PASS or `level: "warning"` for FAIL
-6. If a scenario fails, **continue to the next scenario** — do not halt the suite
+1. **Announce in chat:** Output `"▶ Scenario {N}: {name}"` in the chat response so the developer has visibility regardless of MCP state.
+2. **Best-effort MCP log:** Call `remote_log` with `message: "[TEST] Starting scenario {N}: {name}"`, `level: "info"`. If **this call fails or hangs**, skip it — do not let a logging failure stall the suite.
+3. Execute the scenario steps exactly as defined in scenarios.md.
+4. Validate the response against the expected outcomes listed in the scenario.
+5. Record the result as PASS or FAIL with details about what matched or diverged.
+6. **Report result in chat first**, then best-effort via `remote_log` with `message: "[TEST] Result: {PASS|FAIL} — {name} — {details}"`, `level: "success"` for PASS or `level: "warning"` for FAIL.
+7. If a scenario fails, **continue to the next scenario** — do not halt the suite.
+
+**Critical rule:** Chat output is the primary reporting channel. `remote_log` calls during scenario execution are supplementary. If any `remote_log` call returns an error, log the error in chat and proceed — never retry a failed `remote_log` or block on it.
 
 ### Step 4: Produce Summary
 
@@ -70,8 +73,10 @@ Also output the summary in the chat for the developer to review.
 
 ### Step 5: Cleanup
 
-1. Call `set_operational_mode` with `mode: "remote"` to restore the default mode if it was changed during testing.
-2. Call `remote_log` with `message: "[HITL TEST] Suite complete. {passed}/{total} passed."`, `level: "success"` if all passed or `level: "warning"` if any failed.
+1. Call `set_operational_mode` with `mode: "remote"` to restore the default mode if it was changed during testing. If this call fails, note it in chat and continue.
+2. Call `remote_log` with `message: "[HITL TEST] Suite complete. {passed}/{total} passed."`, `level: "success"` if all passed or `level: "warning"` if any failed. If this call fails, the chat summary from Step 4 is sufficient.
+
+**If the MCP server became unresponsive during the suite**, skip all Step 5 calls entirely — they will also hang. The chat summary is the authoritative record.
 
 ## Error Handling
 
@@ -79,9 +84,23 @@ Also output the summary in the chat for the developer to review.
 |---|---|
 | `heartbeat` fails | Halt — server not running |
 | Operator does not respond to readiness prompt | Re-prompt once after 30 seconds, then halt |
-| Individual scenario tool call fails | Record as FAIL, continue to next scenario |
+| Individual scenario tool call fails | Record as FAIL **in chat**, best-effort `remote_log`, continue to next scenario |
+| `remote_log` itself fails | Log the error **in chat only** and continue — never stall on a logging call |
 | `accept_diff` returns `patch_conflict` | Record as FAIL with details, continue |
 | Operator rejects when approval was expected (or vice versa) | Record as FAIL — this tests the operator following instructions |
+| Any MCP tool call hangs (no response) | If no response within a reasonable time, record as FAIL/TIMEOUT in chat, skip remaining steps for that scenario, continue to next scenario |
+
+### Error Containment Principle
+
+Every MCP tool call during scenario execution is **independently failable**. A failure in one call must never prevent the agent from:
+1. Recording the result in chat
+2. Moving to the next scenario
+3. Producing the final summary
+
+If the MCP server becomes entirely unresponsive mid-suite, the agent should:
+1. Record all remaining scenarios as SKIP (server unresponsive)
+2. Output the summary table in chat
+3. Do **not** attempt Step 5 cleanup calls — they will also hang
 
 ## Notes
 
