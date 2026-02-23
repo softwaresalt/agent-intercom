@@ -83,6 +83,13 @@ pub struct AppState {
     pub ipc_auth_token: Option<String>,
 }
 
+/// Owner ID assigned to sessions created by direct (non-spawned) agent connections.
+///
+/// Distinguishes locally-initiated sessions from sessions spawned via the Slack
+/// `/spawn` command (which use the operator's real Slack user ID).  Used by
+/// `on_initialized` to clean up stale direct-connection sessions on reconnect.
+const LOCAL_AGENT_OWNER: &str = "agent:local";
+
 /// MCP server implementation that exposes the nine monocoque-agent-rc tools.
 pub struct AgentRcServer {
     state: Arc<AppState>,
@@ -463,12 +470,12 @@ impl ServerHandler for AgentRcServer {
             //
             // Before creating, terminate any stale active direct-connection
             // sessions left behind by prior window reloads or reconnections.
-            // Only sessions owned by "agent:local" are cleaned up — spawned
+            // Only sessions owned by LOCAL_AGENT_OWNER are cleaned up — spawned
             // sessions (owned by real Slack users) are left untouched.
             match session_repo.list_active().await {
                 Ok(stale_sessions) => {
                     for stale in &stale_sessions {
-                        if stale.owner_user_id == "agent:local" {
+                        if stale.owner_user_id == LOCAL_AGENT_OWNER {
                             match session_repo
                                 .set_terminated(&stale.id, SessionStatus::Terminated)
                                 .await
@@ -506,7 +513,7 @@ impl ServerHandler for AgentRcServer {
                 SessionMode::Local
             };
             let session = Session::new(
-                "agent:local".to_owned(),
+                LOCAL_AGENT_OWNER.to_owned(),
                 workspace_root,
                 Some("Direct agent connection".to_owned()),
                 mode,

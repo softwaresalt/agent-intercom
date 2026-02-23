@@ -205,50 +205,32 @@ default_nudge_message = "continue"
     assert!(result.is_err());
 }
 
-#[tokio::test]
-#[serial_test::serial]
-#[allow(unsafe_code)]
-async fn rejects_unauthorized_user() {
+#[test]
+fn rejects_unauthorized_user() {
     let temp = tempfile::tempdir().expect("tempdir");
     let toml = sample_toml(temp.path().to_str().expect("utf8 path"));
     let mut config = GlobalConfig::from_toml_str(&toml).expect("config parses");
 
-    unsafe {
-        std::env::set_var("SLACK_MEMBER_IDS", "U123,U456");
-    }
-    config.load_authorized_users().expect("load users");
+    config.authorized_user_ids = vec!["U123".into(), "U456".into()];
 
     let result = config.ensure_authorized("U999");
     match result {
         Err(AppError::Unauthorized(_)) => {}
         other => panic!("expected unauthorized error, got {other:?}"),
     }
-
-    unsafe {
-        std::env::remove_var("SLACK_MEMBER_IDS");
-    }
 }
 
-#[tokio::test]
-#[serial_test::serial]
-#[allow(unsafe_code)]
-async fn allows_authorized_user() {
+#[test]
+fn allows_authorized_user() {
     let temp = tempfile::tempdir().expect("tempdir");
     let toml = sample_toml(temp.path().to_str().expect("utf8 path"));
     let mut config = GlobalConfig::from_toml_str(&toml).expect("config parses");
 
-    unsafe {
-        std::env::set_var("SLACK_MEMBER_IDS", "U123,U456");
-    }
-    config.load_authorized_users().expect("load users");
+    config.authorized_user_ids = vec!["U123".into(), "U456".into()];
 
     config
         .ensure_authorized("U123")
         .expect("user should be authorized");
-
-    unsafe {
-        std::env::remove_var("SLACK_MEMBER_IDS");
-    }
 }
 
 #[tokio::test]

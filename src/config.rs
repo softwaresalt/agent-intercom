@@ -172,7 +172,11 @@ pub struct GlobalConfig {
     /// Default arguments for the host CLI.
     #[serde(default)]
     pub host_cli_args: Vec<String>,
-    /// Registry of allowed commands.
+    /// Registry of Slack slash-command aliases for the `/run` command (FR-014).
+    ///
+    /// Maps a short alias (e.g. `status`) to a shell command string (e.g. `git status -s`).
+    /// Invoked by the Slack command handler only — has no effect on MCP
+    /// auto-approve policy (see ADR-0012).
     #[serde(default)]
     pub commands: HashMap<String, String>,
     /// HTTP port for the SSE transport.
@@ -254,6 +258,13 @@ impl GlobalConfig {
     ///
     /// Returns `AppError::Config` if the variable is absent, empty, or
     /// resolves to an empty list after trimming.
+    ///
+    /// # Note
+    ///
+    /// This function is `pub` to allow direct testing from the integration
+    /// test crate.  It is an internal implementation detail of
+    /// [`load_credentials`] and is not part of the public API contract.
+    #[doc(hidden)]
     pub fn load_authorized_users(&mut self) -> Result<()> {
         let raw = env::var("SLACK_MEMBER_IDS").unwrap_or_default();
         let ids: Vec<String> = raw

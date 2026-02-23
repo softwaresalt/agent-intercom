@@ -9,6 +9,18 @@
 //! - Direct connection in local mode → session has Local mode
 //! - Auto-created session uses config `default_workspace_root`
 //! - Direct connection terminates stale active direct-connection sessions
+//!
+//! # Coverage note
+//!
+//! `AgentRcServer::on_initialized` cannot be invoked directly in tests because
+//! `NotificationContext<RoleServer>` requires a live MCP transport to construct.
+//! These tests verify the constituent repository operations that `on_initialized`
+//! delegates to (session creation, status update, stale-cleanup) rather than the
+//! method's control flow itself.  A logic regression in `on_initialized` (e.g.,
+//! dropping the stale-cleanup branch) would not be caught here.  If direct
+//! invocation becomes necessary, consider extracting the inner async logic into a
+//! `pub(crate) async fn initialize_session(state, session_id_override, is_remote)`
+//! helper that both `on_initialized` and these tests can call.
 
 use std::collections::HashMap;
 use std::sync::Arc;

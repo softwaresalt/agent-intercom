@@ -603,7 +603,7 @@ status = "git status"
 3. Pauses the stall detector timer during execution.
 4. Posts the output to Slack.
 
-**Security:** Workspace policy cannot introduce commands beyond the global allowlist (FR-011).
+**Security:** Only commands explicitly listed in `config.commands` can be invoked as Slack aliases (FR-014). MCP auto-approve policy is governed separately by `.agentrc/settings.json` (ADR-0012).
 
 ---
 
@@ -1213,7 +1213,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 | Missing file/directory | Returns `WorkspacePolicy::default()` (deny-all) |
 | Empty file | Returns deny-all + logs warning |
 | Malformed JSON | Returns deny-all + logs warning |
-| Valid JSON | Parses, then strips `commands` entries absent from global allowlist (FR-011) |
+| Valid JSON | Parses into `WorkspacePolicy` as-is; workspace policy is self-contained (ADR-0012) |
 
 ### 10.3 Policy Evaluator
 
@@ -1221,7 +1221,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 1. **Disabled** → deny all
 2. **Risk level threshold** → deny if requested risk exceeds threshold. `critical` risk is **never** auto-approved regardless of threshold.
-3. **Command matching** → approve if `tool_name` is in both workspace `commands` AND global `config.commands` allowlist
+3. **Command matching** → approve if `tool_name` matches any regex in workspace `auto_approve_commands` (ADR-0012: global allowlist gate removed)
 4. **Tool matching** → approve if `tool_name` is in workspace `tools` list
 5. **File pattern matching** → approve if `context.file_path` matches any write/read glob pattern
 6. **No match** → deny
