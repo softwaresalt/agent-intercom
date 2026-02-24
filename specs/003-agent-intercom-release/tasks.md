@@ -190,19 +190,19 @@
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T070 [US3] After all documentation is written, verify zero "monocoque" occurrences in `docs/` (except `docs/migration-guide.md` which references the old name for context) (S047)
+- [x] T070 [US3] After all documentation is written, verify zero "monocoque" occurrences in `docs/` (except `docs/migration-guide.md` which references the old name for context) (S047)
 
 ### Implementation for User Story 3
 
-- [ ] T071 [P] [US3] Rewrite `README.md` with new product name, binary names (`agent-intercom`, `agent-intercom-ctl`), quick start instructions, and updated feature list (FR-019)
-- [ ] T072 [P] [US3] Update `docs/setup-guide.md` with new Slack app creation steps (using `/intercom` command), credential configuration (keychain service `agent-intercom`, `INTERCOM_` env vars), and first run instructions (FR-020)
-- [ ] T073 [P] [US3] Update `docs/user-guide.md` with all 9 MCP tools using new names (check_clearance, check_diff, auto_check, transmit, standby, ping, broadcast, reboot, switch_freq), all Slack commands under `/intercom`, workspace policy config in `.intercom/settings.json` (FR-021)
-- [ ] T074 [P] [US3] Create new `docs/developer-guide.md` covering build instructions, test commands (`cargo test`), project structure, coding conventions, contribution workflow, and the approval workflow process (FR-022)
-- [ ] T075 [P] [US3] Complete `agent-intercom-ctl` CLI documentation in `docs/user-guide.md` or separate `docs/cli-reference.md` with usage examples for every subcommand (FR-023)
-- [ ] T076 [P] [US3] Create new `docs/migration-guide.md` documenting transition steps: keychain rename, env var prefix change (`MONOCOQUE_` → `INTERCOM_`), Slack app command update (`/monocoque` → `/intercom`), policy directory rename (`.agentrc/` → `.intercom/`), `mcp.json` URL update, binary name change (FR-024)
-- [ ] T077 [P] [US3] Update `docs/REFERENCE.md` with new tool names, new Slack commands, updated configuration reference
-- [ ] T078 [US3] Update all doc comments in `src/` that reference user-facing concepts to use new names (final sweep)
-- [ ] T079 [US3] Run search for "monocoque" across `docs/` and `README.md` — verify matches only in migration-guide.md context (S047) — EXIT GATE for Phase 6
+- [x] T071 [P] [US3] Rewrite `README.md` with new product name, binary names (`agent-intercom`, `agent-intercom-ctl`), quick start instructions, and updated feature list (FR-019)
+- [x] T072 [P] [US3] Update `docs/setup-guide.md` with new Slack app creation steps (using `/intercom` command), credential configuration (keychain service `agent-intercom`, `INTERCOM_` env vars), and first run instructions (FR-020)
+- [x] T073 [P] [US3] Update `docs/user-guide.md` with all 9 MCP tools using new names (check_clearance, check_diff, auto_check, transmit, standby, ping, broadcast, reboot, switch_freq), all Slack commands under `/intercom`, workspace policy config in `.intercom/settings.json` (FR-021)
+- [x] T074 [P] [US3] Create new `docs/developer-guide.md` covering build instructions, test commands (`cargo test`), project structure, coding conventions, contribution workflow, and the approval workflow process (FR-022)
+- [x] T075 [P] [US3] Complete `agent-intercom-ctl` CLI documentation in `docs/user-guide.md` or separate `docs/cli-reference.md` with usage examples for every subcommand (FR-023)
+- [x] T076 [P] [US3] Create new `docs/migration-guide.md` documenting transition steps: keychain rename, env var prefix change (`MONOCOQUE_` → `INTERCOM_`), Slack app command update (`/monocoque` → `/intercom`), policy directory rename (`.agentrc/` → `.intercom/`), `mcp.json` URL update, binary name change (FR-024)
+- [x] T077 [P] [US3] Update `docs/REFERENCE.md` with new tool names, new Slack commands, updated configuration reference
+- [x] T078 [US3] Update all doc comments in `src/` that reference user-facing concepts to use new names (final sweep)
+- [x] T079 [US3] Run search for "monocoque" across `docs/` and `README.md` — verify matches only in migration-guide.md context (S047) — EXIT GATE for Phase 6
 
 **Checkpoint**: Documentation is complete, accurate, and reflects the new product name throughout.
 

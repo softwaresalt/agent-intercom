@@ -1,6 +1,6 @@
 # Setup Guide
 
-Complete installation and configuration instructions for monocoque-agent-rc and its Slack integration.
+Complete installation and configuration instructions for agent-intercom and its Slack integration.
 
 ## Prerequisites
 
@@ -13,8 +13,8 @@ Complete installation and configuration instructions for monocoque-agent-rc and 
 Clone the repository and build both binaries:
 
 ```bash
-git clone https://github.com/softwaresalt/monocoque-agent-rc.git
-cd monocoque-agent-rc
+git clone https://github.com/softwaresalt/agent-intercom.git
+cd agent-intercom
 cargo build --release
 ```
 
@@ -22,8 +22,8 @@ This produces two binaries in `target/release/`:
 
 | Binary | Description |
 |---|---|
-| `monocoque-agent-rc` | The MCP remote agent server |
-| `monocoque-ctl` | Local CLI companion for approvals and session control |
+| `agent-intercom` | The MCP remote agent server |
+| `agent-intercom-ctl` | Local CLI companion for approvals and session control |
 
 ## 2. Create a Slack App
 
@@ -31,7 +31,7 @@ This produces two binaries in `target/release/`:
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App**.
 2. Choose **From scratch**.
-3. Name it (e.g., `Monocoque Agent RC`) and select your workspace.
+3. Name it (e.g., `Agent Intercom`) and select your workspace.
 4. Click **Create App**.
 
 ### 2.2 Enable Socket Mode
@@ -40,7 +40,7 @@ Socket Mode allows the server to receive events over an outbound WebSocket — n
 
 1. In the app settings sidebar, go to **Socket Mode**.
 2. Toggle **Enable Socket Mode** to On.
-3. When prompted, give the app-level token a name (e.g., `monocoque-socket`) and add the scope `connections:write`.
+3. When prompted, give the app-level token a name (e.g., `intercom-socket`) and add the scope `connections:write`.
 4. Click **Generate**. Copy the token (`xapp-...`). This is your `SLACK_APP_TOKEN`.
 
 ### 2.3 Configure Bot Token Scopes
@@ -55,16 +55,16 @@ Socket Mode allows the server to receive events over an outbound WebSocket — n
 | `channels:history` | Read channel history (MCP resource `slack://channel/{id}/recent`) |
 | `channels:read` | List and identify channels |
 | `files:write` | Upload large diffs as file snippets |
-| `commands` | Register the `/monocoque` slash command |
+| `commands` | Register the `/intercom` slash command |
 
 ### 2.4 Create the Slash Command
 
 1. Go to **Slash Commands** in the sidebar.
 2. Click **Create New Command**.
 3. Set:
-   - **Command:** `/monocoque`
+   - **Command:** `/intercom`
    - **Request URL:** Leave blank (Socket Mode handles routing)
-   - **Short Description:** `Agent Remote Control commands`
+   - **Short Description:** `Agent Intercom commands`
    - **Usage Hint:** `help | sessions | session-start <prompt> | ...`
 4. Click **Save**.
 
@@ -89,7 +89,7 @@ The bot must be a member of any channel it posts to.
 Open the target Slack channel and type:
 
 ```
-/invite @Monocoque Agent RC
+/invite @Agent Intercom
 ```
 
 **Option B — Channel settings:**
@@ -150,13 +150,13 @@ Credentials stored in the OS keychain take priority over environment variables.
 
 ```powershell
 # Using the keyring CLI or programmatically:
-# Service: "monocoque-agent-rc"
+# Service: "agent-intercom"
 # Keys: slack_app_token, slack_bot_token, slack_team_id
 ```
 
 **macOS (Keychain Access):**
 
-Store entries under service `monocoque-agent-rc` with keys `slack_app_token`, `slack_bot_token`, and `slack_team_id`.
+Store entries under service `agent-intercom` with keys `slack_app_token`, `slack_bot_token`, and `slack_team_id`.
 
 **Resolution order per credential:** OS Keychain first, then environment variable fallback.
 
@@ -171,8 +171,8 @@ default_workspace_root = "D:/Source/GitHub/my-project"
 # HTTP port for the SSE transport (agents connect here).
 http_port = 3000
 
-# IPC socket name (must match monocoque-ctl --ipc-name).
-ipc_name = "monocoque-agent-rc"
+# IPC socket name (must match agent-intercom-ctl --ipc-name).
+ipc_name = "agent-intercom"
 
 # Maximum concurrent agent sessions.
 max_concurrent_sessions = 3
@@ -186,7 +186,7 @@ retention_days = 30
 
 [database]
 # SQLite database path (parent directories auto-created).
-path = "data/agent-rc.db"
+path = "data/agent-intercom.db"
 
 [slack]
 # Default Slack channel ID for notifications.
@@ -214,7 +214,7 @@ max_retries = 3
 default_nudge_message = "Continue working on the current task. Pick up where you left off."
 
 [commands]
-# Custom shell commands exposed via /monocoque <alias> in Slack.
+# Custom shell commands exposed via /intercom <alias> in Slack.
 # Only commands listed here can be invoked — workspace policies cannot add more.
 status = "git status"
 ```
@@ -226,7 +226,7 @@ Add the server to your workspace's `.vscode/mcp.json`:
 ```jsonc
 {
   "servers": {
-    "monocoque-agent-rc": {
+    "agent-intercom": {
       "type": "sse",
       "url": "http://127.0.0.1:3000/sse?channel_id={your-slack-channel-id}"
     }
@@ -261,14 +261,14 @@ $env:SLACK_TEAM_ID   = [System.Environment]::GetEnvironmentVariable("SLACK_TEAM_
 $env:SLACK_MEMBER_IDS = [System.Environment]::GetEnvironmentVariable("SLACK_MEMBER_IDS", "User")
 $env:RUST_LOG = "info"
 
-.\target\debug\monocoque-agent-rc.exe --config config.toml
+.\target\debug\agent-intercom.exe --config config.toml
 ```
 
 ### Release Mode
 
 ```bash
 cargo build --release
-RUST_LOG=info ./target/release/monocoque-agent-rc --config config.toml
+RUST_LOG=info ./target/release/agent-intercom --config config.toml
 ```
 
 ### Verify Startup
@@ -299,20 +299,20 @@ This script:
 1. Seeds a test session in the SQLite database.
 2. Opens an SSE connection with the workspace channel ID.
 3. Completes the MCP handshake.
-4. Calls the `ask_approval` tool.
+4. Calls the `check_clearance` tool.
 5. Waits for the approval message to appear in Slack.
 
 You should see an approval message with **Accept** and **Reject** buttons in your Slack channel. Click either button to complete the flow.
 
 ## 8. Workspace Auto-Approve Policy (Optional)
 
-Create `.agentrc/settings.json` in your workspace root to define auto-approve rules:
+Create `.intercom/settings.json` in your workspace root to define auto-approve rules:
 
 ```json
 {
   "enabled": true,
   "commands": ["status"],
-  "tools": ["heartbeat", "remote_log"],
+  "tools": ["ping", "broadcast"],
   "file_patterns": {
     "write": ["**/*.md", "docs/**"],
     "read": ["**/*"]
@@ -350,7 +350,7 @@ This file is hot-reloaded — changes take effect without restarting the server.
 2. **Missing config.** Ensure `--config config.toml` points to a valid file.
 3. **DB directory.** The server auto-creates the database directory, but check file permissions.
 
-### monocoque-ctl not connecting
+### agent-intercom-ctl not connecting
 
 1. **IPC name mismatch.** Ensure `--ipc-name` matches the server's `ipc_name` in `config.toml`.
 2. **Server not running.** The IPC socket only exists while the server is running.
