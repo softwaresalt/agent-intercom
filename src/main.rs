@@ -199,8 +199,8 @@ async fn run(args: Cli) -> Result<()> {
         let sse_ct = ct.clone();
         let sse_state = Arc::clone(&state);
         Some(tokio::spawn(async move {
-            if let Err(err) = sse::serve_sse(sse_state, sse_ct).await {
-                error!(%err, "sse transport failed");
+            if let Err(err) = sse::serve_http(sse_state, sse_ct).await {
+                error!(%err, "http transport failed");
             }
         }))
     } else {

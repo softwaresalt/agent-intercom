@@ -1,4 +1,4 @@
-//! Integration tests for full MCP tool dispatch through the HTTP/SSE transport.
+//! Integration tests for full MCP tool dispatch through the HTTP/Streamable-HTTP transport.
 //!
 //! Validates:
 //! - S001: Heartbeat tool call dispatched via HTTP transport
@@ -7,8 +7,8 @@
 //! - S007: Malformed arguments return descriptive MCP error
 //! - S010: `tools/list` returns exactly 9 registered tools
 //!
-//! NOTE: rmcp `RequestContext` has no public constructor. These tests use
-//! a minimal hand-rolled MCP over SSE client to exercise the transport layer.
+//! Uses the rmcp 0.13 Streamable HTTP protocol: POST to `/mcp` for every
+//! request, with the `Mcp-Session-Id` header on subsequent requests.
 //!
 //! FR-001 — MCP Transport Dispatch
 
@@ -16,16 +16,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_intercom::mcp::handler::AppState;
-use agent_intercom::mcp::sse::serve_sse;
+use agent_intercom::mcp::sse::serve_http;
 use serde_json::{json, Value};
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::test_helpers::{test_app_state, test_config};
 
 // ── Server fixture helpers ────────────────────────────────────
 
-/// Spawn a test SSE/MCP server on an ephemeral port.
+/// Spawn a test HTTP/MCP server on an ephemeral port.
 ///
 /// Caller must cancel `ct` when done. Returns `(base_url, ct)`.
 async fn spawn_test_server() -> (String, CancellationToken) {
@@ -61,7 +60,7 @@ async fn spawn_test_server() -> (String, CancellationToken) {
 
     let server_ct = ct.clone();
     tokio::spawn(async move {
-        let _ = serve_sse(state, server_ct).await;
+        let _ = serve_http(state, server_ct).await;
     });
 
     // Allow the server to bind.
@@ -69,99 +68,106 @@ async fn spawn_test_server() -> (String, CancellationToken) {
     (format!("http://127.0.0.1:{port}"), ct)
 }
 
-// ── Minimal MCP / SSE client ──────────────────────────────────
+// ── Minimal MCP / Streamable-HTTP client ─────────────────────
 
-/// SSE connection state: message endpoint URL + a channel of raw SSE data lines.
-struct SseConnection {
-    /// Absolute URL to POST JSON-RPC messages to (e.g. `http://…/message?sessionId=…`).
-    message_url: String,
-    /// Receiver of raw SSE `data:` payloads (one `String` per non-empty payload).
-    data_rx: mpsc::Receiver<String>,
-    /// HTTP client reused across all POST calls.
+/// Streamable-HTTP MCP connection state.
+///
+/// Uses the rmcp 0.13 protocol: every request is a POST to `/mcp`. After the
+/// `initialize` request the server returns an `Mcp-Session-Id` header that
+/// must be included in all subsequent requests.
+struct McpConnection {
+    /// Absolute URL for all MCP requests (e.g. `http://…/mcp`).
+    mcp_url: String,
+    /// Session ID obtained from the `Mcp-Session-Id` response header.
+    session_id: Option<String>,
+    /// HTTP client reused across all requests.
     client: reqwest::Client,
     /// Monotonically increasing JSON-RPC request id.
     next_id: u64,
 }
 
-impl SseConnection {
-    /// Connect to `/sse`, wait for the `endpoint` event, then return the
-    /// connection object. Spawns a background task to drain the SSE stream
-    /// and forward all `data:` payloads to `data_rx`.
-    async fn connect(base_url: &str) -> Self {
-        let client = reqwest::Client::new();
-        let sse_url = format!("{base_url}/sse");
-
-        let mut response = client
-            .get(&sse_url)
-            .header("Accept", "text/event-stream")
-            .send()
-            .await
-            .expect("GET /sse");
-
-        // One-shot for the endpoint URL; unbounded channel for subsequent events.
-        let (endpoint_tx, endpoint_rx) = tokio::sync::oneshot::channel::<String>();
-        let (data_tx, data_rx) = mpsc::channel::<String>(64);
-
-        // Background task: parse SSE lines and fan-out to channels.
-        tokio::spawn(async move {
-            let mut buf = String::new();
-            let mut in_endpoint = false;
-            let mut endpoint_tx_opt = Some(endpoint_tx);
-            let mut endpoint_delivered = false;
-
-            loop {
-                let chunk = response.chunk().await;
-                let Ok(Some(bytes)) = chunk else { break };
-                buf.push_str(&String::from_utf8_lossy(&bytes));
-
-                while let Some(nl) = buf.find('\n') {
-                    let line = buf[..nl].trim_end_matches('\r').to_owned();
-                    buf = buf[nl + 1..].to_owned();
-
-                    if line.is_empty() {
-                        in_endpoint = false;
-                    } else if let Some(event_type) = line.strip_prefix("event:") {
-                        in_endpoint = event_type.trim() == "endpoint";
-                    } else if let Some(rest) = line.strip_prefix("data:") {
-                        let data = rest.trim().to_owned();
-                        if in_endpoint && !endpoint_delivered {
-                            endpoint_delivered = true;
-                            if let Some(tx) = endpoint_tx_opt.take() {
-                                let _ = tx.send(data);
-                            }
-                        } else if !data.is_empty() {
-                            let _ = data_tx.send(data).await;
-                        }
-                    }
-                }
-            }
-        });
-
-        // Wait for the endpoint event to arrive (server sends it immediately).
-        let endpoint_path = tokio::time::timeout(Duration::from_secs(5), endpoint_rx)
-            .await
-            .expect("endpoint event within 5 s")
-            .expect("endpoint oneshot");
-
-        // Build the absolute URL for the message endpoint.
-        let message_url = if endpoint_path.starts_with("http") {
-            endpoint_path
-        } else {
-            format!("{base_url}{endpoint_path}")
-        };
-
+impl McpConnection {
+    /// Create a new (uninitialized) connection to the `/mcp` endpoint.
+    fn new(base_url: &str) -> Self {
         Self {
-            message_url,
-            data_rx,
-            client,
+            mcp_url: format!("{base_url}/mcp"),
+            session_id: None,
+            client: reqwest::Client::new(),
             next_id: 1,
         }
     }
 
-    /// Send a JSON-RPC request and wait for the matching response via SSE.
+    /// Perform the MCP initialize + initialized handshake.
     ///
-    /// Returns the `result` field of the response, or panics if an error is
-    /// received or the timeout elapses.
+    /// Returns the raw `initialize` JSON-RPC response for inspection.
+    /// After this call, the session ID is set and the connection is ready.
+    async fn handshake(&mut self) -> Value {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "intercom-test",
+                    "version": "0.0.1"
+                }
+            }
+        });
+
+        let response = self
+            .client
+            .post(&self.mcp_url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .body(serde_json::to_string(&body).expect("serialize"))
+            .send()
+            .await
+            .expect("POST /mcp initialize");
+
+        // Capture the session ID from the response header.
+        if let Some(sid) = response.headers().get("mcp-session-id") {
+            self.session_id = sid.to_str().ok().map(ToOwned::to_owned);
+        }
+
+        // Read and parse the response body.
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        let text = response.text().await.expect("initialize response body");
+        let json_str = if content_type.contains("text/event-stream") || text.contains("\ndata:") {
+            text.lines()
+                .find_map(|line| {
+                    line.strip_prefix("data:")
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or("")
+                .to_owned()
+        } else {
+            text
+        };
+        let init_response: Value = serde_json::from_str(&json_str).unwrap_or(Value::Null);
+
+        // Send the initialized notification.
+        self.notify("notifications/initialized", json!({})).await;
+
+        // Brief pause so `on_initialized` fires and creates the DB session.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        init_response
+    }
+
+    /// Send a JSON-RPC request and wait for the response.
+    ///
+    /// Returns the full JSON-RPC response object.
     async fn request(&mut self, method: &str, params: Value) -> Value {
         let id = self.next_id;
         self.next_id += 1;
@@ -174,29 +180,45 @@ impl SseConnection {
         });
 
         let body_str = serde_json::to_string(&body).expect("serialize JSON-RPC");
-        self.client
-            .post(&self.message_url)
+
+        let mut req = self
+            .client
+            .post(&self.mcp_url)
             .header("Content-Type", "application/json")
-            .body(body_str)
-            .send()
-            .await
-            .expect("POST JSON-RPC");
+            .header("Accept", "application/json, text/event-stream")
+            .body(body_str);
 
-        // Drain SSE until we find the matching response id.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            let data = tokio::time::timeout(remaining, self.data_rx.recv())
-                .await
-                .expect("SSE response within 10 s")
-                .expect("SSE channel open");
-
-            let msg: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
-            if msg.get("id") == Some(&Value::Number(serde_json::Number::from(id))) {
-                return msg;
-            }
-            // Priming events or unrelated messages — continue draining.
+        if let Some(sid) = &self.session_id {
+            req = req.header("mcp-session-id", sid.clone());
         }
+
+        let response = req.send().await.expect("POST JSON-RPC");
+
+        // Read and parse the response body.
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        let text = response.text().await.expect("response body");
+
+        // The response may be plain JSON or a text/event-stream payload.
+        // For SSE, find the first non-empty `data:` line.
+        let json_str = if content_type.contains("text/event-stream") || text.contains("\ndata:") {
+            text.lines()
+                .find_map(|line| {
+                    line.strip_prefix("data:")
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or("")
+                .to_owned()
+        } else {
+            text
+        };
+
+        serde_json::from_str(&json_str).unwrap_or(Value::Null)
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
@@ -207,37 +229,19 @@ impl SseConnection {
             "params": params,
         });
         let body_str = serde_json::to_string(&body).expect("serialize notification");
-        self.client
-            .post(&self.message_url)
+
+        let mut req = self
+            .client
+            .post(&self.mcp_url)
             .header("Content-Type", "application/json")
-            .body(body_str)
-            .send()
-            .await
-            .expect("POST notification");
-    }
+            .header("Accept", "application/json, text/event-stream")
+            .body(body_str);
 
-    /// Perform the MCP initialize + initialized handshake.
-    ///
-    /// After this call, the connection is ready for tool calls.
-    async fn handshake(&mut self) {
-        let _init_response = self
-            .request(
-                "initialize",
-                json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "intercom-test",
-                        "version": "0.0.1"
-                    }
-                }),
-            )
-            .await;
+        if let Some(sid) = &self.session_id {
+            req = req.header("mcp-session-id", sid.clone());
+        }
 
-        self.notify("notifications/initialized", json!({})).await;
-
-        // Brief pause so `on_initialized` fires and creates the DB session.
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = req.send().await;
     }
 
     /// Call a tool. Returns the full JSON-RPC response object (may contain
@@ -268,7 +272,7 @@ impl SseConnection {
 #[tokio::test]
 async fn transport_list_tools_returns_nine_tools() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     let response = conn.list_tools().await;
@@ -293,7 +297,7 @@ async fn transport_list_tools_returns_nine_tools() {
 #[tokio::test]
 async fn transport_heartbeat_dispatch() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     let response = conn
@@ -326,7 +330,7 @@ async fn transport_heartbeat_dispatch() {
 #[tokio::test]
 async fn transport_recover_state_dispatch() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     let response = conn.call_tool("reboot", json!({})).await;
@@ -356,7 +360,7 @@ async fn transport_recover_state_dispatch() {
 #[tokio::test]
 async fn transport_unknown_tool_returns_error() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     let response = conn
@@ -380,7 +384,7 @@ async fn transport_unknown_tool_returns_error() {
 #[tokio::test]
 async fn transport_malformed_args_returns_error() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     // `switch_freq` expects `{ mode: "…" }`, not `{ wrong_field: 1 }`.
@@ -403,7 +407,7 @@ async fn transport_malformed_args_returns_error() {
 #[tokio::test]
 async fn transport_list_tools_uses_new_intercom_names() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     let response = conn.list_tools().await;
@@ -442,24 +446,10 @@ async fn transport_list_tools_uses_new_intercom_names() {
 #[tokio::test]
 async fn transport_server_info_reports_agent_intercom() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
 
-    // Run the initialize request directly and inspect the raw response.
-    let init_response = conn
-        .request(
-            "initialize",
-            json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "intercom-test",
-                    "version": "0.0.1"
-                }
-            }),
-        )
-        .await;
-
-    conn.notify("notifications/initialized", json!({})).await;
+    // handshake() performs initialize + initialized and returns the init response.
+    let init_response = conn.handshake().await;
 
     let server_info = &init_response["result"]["serverInfo"];
     assert_eq!(
@@ -482,7 +472,7 @@ async fn transport_server_info_reports_agent_intercom() {
 #[tokio::test]
 async fn transport_old_tool_name_returns_error() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     let response = conn
@@ -511,7 +501,7 @@ async fn transport_old_tool_name_returns_error() {
 #[tokio::test]
 async fn transport_empty_tool_name_returns_error() {
     let (base_url, ct) = spawn_test_server().await;
-    let mut conn = SseConnection::connect(&base_url).await;
+    let mut conn = McpConnection::new(&base_url);
     conn.handshake().await;
 
     let response = conn.call_tool("", json!({})).await;

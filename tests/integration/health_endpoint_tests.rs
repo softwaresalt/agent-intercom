@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use agent_intercom::mcp::sse::serve_sse;
+use agent_intercom::mcp::sse::serve_http;
 
 use super::test_helpers::{test_app_state, test_config};
 
-/// Spawn the SSE/health server on an ephemeral port, returning the bound address.
+/// Spawn the HTTP/health server on an ephemeral port, returning the bound address.
 ///
 /// Caller must cancel `ct` to shut the server down.
 async fn spawn_server() -> (String, CancellationToken) {
@@ -26,9 +26,9 @@ async fn spawn_server() -> (String, CancellationToken) {
     let ct = CancellationToken::new();
 
     // Bind a listener ourselves to know the port, then drop it and
-    // re-bind inside `serve_sse`.  Instead, we use the retry approach:
+    // re-bind inside `serve_http`.  Instead, we use the retry approach:
     // bind a temporary listener to discover a free port, then configure
-    // serve_sse to use that port.
+    // serve_http to use that port.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind ephemeral");
@@ -55,7 +55,7 @@ async fn spawn_server() -> (String, CancellationToken) {
 
     let server_ct = ct.clone();
     tokio::spawn(async move {
-        let _ = serve_sse(state, server_ct).await;
+        let _ = serve_http(state, server_ct).await;
     });
 
     // Give the server a moment to bind.

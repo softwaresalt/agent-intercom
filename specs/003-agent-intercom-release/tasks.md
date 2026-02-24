@@ -252,25 +252,25 @@
 
 > **NOTE: Write tests FIRST. Some existing integration tests will need rewiring for the new transport API.**
 
-- [ ] T094 [P] [US5] Write integration test verifying StreamableHttpService on `/mcp` endpoint accepts HTTP POST and returns tool list in `tests/integration/` (S057)
-- [ ] T095 [P] [US5] Write integration test verifying stdio transport still works with rmcp 0.13 in `tests/integration/` (S058)
-- [ ] T096 [P] [US5] Write integration test verifying old `/sse` endpoint returns redirect or 410 Gone in `tests/integration/` (S060)
-- [ ] T097 [P] [US5] Write integration test verifying concurrent MCP connections are handled independently in `tests/integration/` (S061)
-- [ ] T098 [P] [US5] Write integration test verifying graceful handling of dropped connections in `tests/integration/` (S062)
-- [ ] T099 [US5] Run tests and confirm new transport assertions FAIL (red gate)
+- [x] T094 [P] [US5] Write integration test verifying StreamableHttpService on `/mcp` endpoint accepts HTTP POST and returns tool list in `tests/integration/` (S057)
+- [x] T095 [P] [US5] Write integration test verifying stdio transport still works with rmcp 0.13 in `tests/integration/` (S058)
+- [x] T096 [P] [US5] Write integration test verifying old `/sse` endpoint returns redirect or 410 Gone in `tests/integration/` (S060)
+- [x] T097 [P] [US5] Write integration test verifying concurrent MCP connections are handled independently in `tests/integration/` (S061)
+- [x] T098 [P] [US5] Write integration test verifying graceful handling of dropped connections in `tests/integration/` (S062)
+- [x] T099 [US5] Run tests and confirm new transport assertions FAIL (red gate)
 
 ### Implementation for User Story 5
 
-- [ ] T100 [US5] Update `Cargo.toml`: change rmcp version from `0.5` to `0.13.0`, change feature from `transport-sse-server` to `transport-streamable-http-server` (FR-028)
-- [ ] T101 [US5] Rewrite `src/mcp/sse.rs` — replace `SseServer`/`SseServerConfig` with `StreamableHttpService`, implement `SessionManager` trait (or use `LocalSessionManager`), replace `/sse` + `/message` two-endpoint model with single `/mcp` POST endpoint (FR-031) — **CRITICAL: this is a complete rewrite**
-- [ ] T102 [US5] Add backward-compatible route: mount redirect from `/sse` to `/mcp` with deprecation header in `src/mcp/sse.rs` (Design Decision D-003)
-- [ ] T103 [US5] Update `src/mcp/handler.rs`: adapt `AgentRcServer` (or successor) to rmcp 0.13 `ServerHandler` trait, handle any new required methods (FR-029)
-- [ ] T104 [US5] Update tool registration to use rmcp 0.13 patterns (`ToolRouter` / proc macros / new API) in `src/mcp/handler.rs` (FR-030)
-- [ ] T105 [US5] Verify `src/mcp/transport.rs` stdio transport compiles and works with rmcp 0.13 (FR-031)
-- [ ] T106 [P] [US5] Update `src/mcp/resources/` resource providers to compile with rmcp 0.13 type changes
-- [ ] T107 [US5] Update all integration tests that use SSE transport setup in `tests/integration/` to use new StreamableHttpService transport
-- [ ] T108 [US5] Run full `cargo test` suite — all unit, contract, and integration tests pass (FR-032) (S059) — EXIT GATE for Phase 8
-- [ ] T109 [US5] Run `cargo clippy -- -D warnings` and confirm zero warnings with rmcp 0.13 (SC-007)
+- [x] T100 [US5] Update `Cargo.toml`: change rmcp version from `0.5` to `0.13.0`, change feature from `transport-sse-server` to `transport-streamable-http-server` (FR-028)
+- [x] T101 [US5] Rewrite `src/mcp/sse.rs` — replace `SseServer`/`SseServerConfig` with `StreamableHttpService`, implement `SessionManager` trait (or use `LocalSessionManager`), replace `/sse` + `/message` two-endpoint model with single `/mcp` POST endpoint (FR-031) — **CRITICAL: this is a complete rewrite**
+- [x] T102 [US5] Add backward-compatible route: mount redirect from `/sse` to `/mcp` with deprecation header in `src/mcp/sse.rs` (Design Decision D-003)
+- [x] T103 [US5] Update `src/mcp/handler.rs`: adapt `AgentRcServer` (or successor) to rmcp 0.13 `ServerHandler` trait, handle any new required methods (FR-029)
+- [x] T104 [US5] Update tool registration to use rmcp 0.13 patterns (`ToolRouter` / proc macros / new API) in `src/mcp/handler.rs` (FR-030)
+- [x] T105 [US5] Verify `src/mcp/transport.rs` stdio transport compiles and works with rmcp 0.13 (FR-031)
+- [x] T106 [P] [US5] Update `src/mcp/resources/` resource providers to compile with rmcp 0.13 type changes
+- [x] T107 [US5] Update all integration tests that use SSE transport setup in `tests/integration/` to use new StreamableHttpService transport
+- [x] T108 [US5] Run full `cargo test` suite — all unit, contract, and integration tests pass (FR-032) (S059) — EXIT GATE for Phase 8
+- [x] T109 [US5] Run `cargo clippy -- -D warnings` and confirm zero warnings with rmcp 0.13 (SC-007)
 
 **Checkpoint**: rmcp 0.13 upgrade complete. Both HTTP (Streamable) and stdio transports working. All tests pass. Zero clippy warnings.
 
@@ -311,7 +311,7 @@
 Phase 1 (Setup)
     │
     ▼
-Phase 2 (Foundational) ── BLOCKS ALL ──┐
+Phase 2 (Foundational) ── BLOCKS ALL ────┐
     │                                    │
     ▼                                    │
 Phase 3 (US1: Identity)                  │
@@ -322,10 +322,10 @@ Phase 4 (US4: Tools)  Phase 7 (US6: Release)
     │                                    │
     ├──────────────────┐                 │
     ▼                  ▼                 │
-Phase 5 (US2: Slack)  Phase 8 (US5: rmcp)
+Phase 5 (US2: Slack)  Phase 8 (US5: rmcp) |
     │                                    │
     ▼                                    │
-Phase 6 (US3: Docs) ◄───────────────────┘
+Phase 6 (US3: Docs) ◄────────────────────┘
     │
     ▼
 Phase 9 (Polish)
@@ -357,19 +357,19 @@ T003: Update Cargo.toml package name and binary names
 
 # Then crate roots (can be parallel):
 T004: Update src/lib.rs            ──┐
-T005: Update src/main.rs            ├── Parallel
+T005: Update src/main.rs             ├── Parallel
 T006: Update ctl/main.rs           ──┘
 
 # Then constants (all parallel):
 T007: KEYCHAIN_SERVICE             ──┐
-T008: IPC pipe name                 │
-T009: Env var prefix                ├── Parallel
-T010: Policy directory              │
+T008: IPC pipe name                  │
+T009: Env var prefix                 ├── Parallel
+T010: Policy directory               │
 T011: Slack command root           ──┘
 
 # Then global imports (parallel per directory):
 T012: src/ imports                 ──┐
-T013: tests/ imports                ├── Parallel
+T013: tests/ imports                 ├── Parallel
 T014: ctl/ imports                 ──┘
 
 # Then sweep + gate:
@@ -385,14 +385,14 @@ T017: cargo check gate
 ```text
 # All test tasks in parallel (different test files):
 T047: accept_diff success test     ──┐
-T048: accept_diff conflict test     │
-T049: force-apply test              │
-T050: no channel test               ├── Parallel
-T051: new file write test           │
-T052: ask_approval no channel test  │
-T053: Slack unavailable test        │
-T054: rejection confirmation test   │
-T055: transmit no channel test      │
+T048: accept_diff conflict test      │
+T049: force-apply test               │
+T050: no channel test                ├── Parallel
+T051: new file write test            │
+T052: ask_approval no channel test   │
+T053: Slack unavailable test         │
+T054: rejection confirmation test    │
+T055: transmit no channel test       │
 T056: standby no channel test      ──┘
 
 # Red gate:
@@ -400,8 +400,8 @@ T057: Confirm all FAIL
 
 # Block Kit builders in parallel:
 T063: success builder              ──┐
-T064: conflict builder              ├── Parallel
-T065: force-apply builder           │
+T064: conflict builder               ├── Parallel
+T065: force-apply builder            │
 T066: rejection builder            ──┘
 
 # Then handler implementations (sequential per handler):

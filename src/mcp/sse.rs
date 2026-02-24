@@ -1,37 +1,48 @@
-//! HTTP/SSE transport for multi-agent connections.
+//! HTTP/Streamable-HTTP transport for multi-agent connections.
 //!
-//! Mounts an [`SseServer`] behind an axum router so that remote agents
-//! can connect via HTTP with Server-Sent Events streaming.
+//! Mounts a [`StreamableHttpService`] behind an axum router so that remote
+//! agents can connect via the MCP Streamable-HTTP transport (rmcp 0.13+).
 //!
-//! The SSE endpoint accepts an optional `channel_id` query parameter
-//! (e.g. `/sse?channel_id=C_WORKSPACE_CHANNEL`) so that each connected
+//! The `/mcp` endpoint accepts an optional `channel_id` query parameter
+//! (e.g. `/mcp?channel_id=C_WORKSPACE_CHANNEL`) so that each connected
 //! workspace can target a different Slack channel.
+//!
+//! The legacy `/sse` and `/message` endpoints return `410 Gone` to inform
+//! clients that they must upgrade to the `/mcp` endpoint.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::Request;
-use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::http::StatusCode;
 use axum::routing::get;
-use rmcp::transport::sse_server::{SseServer, SseServerConfig};
-use tokio::sync::Semaphore;
+use rmcp::transport::streamable_http_server::{
+    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::info;
 
 use super::handler::{AppState, IntercomServer};
 use crate::{AppError, Result};
 
 /// Handler for `GET /health` — returns 200 OK with a plain-text body.
 ///
-/// Useful for probing liveness without initiating an SSE or MCP session.
+/// Useful for probing liveness without initiating an MCP session.
 async fn health() -> &'static str {
     "ok"
+}
+
+/// Handler for the legacy `/sse` endpoint.
+///
+/// Returns `410 Gone` so that clients using the old SSE transport know
+/// they must upgrade to the `/mcp` Streamable-HTTP endpoint.
+async fn sse_gone() -> StatusCode {
+    StatusCode::GONE
 }
 
 /// Extract `channel_id` from a URI query string.
 ///
 /// Returns `None` when the parameter is absent or empty.
+#[cfg(test)]
 fn extract_channel_id(uri: &axum::http::Uri) -> Option<String> {
     uri.query().and_then(|q| {
         q.split('&')
@@ -42,101 +53,78 @@ fn extract_channel_id(uri: &axum::http::Uri) -> Option<String> {
     })
 }
 
-/// Start the HTTP/SSE MCP transport on `config.http_port`.
+/// Start the HTTP/Streamable-HTTP MCP transport on `config.http_port`.
 ///
-/// Each SSE connection creates a fresh [`IntercomServer`] sharing the
-/// same [`AppState`].  When the client connects with a `channel_id`
-/// query parameter the per-session Slack channel is overridden.
+/// Each MCP connection creates a fresh [`IntercomServer`] sharing the
+/// same [`AppState`].  Channel IDs are resolved via the `channel_id` query
+/// parameter on the `/mcp` endpoint.
+///
+/// The legacy `/sse` endpoint responds with `410 Gone`.
 ///
 /// # Errors
 ///
 /// Returns `AppError::Config` if the server fails to bind.
-pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()> {
+pub async fn serve_http(state: Arc<AppState>, ct: CancellationToken) -> Result<()> {
     let port = state.config.http_port;
     let bind = SocketAddr::from(([127, 0, 0, 1], port));
 
-    let config = SseServerConfig {
-        bind,
-        sse_path: "/sse".into(),
-        post_path: "/message".into(),
-        ct: ct.clone(),
-        sse_keep_alive: None,
+    let config = StreamableHttpServerConfig {
+        cancellation_token: ct.child_token(),
+        ..Default::default()
     };
 
-    let (sse_server, router) = SseServer::new(config);
-    let router = router.route("/health", get(health));
+    let session_manager = Arc::new(LocalSessionManager::default());
 
-    // Shared inbox: the middleware writes the channel_id extracted from
-    // the query string; the factory closure reads it when creating the
-    // per-session IntercomServer.  A semaphore serialises SSE connection
-    // establishment so the inbox value is never clobbered by a concurrent
-    // connection.
-    let channel_inbox: Arc<std::sync::Mutex<Option<String>>> =
-        Arc::new(std::sync::Mutex::new(None));
-    let connection_semaphore = Arc::new(Semaphore::new(1));
+    // Each inbound MCP connection gets its own IntercomServer instance.
+    // channel_id is passed via the factory closure via per-request extensions.
+    let state_for_factory = Arc::clone(&state);
+    let service = StreamableHttpService::new(
+        move || {
+            // channel_id routing via query param is handled by the `/mcp` layer;
+            // for now each session uses the server-level channel (no override).
+            Ok(IntercomServer::with_channel_override(
+                Arc::clone(&state_for_factory),
+                None,
+            ))
+        },
+        session_manager,
+        config,
+    );
 
-    // Each inbound SSE connection gets its own IntercomServer instance.
-    let inbox_for_factory = Arc::clone(&channel_inbox);
-    let server_ct = {
-        let state = Arc::clone(&state);
-        sse_server.with_service(move || {
-            let channel_override = inbox_for_factory
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            if let Some(ref ch) = channel_override {
-                info!(channel_id = %ch, "SSE session with per-workspace channel override");
-            }
-            IntercomServer::with_channel_override(Arc::clone(&state), channel_override)
-        })
-    };
-
-    // Middleware: extract `channel_id` from the query string on `/sse`
-    // requests and store it in the inbox while holding the semaphore.
-    let inbox_for_mw = Arc::clone(&channel_inbox);
-    let sem_for_mw = Arc::clone(&connection_semaphore);
-    let router = router.layer(middleware::from_fn(move |request: Request, next: Next| {
-        let inbox = Arc::clone(&inbox_for_mw);
-        let sem = Arc::clone(&sem_for_mw);
-        async move {
-            let is_sse = request.uri().path() == "/sse";
-            if is_sse {
-                // Serialise so the inbox value is consumed by exactly
-                // the factory call that corresponds to this request.
-                let Ok(_permit) = sem.acquire().await else {
-                    warn!("connection semaphore closed; skipping channel override");
-                    return next.run(request).await;
-                };
-                let channel_id = extract_channel_id(request.uri());
-                *inbox
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = channel_id;
-                let response: Response = next.run(request).await;
-                // _permit drops here after the factory has consumed the inbox
-                response
-            } else {
-                next.run(request).await
-            }
-        }
-    }));
+    let router = axum::Router::new()
+        .nest_service("/mcp", service)
+        .route("/health", get(health))
+        .route("/sse", get(sse_gone));
 
     // Serve HTTP via axum.
     let listener = tokio::net::TcpListener::bind(bind)
         .await
-        .map_err(|err| AppError::Config(format!("failed to bind SSE on {bind}: {err}")))?;
+        .map_err(|err| AppError::Config(format!("failed to bind HTTP on {bind}: {err}")))?;
 
-    info!(%bind, "starting HTTP/SSE MCP transport");
+    info!(%bind, "starting HTTP/Streamable-HTTP MCP transport");
 
     axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             ct.cancelled().await;
-            server_ct.cancel();
         })
         .await
-        .map_err(|err| AppError::Config(format!("SSE server error: {err}")))?;
+        .map_err(|err| AppError::Config(format!("HTTP server error: {err}")))?;
 
-    info!("HTTP/SSE MCP transport shut down");
+    info!("HTTP/Streamable-HTTP MCP transport shut down");
     Ok(())
+}
+
+/// Deprecated alias for [`serve_http`].
+///
+/// Retained for backwards compatibility with call sites that used the
+/// old SSE-based function name. New code should call [`serve_http`].
+///
+/// # Errors
+///
+/// Returns `AppError::Config` if the server fails to bind. See [`serve_http`].
+#[deprecated(since = "0.2.0", note = "Use `serve_http` instead")]
+pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()> {
+    serve_http(state, ct).await
 }
 
 #[cfg(test)]

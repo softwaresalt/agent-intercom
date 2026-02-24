@@ -264,6 +264,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "check_diff".into(),
@@ -280,6 +283,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "auto_check".into(),
@@ -298,6 +304,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "transmit".into(),
@@ -318,6 +327,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "broadcast".into(),
@@ -335,6 +347,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "reboot".into(),
@@ -351,6 +366,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "switch_freq".into(),
@@ -366,6 +384,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "standby".into(),
@@ -383,6 +404,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
                 name: "ping".into(),
@@ -410,6 +434,9 @@ impl IntercomServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
         ]
     }
@@ -421,6 +448,7 @@ impl ServerHandler for IntercomServer {
             server_info: Implementation {
                 name: env!("CARGO_PKG_NAME").into(),
                 version: env!("CARGO_PKG_VERSION").into(),
+                ..Default::default()
             },
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
@@ -610,6 +638,7 @@ impl ServerHandler for IntercomServer {
             None => ListResourcesResult {
                 resources: vec![],
                 next_cursor: None,
+                ..Default::default()
             },
         };
         std::future::ready(Ok(result))
