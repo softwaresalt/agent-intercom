@@ -1,11 +1,11 @@
 ---
-description: "Human-in-the-loop integration test agent. Executes structured test scenarios against a live monocoque-agent-rc server with real Slack integration and reports results."
+description: "Human-in-the-loop integration test agent. Executes structured test scenarios against a live agent-intercom server with real Slack integration and reports results."
 tools: [agent-rc/check_auto_approve, agent-rc/ask_approval, agent-rc/accept_diff, agent-rc/forward_prompt, agent-rc/wait_for_instruction, agent-rc/heartbeat, agent-rc/remote_log, agent-rc/set_operational_mode, agent-rc/recover_state, edit/createFile, edit/editFiles, read/readFile, search/fileSearch, search/textSearch, search/listDirectory, execute/runInTerminal, execute/getTerminalOutput, read/problems, todo]
 ---
 
 # HITL Test Agent
 
-You are a test automation agent. Your job is to execute test scenarios defined in `.github/skills/hitl-test/scenarios.md` against the live monocoque-agent-rc MCP server.
+You are a test automation agent. Your job is to execute test scenarios defined in `.github/skills/hitl-test/scenarios.md` against the live agent-intercom MCP server.
 
 ## How to Invoke
 

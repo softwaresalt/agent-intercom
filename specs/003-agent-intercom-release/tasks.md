@@ -280,14 +280,14 @@
 
 **Purpose**: Final verification, cleanup, and cross-cutting improvements
 
-- [ ] T110 [P] Run final `grep -r "monocoque" .` across entire workspace — verify matches only in git history, archived ADR/spec docs, and migration guide context (SC-001)
-- [ ] T111 [P] Update `.github/copilot-instructions.md` with final tool names, binary names, policy directory, env var prefix — complete final sweep (FR-026)
-- [ ] T112 [P] Update all remaining `.github/agents/` files with new tool names and binary names
-- [ ] T113a Verify automated success criteria: SC-001 (zero monocoque matches), SC-002 (binary names), SC-003 (all tests pass), SC-006 (release archives), SC-007 (clippy clean), SC-008 (contract tests pass)
+- [x] T110 [P] Run final `grep -r "monocoque" .` across entire workspace — verify matches only in git history, archived ADR/spec docs, and migration guide context (SC-001)
+- [x] T111 [P] Update `.github/copilot-instructions.md` with final tool names, binary names, policy directory, env var prefix — complete final sweep (FR-026)
+- [x] T112 [P] Update all remaining `.github/agents/` files with new tool names and binary names
+- [x] T113a Verify automated success criteria: SC-001 (zero monocoque matches), SC-002 (binary names), SC-003 (all tests pass), SC-006 (release archives), SC-007 (clippy clean), SC-008 (contract tests pass)
 - [ ] T113b Verify HITL success criteria: SC-004 (operator receives ≥5 distinct Slack notifications during full agent session), SC-005 (new user follows docs end-to-end in <30 min) — requires live server + Slack
-- [ ] T114 Run full quality gate sequence: `cargo check` → `cargo clippy -- -D warnings` → `cargo fmt --all -- --check` → `cargo test`
-- [ ] T115 Run `specs/003-agent-intercom-release/quickstart.md` validation: execute each phase verification step
-- [ ] T116 Draft constitution amendment v2.0.0: update title from "monocoque-agent-rc" to "agent-intercom", Principle II rmcp version 0.5 → 0.13, Principle VI binary names, Technical Constraints rmcp version + transport feature. Document as MAJOR bump (binary rename + SDK version change). Stage in `.specify/memory/constitution.md` for post-merge ratification.
+- [x] T114 Run full quality gate sequence: `cargo check` → `cargo clippy -- -D warnings` → `cargo fmt --all -- --check` → `cargo test`
+- [x] T115 Run `specs/003-agent-intercom-release/quickstart.md` validation: execute each phase verification step
+- [x] T116 Draft constitution amendment v2.0.0: update title from "monocoque-agent-rc" to "agent-intercom", Principle II rmcp version 0.5 → 0.13, Principle VI binary names, Technical Constraints rmcp version + transport feature. Document as MAJOR bump (binary rename + SDK version change). Stage in `.specify/memory/constitution.md` for post-merge ratification.
 
 ---
 

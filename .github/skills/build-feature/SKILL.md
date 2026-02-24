@@ -293,12 +293,12 @@ These rules are injected into each task based on its type classification in Step
 | Transport (stdio) | stdio via `rmcp` for direct agent connections                                                |
 | Transport (HTTP)  | axum 0.8 with `StreamableHttpService` on `/mcp` for HTTP/SSE sessions                       |
 | Slack             | `slack-morphism` Socket Mode                                                                 |
-| Database          | SurrealDB embedded — `kv-rocksdb` production, `kv-mem` tests, `SCHEMAFULL` tables            |
+| Database          | SQLite via `sqlx` 0.8 — file-based production, in-memory (`":memory:"`) for tests           |
 | Configuration     | TOML (`config.toml`) → `GlobalConfig`, credentials via keyring with env fallback             |
-| Workspace policy  | JSON auto-approve rules (`.monocoque/settings.json`), hot-reloaded via `notify` file watcher |
+| Workspace policy  | JSON auto-approve rules (`.agentrc/settings.json`), hot-reloaded via `notify` file watcher  |
 | Diff safety       | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via tempfile |
 | Path security     | All paths canonicalized and validated via `starts_with(workspace_root)`                       |
-| IPC               | `interprocess` crate — named pipes (Windows) / Unix domain sockets for `monocoque-ctl`       |
+| IPC               | `interprocess` crate — named pipes (Windows) / Unix domain sockets for `agent-intercom-ctl` |
 | Shutdown          | `CancellationToken` — persist state, notify Slack, terminate children gracefully              |
 
 ---

@@ -1,5 +1,5 @@
 ---
-description: Expert Rust software engineer specializing in the monocoque-agent-rc MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
+description: Expert Rust software engineer specializing in the agent-intercom MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
 tools: ['execute/runInTerminal', 'execute/getTerminalOutput', 'read', 'read/problems', 'edit/createFile', 'edit/editFiles', 'search']
 user-invokable: false
 ---
@@ -79,19 +79,19 @@ Consider the user input before proceeding (if not empty).
 
 ## Architecture Awareness
 
-This crate is **monocoque-agent-rc** — a standalone MCP server that provides remote I/O capabilities to local AI agents via Slack. It bridges agentic IDEs (Claude Code, GitHub Copilot CLI, Cursor, VS Code) with a remote operator's Slack mobile app, enabling asynchronous code review/approval, diff application, continuation prompt forwarding, stall detection with auto-nudge, session orchestration, and workspace auto-approve policies.
+This crate is **agent-intercom** — a standalone MCP server that provides remote I/O capabilities to local AI agents via Slack. It bridges agentic IDEs (Claude Code, GitHub Copilot CLI, Cursor, VS Code) with a remote operator's Slack mobile app, enabling asynchronous code review/approval, diff application, continuation prompt forwarding, stall detection with auto-nudge, session orchestration, and workspace auto-approve policies.
 
 ### Key Architectural Constraints
 
 | Concern             | Approach                                                                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------- |
-| MCP SDK             | `rmcp` 0.5 — `ServerHandler` trait, `#[tool]`/`#[tool_router]` macros for tool definitions     |
+| MCP SDK             | `rmcp` 0.13 — `ServerHandler` trait, `ToolRouter` / `ToolRoute::new_dyn()` for tool definitions |
 | Transport (primary) | stdio via `rmcp` for direct agent connections                                                  |
 | Transport (spawned) | axum 0.8 with `StreamableHttpService` mounted on `/mcp` for HTTP/SSE sessions                  |
 | Slack               | `slack-morphism` Socket Mode (outbound-only WebSocket, no inbound firewall ports)              |
-| Database            | SurrealDB embedded — `kv-rocksdb` for production, `kv-mem` for tests, `SCHEMAFULL` tables      |
+| Database            | SQLite via `sqlx` 0.8 — file-based for production, in-memory (`":memory:"`) for tests          |
 | Configuration       | TOML global config (`config.toml`) parsed via `toml` crate into `GlobalConfig`                 |
-| Workspace policy    | JSON auto-approve rules (`.monocoque/settings.json`), hot-reloaded via `notify` file watcher   |
+| Workspace policy    | JSON auto-approve rules (`.agentrc/settings.json`), hot-reloaded via `notify` file watcher      |
 | State management    | SurrealDB persistence for sessions, approvals, checkpoints, prompts, stall alerts              |
 | Diff safety         | `diffy` 0.4 for unified diff parsing/application, `sha2` for integrity hashing                |
 | Atomic file writes  | `tempfile::NamedTempFile::persist()` — write to temp, rename atomically                        |
@@ -99,14 +99,14 @@ This crate is **monocoque-agent-rc** — a standalone MCP server that provides r
 | Process spawning    | `tokio::process::Command` with `kill_on_drop(true)` for agent session processes                |
 | IPC                 | `interprocess` crate — named pipes (Windows) / Unix domain sockets for local CLI control       |
 | Shutdown            | `CancellationToken` coordination — persist state, notify Slack, terminate children gracefully   |
-| Notifications       | `monocoque/nudge` custom method via `ServerNotification::CustomNotification`                    |
+| Notifications       | `intercom/nudge` custom method via `ServerNotification::CustomNotification`                     |
 
 ### Project Structure
 
 Two binary targets in a single Cargo workspace:
 
-- `monocoque-agent-rc` (server) — `src/main.rs`
-- `monocoque-ctl` (local CLI) — `ctl/main.rs`
+- `agent-intercom` (server) — `src/main.rs`
+- `agent-intercom-ctl` (local CLI) — `ctl/main.rs`
 
 ```text
 src/
@@ -143,7 +143,7 @@ src/
 │   ├── client.rs        # Socket Mode lifecycle, reconnection, message queue
 │   ├── events.rs        # Interaction handlers (buttons, modals, submissions)
 │   ├── blocks.rs        # Block Kit message builders (diffs, alerts, prompts)
-│   └── commands.rs      # Slash command router (/monocoque)
+│   └── commands.rs      # Slash command router (/intercom)
 ├── persistence/
 │   ├── mod.rs
 │   ├── db.rs            # SurrealDB connection, schema DDL bootstrap
@@ -159,13 +159,13 @@ src/
 ├── policy/
 │   ├── mod.rs
 │   ├── evaluator.rs     # Auto-approve rule matching against global allowlist
-│   └── watcher.rs       # notify-based hot-reload of .monocoque/settings.json
+│   └── watcher.rs       # notify-based hot-reload of .agentrc/settings.json
 ├── diff/
 │   ├── mod.rs           # Path validation utility (canonicalize + starts_with)
 │   └── applicator.rs    # Unified diff parsing, SHA-256 integrity, atomic writes
 └── ipc/
     ├── mod.rs
-    └── socket.rs        # Named pipe / Unix domain socket for monocoque-ctl
+    └── socket.rs        # Named pipe / Unix domain socket for agent-intercom-ctl
 ```
 
 ### MCP Tools (9 total, always visible to all agents)
@@ -193,7 +193,7 @@ Key data model relationships (all linked via `session_id` FK):
 - `Checkpoint` — session state snapshot with `file_hashes` map for divergence detection
 - `ContinuationPrompt` — forwarded meta-prompt with decision (`continue` | `refine` | `stop`)
 - `StallAlert` — watchdog notification (`pending` → `nudged` | `self_recovered` | `escalated` | `dismissed`)
-- `WorkspacePolicy` — in-memory auto-approve rules from `.monocoque/settings.json` (not persisted)
+- `WorkspacePolicy` — in-memory auto-approve rules from `.agentrc/settings.json` (not persisted)
 - `GlobalConfig` — TOML server configuration including Slack tokens, workspace root, authorized users, command allowlist, timeouts, stall thresholds
 
 ### Stall Detection Architecture
@@ -201,7 +201,7 @@ Key data model relationships (all linked via `session_id` FK):
 Per-session timer using `tokio::time::Interval` with reset on any MCP activity or `ping` call:
 
 1. Inactivity threshold exceeded → post stall alert to Slack with last-tool context
-2. Escalation threshold → auto-nudge via `monocoque/nudge` custom notification
+2. Escalation threshold → auto-nudge via `intercom/nudge` custom notification
 3. Agent still idle → increment nudge counter, retry up to `max_retries`
 4. Max retries exceeded → escalated alert with `@channel` mention
 5. Agent self-recovers → `chat.update` to dismiss alert, disable Slack buttons
@@ -230,7 +230,7 @@ All Slack-posting modules send messages through a rate-limited in-memory queue w
 
 ## Implementation Workflow
 
-This agent **inherits** and **overrides** `speckit.implement` for the monocoque-agent-rc crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
+This agent **inherits** and **overrides** `speckit.implement` for the agent-intercom crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
 
 For ad-hoc questions, fixes, or reviews that do not involve the full task plan, skip to the Supplemental Workflow section at the end.
 
@@ -290,7 +290,7 @@ For ad-hoc requests (fixes, reviews, questions) that do not involve the full tas
 - `#[allow(...)]` without a comment explaining why.
 - Magic numbers — use named constants or `GlobalConfig` fields.
 - Premature optimization — profile before reaching for `unsafe` or exotic data structures.
-- Raw SurrealDB queries outside repository modules — all DB access goes through `persistence/` repos.
+- Raw SQL queries outside repository modules — all DB access goes through `persistence/` repos.
 - Bare URLs in Slack messages — use Block Kit builders from `slack/blocks.rs`.
 - Holding locks across `.await` points.
 - Ignoring Slack rate limits — route all messages through the message queue.

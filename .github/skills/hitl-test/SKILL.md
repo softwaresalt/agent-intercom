@@ -1,17 +1,17 @@
 ---
 name: hitl-test
-description: "Usage: Run HITL tests. Executes human-in-the-loop test scenarios against a live monocoque-agent-rc server with real Slack integration."
+description: "Usage: Run HITL tests. Executes human-in-the-loop test scenarios against a live agent-intercom server with real Slack integration."
 version: 1.0
 maturity: experimental
 ---
 
 # HITL Integration Test Skill
 
-Executes structured test scenarios against a live monocoque-agent-rc MCP server to validate the full Slack-mediated approval workflow with a real human operator.
+Executes structured test scenarios against a live agent-intercom MCP server to validate the full Slack-mediated approval workflow with a real human operator.
 
 ## Prerequisites
 
-* `monocoque-agent-rc` is running via `run_debug.ps1` (or the VS Code task "Run monocoque-agent-rc (debug)")
+* `agent-intercom` is running via `run_debug.ps1` (or the VS Code task "Run agent-intercom (debug)")
 * The server is connected to a real Slack workspace with a configured `channel_id` in `.vscode/mcp.json`
 * The operator is actively monitoring the Slack channel on a device
 * The workspace may have `.agentrc/settings.json` with auto-approve rules (Scenario 2 will baseline this)

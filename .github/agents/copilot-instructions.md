@@ -1,6 +1,6 @@
-# monocoque-agent-rc Development Guidelines
+# agent-intercom Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-02-10
+Auto-generated from all feature plans. Last updated: 2026-02-23
 
 ## Active Technologies
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (002-sqlite-migration)

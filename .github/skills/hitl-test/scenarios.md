@@ -1,5 +1,5 @@
 ---
-description: "Structured HITL test scenarios for the monocoque-agent-rc approval workflow."
+description: "Structured HITL test scenarios for the agent-intercom approval workflow."
 ---
 
 # HITL Test Scenarios

@@ -1,17 +1,17 @@
 ---
-description: Shared Monocoque Agent RC development guidelines for custom agents.
+description: Shared agent-intercom development guidelines for custom agents.
 maturity: stable
 ---
-# monocoque-agent-rc Development Guidelines
+# agent-intercom Development Guidelines
 
-Last updated: 2026-02-15
+Last updated: 2026-02-23
 
 ## Active Technologies
 
 | Dependency | Version | Purpose |
 |---|---|---|
 | Rust | stable, edition 2021 | Language toolchain |
-| `rmcp` | 0.5 | MCP SDK (`ServerHandler`, `ToolRouter`, `ToolRoute`) |
+| `rmcp` | 0.13 | MCP SDK (`ServerHandler`, `ToolRouter`, `ToolRoute`) |
 | `axum` | 0.8 | HTTP/SSE transport (`StreamableHttpService` on `/mcp`) |
 | `slack-morphism` | 2.17 | Slack Socket Mode client |
 | `tokio` | 1.37 | Async runtime (full feature set) |
@@ -44,7 +44,7 @@ src/
   main.rs                 # CLI bootstrap, tokio runtime, server startup
   diff/                   # Unified diff parsing, patch application, atomic writes
     applicator.rs, patcher.rs, path_safety.rs, writer.rs
-  ipc/                    # IPC server (named pipes / Unix sockets) for monocoque-ctl
+  ipc/                    # IPC server (named pipes / Unix sockets) for agent-intercom-ctl
     server.rs, socket.rs
   mcp/                    # MCP protocol layer
     handler.rs            # AppState, AgentRcServer, ToolRouter wiring
@@ -75,7 +75,7 @@ src/
     events.rs             # Event dispatcher with authorization guard
     handlers/             # Per-event-type handlers
 ctl/
-  main.rs                 # monocoque-ctl companion CLI
+  main.rs                 # agent-intercom-ctl companion CLI
 lib/
   hve-core/               # External library (separate project)
 tests/
@@ -95,8 +95,8 @@ rustfmt.toml             # max_width = 100, edition = 2021
 
 | Binary | Path | Description |
 |---|---|---|
-| `monocoque-agent-rc` | `src/main.rs` | MCP remote agent server |
-| `monocoque-ctl` | `ctl/main.rs` | Local CLI companion (IPC client) |
+| `agent-intercom` | `src/main.rs` | MCP remote agent server |
+| `agent-intercom-ctl` | `ctl/main.rs` | Local CLI companion (IPC client) |
 
 ## Quality Gates
 
@@ -181,7 +181,7 @@ Never write production code before the corresponding test exists and has been ob
 * File-based SQLite for production, in-memory SQLite for tests (controlled by `connect(path, use_memory)`)
 * Schema uses idempotent DDL (`CREATE TABLE IF NOT EXISTS`) in `persistence/schema.rs`
 
-### MCP (rmcp 0.5)
+### MCP (rmcp 0.13)
 
 * Implements `ServerHandler` trait on `IntercomServer` in `mcp/handler.rs`
 * Tools registered via `ToolRouter` / `ToolRoute::new_dyn()` — no `#[tool]` proc macros
@@ -237,7 +237,7 @@ Never write production code before the corresponding test exists and has been ob
 
 | Concern | Approach |
 |---|---|
-| MCP SDK | `rmcp` 0.5 — `ServerHandler` trait, `ToolRouter` / `ToolRoute::new_dyn()` |
+| MCP SDK | `rmcp` 0.13 — `ServerHandler` trait, `ToolRouter` / `ToolRoute::new_dyn()` |
 | Transport (stdio) | `rmcp::transport::io::stdio()` for direct agent connections |
 | Transport (HTTP) | axum 0.8 with `StreamableHttpService` on `/mcp` |
 | Slack | `slack-morphism` 2.17 Socket Mode |
@@ -246,13 +246,13 @@ Never write production code before the corresponding test exists and has been ob
 | Workspace policy | JSON auto-approve rules (`.agentrc/settings.json`), hot-reloaded via `notify` |
 | Diff safety | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via `tempfile` |
 | Path security | All paths canonicalized and validated via `starts_with(workspace_root)` |
-| IPC | `interprocess` 2.0 — named pipes (Windows) / Unix domain sockets for `monocoque-ctl` |
+| IPC | `interprocess` 2.0 — named pipes (Windows) / Unix domain sockets for `agent-intercom-ctl` |
 | Shutdown | `CancellationToken` — persist state, notify Slack, terminate children gracefully |
 | ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0011) |
 
 ## Remote Approval Workflow for File Changes
 
-When the monocoque-agent-rc MCP server is running, agents **must** route all file modifications through the remote approval workflow instead of writing files directly. This allows the operator to review and approve every change via Slack before it touches the filesystem.
+When the agent-intercom MCP server is running, agents **must** route all file modifications through the remote approval workflow instead of writing files directly. This allows the operator to review and approve every change via Slack before it touches the filesystem.
 
 Additionally, **do not write multiple files in a single proposal.** Each file change must be proposed, reviewed, and approved separately to ensure clear audit trails and granular control.  Further, when modifying existing files, always generate a unified diff rather than sending the full file content. This provides better context for reviewers and reduces the risk of unintended changes.
 
