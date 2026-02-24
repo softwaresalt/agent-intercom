@@ -9,9 +9,9 @@ use rmcp::handler::server::{
     ServerHandler,
 };
 use rmcp::model::{
-    CallToolRequestParam, CallToolResult, ListResourceTemplatesResult, ListResourcesResult,
-    ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam, ReadResourceResult,
-    ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParam, CallToolResult, Implementation, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam,
+    ReadResourceResult, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use sqlx::SqlitePool;
@@ -171,47 +171,47 @@ impl IntercomServer {
             for tool in Self::all_tools() {
                 let name = tool.name.to_string();
                 match name.as_str() {
-                    "ask_approval" => {
+                    "check_clearance" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::ask_approval::handle(context))
                         }));
                     }
-                    "accept_diff" => {
+                    "check_diff" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::accept_diff::handle(context))
                         }));
                     }
-                    "heartbeat" => {
+                    "ping" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::heartbeat::handle(context))
                         }));
                     }
-                    "remote_log" => {
+                    "broadcast" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::remote_log::handle(context))
                         }));
                     }
-                    "forward_prompt" => {
+                    "transmit" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::forward_prompt::handle(context))
                         }));
                     }
-                    "check_auto_approve" => {
+                    "auto_check" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::check_auto_approve::handle(context))
                         }));
                     }
-                    "recover_state" => {
+                    "reboot" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::recover_state::handle(context))
                         }));
                     }
-                    "set_operational_mode" => {
+                    "switch_freq" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::set_operational_mode::handle(context))
                         }));
                     }
-                    "wait_for_instruction" => {
+                    "standby" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::wait_for_instruction::handle(context))
                         }));
@@ -245,7 +245,7 @@ impl IntercomServer {
     pub(crate) fn all_tools() -> Vec<Tool> {
         vec![
             Tool {
-                name: "ask_approval".into(),
+                name: "check_clearance".into(),
                 description: Some(
                     "Submit a code proposal for remote operator approval via Slack. \
                      Blocks until the operator responds or the timeout elapses."
@@ -266,7 +266,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "accept_diff".into(),
+                name: "check_diff".into(),
                 description: Some(
                     "Apply previously approved code changes to the local file system.".into(),
                 ),
@@ -282,7 +282,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "check_auto_approve".into(),
+                name: "auto_check".into(),
                 description: Some(
                     "Query the workspace auto-approve policy to determine whether an \
                      operation can bypass the remote approval gate."
@@ -300,7 +300,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "forward_prompt".into(),
+                name: "transmit".into(),
                 description: Some(
                     "Forward an agent-generated continuation prompt to the remote \
                      operator via Slack. Blocks until the operator responds."
@@ -320,7 +320,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "remote_log".into(),
+                name: "broadcast".into(),
                 description: Some(
                     "Send a non-blocking status log message to the Slack channel.".into(),
                 ),
@@ -337,7 +337,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "recover_state".into(),
+                name: "reboot".into(),
                 description: Some(
                     "Retrieve the last known state from persistent storage. Called on \
                      startup to check for interrupted sessions or pending requests."
@@ -353,7 +353,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "set_operational_mode".into(),
+                name: "switch_freq".into(),
                 description: Some(
                     "Switch between remote, local, and hybrid operational modes at runtime.".into(),
                 ),
@@ -368,7 +368,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "wait_for_instruction".into(),
+                name: "standby".into(),
                 description: Some(
                     "Place the agent in standby, polling for a resume signal or new \
                      command from the operator via Slack."
@@ -385,7 +385,7 @@ impl IntercomServer {
                 annotations: None,
             },
             Tool {
-                name: "heartbeat".into(),
+                name: "ping".into(),
                 description: Some(
                     "Lightweight liveness signal. Resets the stall detection timer and \
                      optionally stores a structured progress snapshot."
@@ -418,6 +418,10 @@ impl IntercomServer {
 impl ServerHandler for IntercomServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
+            server_info: Implementation {
+                name: env!("CARGO_PKG_NAME").into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()

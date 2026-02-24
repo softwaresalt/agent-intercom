@@ -7,7 +7,7 @@
 use serde_json::json;
 
 /// The tool name as registered in the MCP server.
-const TOOL_NAME: &str = "accept_diff";
+const TOOL_NAME: &str = "check_diff";
 
 /// Valid output status values per contract.
 const VALID_OUTPUT_STATUSES: &[&str] = &["applied", "error"];
@@ -202,7 +202,7 @@ fn error_request_not_found_structure() {
 
 #[test]
 fn tool_name_matches_contract() {
-    assert_eq!(TOOL_NAME, "accept_diff");
+    assert_eq!(TOOL_NAME, "check_diff");
 }
 
 #[test]

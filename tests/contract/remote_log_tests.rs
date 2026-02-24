@@ -7,7 +7,7 @@
 use serde_json::json;
 
 /// The tool name as registered in the MCP server.
-const TOOL_NAME: &str = "remote_log";
+const TOOL_NAME: &str = "broadcast";
 
 /// Valid severity level enum values per contract.
 const VALID_LEVELS: &[&str] = &["info", "success", "warning", "error"];
@@ -174,7 +174,7 @@ fn severity_error_renders_error_icon() {
 
 #[test]
 fn tool_name_matches_contract() {
-    assert_eq!(TOOL_NAME, "remote_log");
+    assert_eq!(TOOL_NAME, "broadcast");
 }
 
 #[test]

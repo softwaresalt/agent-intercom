@@ -7,7 +7,7 @@
 use serde_json::json;
 
 /// The tool name as registered in the MCP server.
-const TOOL_NAME: &str = "forward_prompt";
+const TOOL_NAME: &str = "transmit";
 
 /// Valid `prompt_type` enum values per contract.
 const VALID_PROMPT_TYPES: &[&str] = &[
@@ -180,7 +180,7 @@ fn output_instruction_present_only_when_refine() {
 
 #[test]
 fn tool_name_matches_contract() {
-    assert_eq!(TOOL_NAME, "forward_prompt");
+    assert_eq!(TOOL_NAME, "transmit");
 }
 
 /// Verify the tool definition from `mcp-tools.json` matches what the server

@@ -183,10 +183,10 @@ Never write production code before the corresponding test exists and has been ob
 
 ### MCP (rmcp 0.5)
 
-* Implements `ServerHandler` trait on `AgentRcServer` in `mcp/handler.rs`
+* Implements `ServerHandler` trait on `IntercomServer` in `mcp/handler.rs`
 * Tools registered via `ToolRouter` / `ToolRoute::new_dyn()` — no `#[tool]` proc macros
 * All 9 tools always registered and visible; inapplicable calls return descriptive errors
-* Blocking tools (`ask_approval`, `forward_prompt`, `wait_for_instruction`) use `tokio::sync::oneshot` channels
+* Blocking tools (`check_clearance`, `transmit`, `standby`) use `tokio::sync::oneshot` channels
 * HTTP transport: axum `StreamableHttpService` on `/mcp` endpoint
 * Stdio transport: `rmcp::transport::io::stdio()` for direct agent connections
 
@@ -261,12 +261,12 @@ For terminal commands, **never chain multiple commands together**. Each command 
 ### Required Call Sequence
 
 ```text
-1. check_auto_approve   →  Can this change bypass approval?
-2. ask_approval          →  Submit the proposal (blocks until operator responds)
-3. accept_diff           →  Apply the approved change to the filesystem
+1. auto_check       →  Can this change bypass approval?
+2. check_clearance   →  Submit the proposal (blocks until operator responds)
+3. check_diff        →  Apply the approved change to the filesystem
 ```
 
-### Step 1 — `check_auto_approve`
+### Step 1 — `auto_check`
 
 Call **before** every file write to check if the workspace policy allows the operation without human review.
 
@@ -278,7 +278,7 @@ Call **before** every file write to check if the workspace policy allows the ope
 - If `auto_approved: true` → the agent may write the file directly (skip steps 2–3).
 - If `auto_approved: false` → proceed to step 2.
 
-### Step 2 — `ask_approval`
+### Step 2 — `check_clearance`
 
 Submit the proposed change for operator review. This call **blocks** until the operator taps Accept/Reject in Slack or the timeout elapses.
 
@@ -296,13 +296,13 @@ Submit the proposed change for operator review. This call **blocks** until the o
 - `rejected` → do **not** apply the change. Adapt or abandon based on the `reason`.
 - `timeout` → treat as rejection. Do not retry automatically without operator guidance.
 
-### Step 3 — `accept_diff`
+### Step 3 — `check_diff`
 
 Apply the approved change to the filesystem. Only call this after receiving `status: "approved"`.
 
 | Parameter    | Type      | Required | Description |
 |--------------|-----------|----------|-------------|
-| `request_id` | `string`  | yes      | The `request_id` from the `ask_approval` response |
+| `request_id` | `string`  | yes      | The `request_id` from the `check_clearance` response |
 | `force`      | `boolean` | no       | `true` to overwrite even if the file changed since proposal |
 
 **Response:** `{ "status": "applied", "files_written": [{ "path": "...", "bytes": N }] }`
@@ -312,7 +312,7 @@ If the server returns `patch_conflict` (file changed since proposal), the agent 
 ### Rules
 
 1. **Never write files directly** when the MCP server is reachable. Always use the approval workflow.
-2. **One file per approval.** Submit each file change as a separate `ask_approval` call.
+2. **One file per approval.** Submit each file change as a separate `check_clearance` call.
 3. **Use unified diffs** when modifying existing files. Use raw file content only for new files.
 4. **Set `risk_level`** to `high` or `critical` for changes to configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
 5. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.

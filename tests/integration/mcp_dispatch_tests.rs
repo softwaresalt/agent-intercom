@@ -297,7 +297,7 @@ async fn transport_heartbeat_dispatch() {
     conn.handshake().await;
 
     let response = conn
-        .call_tool("heartbeat", json!({"status_message": "transport test"}))
+        .call_tool("ping", json!({"status_message": "transport test"}))
         .await;
 
     // Response must have a `result`, not an `error`.
@@ -321,7 +321,7 @@ async fn transport_heartbeat_dispatch() {
 
 // ── S003: recover_state dispatched via transport ──────────────
 
-/// S003 — Verify that `recover_state` dispatched via transport succeeds
+/// S003 — Verify that `reboot` (`recover_state`) dispatched via transport succeeds
 /// and returns `{"status": "clean"}` when no interrupted sessions exist.
 #[tokio::test]
 async fn transport_recover_state_dispatch() {
@@ -329,7 +329,7 @@ async fn transport_recover_state_dispatch() {
     let mut conn = SseConnection::connect(&base_url).await;
     conn.handshake().await;
 
-    let response = conn.call_tool("recover_state", json!({})).await;
+    let response = conn.call_tool("reboot", json!({})).await;
 
     assert!(
         response.get("error").is_none(),
@@ -383,14 +383,142 @@ async fn transport_malformed_args_returns_error() {
     let mut conn = SseConnection::connect(&base_url).await;
     conn.handshake().await;
 
-    // `set_operational_mode` expects `{ mode: "…" }`, not `{ wrong_field: 1 }`.
+    // `switch_freq` expects `{ mode: "…" }`, not `{ wrong_field: 1 }`.
     let response = conn
-        .call_tool("set_operational_mode", json!({"wrong_field": 99}))
+        .call_tool("switch_freq", json!({"wrong_field": 99}))
         .await;
 
     assert!(
         response.get("error").is_some(),
         "malformed args should produce a JSON-RPC error; got {response}"
+    );
+
+    ct.cancel();
+}
+// ── T033: tools/list returns 9 new intercom-themed names ─────
+
+/// T033 — Verify `tools/list` returns exactly 9 tools with the new
+/// intercom-themed names (`check_clearance`, `check_diff`, `auto_check`,
+/// `transmit`, `standby`, `ping`, `broadcast`, `reboot`, `switch_freq`).
+#[tokio::test]
+async fn transport_list_tools_uses_new_intercom_names() {
+    let (base_url, ct) = spawn_test_server().await;
+    let mut conn = SseConnection::connect(&base_url).await;
+    conn.handshake().await;
+
+    let response = conn.list_tools().await;
+    let tools = response["result"]["tools"].as_array().expect("tools array");
+
+    let expected_names: std::collections::HashSet<&str> = [
+        "check_clearance",
+        "check_diff",
+        "auto_check",
+        "transmit",
+        "standby",
+        "ping",
+        "broadcast",
+        "reboot",
+        "switch_freq",
+    ]
+    .iter()
+    .copied()
+    .collect();
+
+    let actual_names: std::collections::HashSet<&str> =
+        tools.iter().filter_map(|t| t["name"].as_str()).collect();
+
+    assert_eq!(
+        actual_names, expected_names,
+        "tools/list should return exactly the 9 intercom-themed names; got {actual_names:?}"
+    );
+
+    ct.cancel();
+}
+
+// ── T034: ServerInfo reports "agent-intercom" ─────────────────
+
+/// T034 — Verify the MCP `initialize` handshake response contains
+/// `serverInfo.name == "agent-intercom"` and a non-empty `version`.
+#[tokio::test]
+async fn transport_server_info_reports_agent_intercom() {
+    let (base_url, ct) = spawn_test_server().await;
+    let mut conn = SseConnection::connect(&base_url).await;
+
+    // Run the initialize request directly and inspect the raw response.
+    let init_response = conn
+        .request(
+            "initialize",
+            json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "intercom-test",
+                    "version": "0.0.1"
+                }
+            }),
+        )
+        .await;
+
+    conn.notify("notifications/initialized", json!({})).await;
+
+    let server_info = &init_response["result"]["serverInfo"];
+    assert_eq!(
+        server_info["name"].as_str(),
+        Some("agent-intercom"),
+        "serverInfo.name should be 'agent-intercom'; got {server_info}"
+    );
+    assert!(
+        !server_info["version"].as_str().unwrap_or("").is_empty(),
+        "serverInfo.version should be non-empty; got {server_info}"
+    );
+
+    ct.cancel();
+}
+
+// ── T035: Old tool name is rejected ──────────────────────────
+
+/// T035 — Verify that calling the old tool name `ask_approval` via
+/// the transport returns a JSON-RPC error (tool not found).
+#[tokio::test]
+async fn transport_old_tool_name_returns_error() {
+    let (base_url, ct) = spawn_test_server().await;
+    let mut conn = SseConnection::connect(&base_url).await;
+    conn.handshake().await;
+
+    let response = conn
+        .call_tool(
+            "ask_approval",
+            json!({
+                "title": "test",
+                "diff": "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new",
+                "file_path": "src/main.rs"
+            }),
+        )
+        .await;
+
+    assert!(
+        response.get("error").is_some(),
+        "old tool name 'ask_approval' should produce a JSON-RPC error; got {response}"
+    );
+
+    ct.cancel();
+}
+
+// ── T037: Empty tool name returns error ───────────────────────
+
+/// T037 — Verify that `call_tool` with an empty string tool name
+/// returns a JSON-RPC error rather than panicking.
+#[tokio::test]
+async fn transport_empty_tool_name_returns_error() {
+    let (base_url, ct) = spawn_test_server().await;
+    let mut conn = SseConnection::connect(&base_url).await;
+    conn.handshake().await;
+
+    let response = conn.call_tool("", json!({})).await;
+
+    assert!(
+        response.get("error").is_some(),
+        "empty tool name should produce a JSON-RPC error; got {response}"
     );
 
     ct.cancel();

@@ -11,4 +11,5 @@ mod contract {
     mod remote_log_tests;
     mod resource_tests;
     mod schema_tests;
+    mod tool_names_tests;
 }

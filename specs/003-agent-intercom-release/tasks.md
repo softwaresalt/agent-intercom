@@ -114,24 +114,24 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T033 [P] [US4] Write contract test verifying `tools/list` returns 9 tools with new names (check_clearance, check_diff, auto_check, transmit, standby, ping, broadcast, reboot, switch_freq) in `tests/contract/schema_tests.rs` or new file (S022)
-- [ ] T034 [P] [US4] Write contract test verifying ServerInfo returns `name: "agent-intercom"` and `version` matches `env!("CARGO_PKG_VERSION")` in `tests/contract/schema_tests.rs` (S021)
-- [ ] T035 [P] [US4] Write contract test verifying old tool name `ask_approval` returns error when called in `tests/contract/` (S023)
-- [ ] T036 [P] [US4] Write contract test verifying each renamed tool preserves its input schema (check_clearance has same fields as ask_approval, etc.) in `tests/contract/` (S024, S025)
-- [ ] T037 [P] [US4] Write integration test verifying `call_tool` with empty string name returns error in `tests/integration/call_tool_dispatch_tests.rs` (S027)
-- [ ] T038 [US4] Run tests and confirm new assertions FAIL (red gate) before proceeding to implementation
+- [x] T033 [P] [US4] Write contract test verifying `tools/list` returns 9 tools with new names (check_clearance, check_diff, auto_check, transmit, standby, ping, broadcast, reboot, switch_freq) in `tests/contract/schema_tests.rs` or new file (S022)
+- [x] T034 [P] [US4] Write contract test verifying ServerInfo returns `name: "agent-intercom"` and `version` matches `env!("CARGO_PKG_VERSION")` in `tests/contract/schema_tests.rs` (S021)
+- [x] T035 [P] [US4] Write contract test verifying old tool name `ask_approval` returns error when called in `tests/contract/` (S023)
+- [x] T036 [P] [US4] Write contract test verifying each renamed tool preserves its input schema (check_clearance has same fields as ask_approval, etc.) in `tests/contract/` (S024, S025)
+- [x] T037 [P] [US4] Write integration test verifying `call_tool` with empty string name returns error in `tests/integration/call_tool_dispatch_tests.rs` (S027)
+- [x] T038 [US4] Run tests and confirm new assertions FAIL (red gate) before proceeding to implementation
 
 ### Implementation for User Story 4
 
-- [ ] T039 [US4] Update `Tool::name` fields for all 9 tools in tool registration in `src/mcp/handler.rs` per mapping: ask_approval→check_clearance, accept_diff→check_diff, check_auto_approve→auto_check, forward_prompt→transmit, wait_for_instruction→standby, heartbeat→ping, remote_log→broadcast, recover_state→reboot, set_operational_mode→switch_freq (FR-025)
-- [ ] T040 [US4] Update `ToolRouter` dispatch keys to match new tool names in `src/mcp/handler.rs`
-- [ ] T041 [US4] Set `ServerInfo { name: "agent-intercom", version: env!("CARGO_PKG_VERSION") }` in `src/mcp/handler.rs` (FR-004, FR-037)
-- [ ] T042 [P] [US4] Update all tool name references in `src/mcp/tools/mod.rs` (tool module re-exports, any name constants)
-- [ ] T042a [P] [US4] Update test assertion strings in `tests/contract/` that reference old tool names (`"ask_approval"` → `"check_clearance"`, `"accept_diff"` → `"check_diff"`, etc.) — deferred from Phase 3 T027 to avoid red state between phases
-- [ ] T043 [P] [US4] Update tool name references in copilot-instructions at `.github/copilot-instructions.md` (FR-026)
-- [ ] T044 [P] [US4] Update tool name references in all agent files in `.github/agents/` directory (FR-026)
-- [ ] T045 [US4] Run `cargo test` and confirm all tests pass including new contract tests (green gate) — EXIT GATE for Phase 4
-- [ ] T046 [US4] Verify all 9 tools visible regardless of config (S026): run contract test with minimal config
+- [x] T039 [US4] Update `Tool::name` fields for all 9 tools in tool registration in `src/mcp/handler.rs` per mapping: ask_approval→check_clearance, accept_diff→check_diff, check_auto_approve→auto_check, forward_prompt→transmit, wait_for_instruction→standby, heartbeat→ping, remote_log→broadcast, recover_state→reboot, set_operational_mode→switch_freq (FR-025)
+- [x] T040 [US4] Update `ToolRouter` dispatch keys to match new tool names in `src/mcp/handler.rs`
+- [x] T041 [US4] Set `ServerInfo { name: "agent-intercom", version: env!("CARGO_PKG_VERSION") }` in `src/mcp/handler.rs` (FR-004, FR-037)
+- [x] T042 [P] [US4] Update all tool name references in `src/mcp/tools/mod.rs` (tool module re-exports, any name constants)
+- [x] T042a [P] [US4] Update test assertion strings in `tests/contract/` that reference old tool names (`"ask_approval"` → `"check_clearance"`, `"accept_diff"` → `"check_diff"`, etc.) — deferred from Phase 3 T027 to avoid red state between phases
+- [x] T043 [P] [US4] Update tool name references in copilot-instructions at `.github/copilot-instructions.md` (FR-026)
+- [x] T044 [P] [US4] Update tool name references in all agent files in `.github/agents/` directory (FR-026)
+- [x] T045 [US4] Run `cargo test` and confirm all tests pass including new contract tests (green gate) — EXIT GATE for Phase 4
+- [x] T046 [US4] Verify all 9 tools visible regardless of config (S026): run contract test with minimal config
 
 **Checkpoint**: All tools have intercom-themed names, ServerInfo is correct, old names are rejected, copilot-instructions updated.
 

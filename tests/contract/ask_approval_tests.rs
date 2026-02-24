@@ -7,7 +7,7 @@
 use serde_json::json;
 
 /// The tool name as registered in the MCP server.
-const TOOL_NAME: &str = "ask_approval";
+const TOOL_NAME: &str = "check_clearance";
 
 /// Valid risk level enum values per contract.
 const VALID_RISK_LEVELS: &[&str] = &["low", "high", "critical"];
@@ -190,7 +190,7 @@ fn output_reason_present_only_when_rejected() {
 
 #[test]
 fn tool_name_matches_contract() {
-    assert_eq!(TOOL_NAME, "ask_approval");
+    assert_eq!(TOOL_NAME, "check_clearance");
 }
 
 /// Verify the tool definition from `mcp-tools.json` matches what the server

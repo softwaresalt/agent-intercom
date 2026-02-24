@@ -174,15 +174,15 @@ All tools are registered and visible regardless of session state. Inapplicable c
 
 | Tool                   | Purpose                                    | Blocks Agent |
 | ---------------------- | ------------------------------------------ | ------------ |
-| `ask_approval`         | Submit code diff for remote Slack approval  | Yes          |
-| `accept_diff`          | Apply approved changes to file system       | No           |
-| `check_auto_approve`   | Query workspace auto-approve policy         | No           |
-| `forward_prompt`       | Forward continuation prompt to Slack        | Yes          |
-| `remote_log`           | Send non-blocking status messages to Slack  | No           |
-| `recover_state`        | Retrieve state after server restart         | No           |
-| `set_operational_mode` | Switch between remote/local/hybrid modes    | No           |
-| `wait_for_instruction` | Enter standby until operator sends command  | Yes          |
-| `heartbeat`            | Reset stall timer during long operations    | No           |
+| `check_clearance`      | Submit code diff for remote Slack approval  | Yes          |
+| `check_diff`           | Apply approved changes to file system       | No           |
+| `auto_check`           | Query workspace auto-approve policy         | No           |
+| `transmit`             | Forward continuation prompt to Slack        | Yes          |
+| `broadcast`            | Send non-blocking status messages to Slack  | No           |
+| `reboot`               | Retrieve state after server restart         | No           |
+| `switch_freq`          | Switch between remote/local/hybrid modes    | No           |
+| `standby`              | Enter standby until operator sends command  | Yes          |
+| `ping`                 | Reset stall timer during long operations    | No           |
 
 ### Domain Entities
 
@@ -198,7 +198,7 @@ Key data model relationships (all linked via `session_id` FK):
 
 ### Stall Detection Architecture
 
-Per-session timer using `tokio::time::Interval` with reset on any MCP activity or `heartbeat` call:
+Per-session timer using `tokio::time::Interval` with reset on any MCP activity or `ping` call:
 
 1. Inactivity threshold exceeded → post stall alert to Slack with last-tool context
 2. Escalation threshold → auto-nudge via `monocoque/nudge` custom notification
@@ -216,7 +216,7 @@ Per-session timer using `tokio::time::Interval` with reset on any MCP activity o
 
 ### Blocking Tool Pattern
 
-Tools that block the agent (`ask_approval`, `forward_prompt`, `wait_for_instruction`) follow this pattern:
+Tools that block the agent (`check_clearance`, `transmit`, `standby`) follow this pattern:
 
 1. Create a persistence record for the pending request
 2. Post interactive message to Slack with action buttons
