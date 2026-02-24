@@ -5,10 +5,17 @@ on:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
 
+# Ensures partial platform failures abort the entire release (S056).
+# A failed build job cancels all sibling jobs and prevents publish from running.
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
+  # ── Quality gate ─────────────────────────────────────────────────────────────
   test:
     name: Quality Gates
     runs-on: ubuntu-latest
@@ -18,43 +25,82 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Format check
+        run: cargo fmt --all -- --check
+
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings -D clippy::pedantic
 
       - name: Tests
         run: cargo test
 
+  # ── Changelog generation ─────────────────────────────────────────────────────
+  # Runs in parallel with `test`. The generated changelog body is passed to
+  # the publish job via job outputs. Requires git-cliff (T088).
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.cliff.outputs.content }}
+    steps:
+      - name: Checkout (full history for cliff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog with git-cliff
+        id: cliff
+        uses: orhun/git-cliff-action@v3
+        with:
+          # Use built-in conventional-commits preset; no cliff.toml required.
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+  # ── Cross-platform release builds ────────────────────────────────────────────
+  # fail-fast: true ensures a partial platform failure aborts the entire release.
   build:
     name: Build ${{ matrix.target }}
     needs: test
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
+          # Linux x86_64 — native build; cross is available for additional targets
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
             binary_suffix: ""
+            use_cross: false
 
+          # Windows x86_64 — native MSVC build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
             binary_suffix: ".exe"
+            use_cross: false
 
+          # macOS Apple Silicon — native ARM64 build on M-series runner
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: tar.gz
             binary_suffix: ""
+            use_cross: false
 
+          # macOS Intel — native x86-64 build on Intel runner
           - os: macos-13
             target: x86_64-apple-darwin
             archive: tar.gz
             binary_suffix: ""
+            use_cross: false
 
     steps:
       - name: Checkout
@@ -65,40 +111,56 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Install `cross` for cross-compilation (T086).
+      # Used when use_cross is true (e.g., additional Linux/ARM targets in future).
+      - name: Install cross
+        if: matrix.use_cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
-      - name: Build release binaries
+      # Build with cross when use_cross is true, otherwise use cargo directly
+      - name: Build release binaries (cargo)
+        if: "!matrix.use_cross"
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Build release binaries (cross)
+        if: matrix.use_cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      # ── Archive: Unix (.tar.gz) ──────────────────────────────────────────────
       - name: Prepare archive (Unix)
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME}"
-          ARCHIVE_NAME="monocoque-agent-rc-${TAG}-${{ matrix.target }}.tar.gz"
+          ARCHIVE_NAME="agent-intercom-${TAG}-${{ matrix.target }}.tar.gz"
           STAGING="staging-${{ matrix.target }}"
           mkdir -p "${STAGING}"
-          cp "target/${{ matrix.target }}/release/monocoque-agent-rc${{ matrix.binary_suffix }}" "${STAGING}/"
-          cp "target/${{ matrix.target }}/release/monocoque-ctl${{ matrix.binary_suffix }}" "${STAGING}/"
-          cp config.toml "${STAGING}/config.toml.example"
+          cp "target/${{ matrix.target }}/release/agent-intercom${{ matrix.binary_suffix }}" "${STAGING}/"
+          cp "target/${{ matrix.target }}/release/agent-intercom-ctl${{ matrix.binary_suffix }}" "${STAGING}/"
+          cp config.toml.example "${STAGING}/"
           cp README.md "${STAGING}/"
           tar -czf "${ARCHIVE_NAME}" -C "${STAGING}" .
           echo "ASSET=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
 
+      # ── Archive: Windows (.zip) ──────────────────────────────────────────────
       - name: Prepare archive (Windows)
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
           $tag = "$env:GITHUB_REF_NAME"
-          $archiveName = "monocoque-agent-rc-$tag-${{ matrix.target }}.zip"
+          $archiveName = "agent-intercom-$tag-${{ matrix.target }}.zip"
           $staging = "staging-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          Copy-Item "target\${{ matrix.target }}\release\monocoque-agent-rc${{ matrix.binary_suffix }}" "$staging\"
-          Copy-Item "target\${{ matrix.target }}\release\monocoque-ctl${{ matrix.binary_suffix }}" "$staging\"
-          Copy-Item "config.toml" "$staging\config.toml.example"
+          Copy-Item "target\${{ matrix.target }}\release\agent-intercom${{ matrix.binary_suffix }}" "$staging\"
+          Copy-Item "target\${{ matrix.target }}\release\agent-intercom-ctl${{ matrix.binary_suffix }}" "$staging\"
+          Copy-Item "config.toml.example" "$staging\"
           Copy-Item "README.md" "$staging\"
           Compress-Archive -Path "$staging\*" -DestinationPath $archiveName
           "ASSET=$archiveName" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -110,9 +172,12 @@ jobs:
           path: ${{ env.ASSET }}
           if-no-files-found: error
 
+  # ── GitHub Releases publish ───────────────────────────────────────────────────
+  # Requires BOTH changelog and all build jobs to succeed before publishing.
+  # If any build job failed, this job will not run (fail-fast enforced).
   release:
-    name: Create GitHub Release
-    needs: build
+    name: Publish GitHub Release
+    needs: [changelog, build]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -124,7 +189,9 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          body: ${{ needs.changelog.outputs.body }}
           files: artifacts/*
-          generate_release_notes: true
+          fail_on_unmatched_files: true
+          generate_release_notes: false
           draft: false
           prerelease: ${{ contains(github.ref_name, '-pre') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

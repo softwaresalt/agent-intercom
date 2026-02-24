@@ -86,6 +86,13 @@ regex = "1.12.3"
 [dev-dependencies]
 serial_test = "3"
 
+[features]
+# No features are enabled by default. All optional capabilities must be opted in explicitly.
+default = []
+# Placeholder gate for the rmcp 0.13 upgrade (US5). Enable with --features rmcp-upgrade
+# once the ssed13 transport rewrite in src/mcp/sse.rs is complete.
+rmcp-upgrade = []
+
 [[bin]]
 name = "agent-intercom"
 path = "src/main.rs"
