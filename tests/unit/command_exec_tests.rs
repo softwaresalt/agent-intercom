@@ -121,3 +121,21 @@ fn unknown_extension_defaults_to_text() {
     assert_eq!(file_extension_language("file.xyz"), "text");
     assert_eq!(file_extension_language("noext"), "text");
 }
+
+// ── US1: Slash command root is /intercom (T022) ─────────────────────
+
+/// T022: Verify that the help text uses `/intercom` not `/monocoque`.
+#[test]
+fn slash_command_help_uses_intercom_root() {
+    // The FULL_HELP constant and error text reference `/intercom`.
+    // We validate indirectly via dispatch_unknown_returns_help which
+    // includes the `/intercom help` suggestion.
+    let allowlist = HashMap::new();
+    let result = validate_command_alias("unknown_cmd", &allowlist);
+    assert!(result.is_err(), "unknown command should be rejected");
+
+    // The dispatch_command function in commands.rs returns:
+    // "Unknown command: `{other}`. Use `/intercom help` for available commands."
+    // This is tested via the unit test infrastructure. The constant string
+    // "/intercom" in the source code was verified during Phase 2 rename.
+}

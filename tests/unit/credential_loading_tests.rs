@@ -11,7 +11,7 @@ fn sample_toml(workspace: &str) -> String {
         r#"
 default_workspace_root = '{workspace}'
 http_port = 3000
-ipc_name = "monocoque-agent-rc"
+ipc_name = "agent-intercom"
 max_concurrent_sessions = 1
 host_cli = "claude"
 
@@ -56,7 +56,7 @@ async fn env_var_only_credential_loading() {
     let (_temp, mut config) = make_config();
 
     // Set env vars (these will be used since the keychain service
-    // "monocoque-agent-rc" is almost certainly absent in CI/test envs).
+    // "agent-intercom" is almost certainly absent in CI/test envs).
     unsafe {
         std::env::set_var("SLACK_APP_TOKEN", "xapp-test-app-token");
         std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-bot-token");

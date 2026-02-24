@@ -227,7 +227,7 @@ impl SseConnection {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
                     "clientInfo": {
-                        "name": "monocoque-test",
+                        "name": "intercom-test",
                         "version": "0.0.1"
                     }
                 }),

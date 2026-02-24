@@ -160,3 +160,38 @@ fn missing_agentrc_dir_returns_deny_all() {
 
     assert!(!policy.enabled);
 }
+
+// ── US1: Policy directory constant assertion (T021) ──────────────────
+
+/// T021: Policy directory uses `.intercom` (not `.agentrc`).
+///
+/// Verifies that `PolicyLoader::load` reads from `.intercom/settings.json`.
+#[test]
+fn policy_directory_is_dot_intercom() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    // Write a policy under .intercom/ — the new directory name.
+    write_policy(
+        dir.path(),
+        r#"{"enabled": true, "auto_approve_commands": ["cargo check"]}"#,
+    );
+
+    let policy = PolicyLoader::load(dir.path()).expect("load from .intercom");
+    assert!(
+        policy.enabled,
+        "should load policy from .intercom/settings.json"
+    );
+
+    // Verify it does NOT load from .agentrc/ by creating one there too.
+    let old_dir = dir.path().join(".agentrc");
+    std::fs::create_dir_all(&old_dir).expect("create .agentrc dir");
+    std::fs::write(old_dir.join("settings.json"), r#"{"enabled": false}"#)
+        .expect("write old settings");
+
+    // Re-load: should still get enabled=true from .intercom, not false from .agentrc.
+    let policy2 = PolicyLoader::load(dir.path()).expect("load from .intercom again");
+    assert!(
+        policy2.enabled,
+        "policy should come from .intercom, not .agentrc"
+    );
+}
