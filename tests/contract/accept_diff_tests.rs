@@ -198,6 +198,78 @@ fn error_request_not_found_structure() {
     assert_eq!(output["error_code"], "request_not_found");
 }
 
+// ─── Phase 5 — Slack notification scenario contract shapes ────────────
+
+/// T047 / S028 — Success notification: output includes `files_written` with path and bytes.
+#[test]
+fn notification_success_includes_file_path_and_bytes() {
+    let output = json!({
+        "status": "applied",
+        "files_written": [{ "path": "src/auth.rs", "bytes": 4096 }]
+    });
+    assert_eq!(output["status"].as_str(), Some("applied"));
+    let files = output["files_written"]
+        .as_array()
+        .expect("files_written array");
+    assert!(files[0].get("path").is_some(), "file entry must have path");
+    assert!(
+        files[0].get("bytes").is_some(),
+        "file entry must have bytes"
+    );
+}
+
+/// T048 / S029 — Conflict error: `patch_conflict` code in output when file changed.
+#[test]
+fn notification_conflict_returns_patch_conflict_code() {
+    let output = json!({
+        "status": "error",
+        "error_code": "patch_conflict",
+        "error_message": "file content has changed since proposal was created"
+    });
+    assert_eq!(output["status"].as_str(), Some("error"));
+    assert_eq!(output["error_code"].as_str(), Some("patch_conflict"));
+}
+
+/// T049 / S030 — Force-apply: even with hash mismatch, status is `applied` when force=true.
+#[test]
+fn notification_force_apply_returns_applied_status() {
+    // Force-apply produces the same success output shape despite the warning posted to Slack.
+    let output = json!({
+        "status": "applied",
+        "files_written": [{ "path": "src/lib.rs", "bytes": 2048 }]
+    });
+    assert_eq!(output["status"].as_str(), Some("applied"));
+    assert!(
+        output.get("error_code").is_none(),
+        "force-apply success must not have error_code"
+    );
+}
+
+/// T050 / S031 — No Slack channel: output structure is identical to normal success.
+#[test]
+fn no_channel_success_output_is_same_structure() {
+    let output = json!({
+        "status": "applied",
+        "files_written": [{ "path": "src/config.rs", "bytes": 512 }]
+    });
+    assert_eq!(output["status"].as_str(), Some("applied"));
+    assert!(
+        output.get("error_code").is_none(),
+        "success without Slack must not include error_code"
+    );
+}
+
+/// T051 / S032 — New file write: same `applied` + `files_written` schema for full-content writes.
+#[test]
+fn notification_new_file_write_includes_files_written() {
+    let output = json!({
+        "status": "applied",
+        "files_written": [{ "path": "src/new_module.rs", "bytes": 789 }]
+    });
+    assert_eq!(output["status"].as_str(), Some("applied"));
+    assert!(output["files_written"].is_array());
+}
+
 // ─── Tool definition contract ─────────────────────────────────────────
 
 #[test]

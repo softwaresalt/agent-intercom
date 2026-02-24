@@ -111,3 +111,41 @@ pub fn diff_section(diff: &str) -> SlackBlock {
         SlackSectionBlock::new().with_text(SlackBlockText::MarkDown(content.into())),
     )
 }
+
+/// T063 — Build a success section for a `check_diff` apply notification.
+///
+/// Used by `accept_diff` after a successful patch application.
+#[must_use]
+pub fn diff_applied_section(file_path: &str, bytes: usize) -> SlackBlock {
+    severity_section(
+        "success",
+        &format!("Applied approved changes to `{file_path}` ({bytes} bytes written)"),
+    )
+}
+
+/// T064 — Build an alert section for a `check_diff` patch conflict notification.
+///
+/// Used by `accept_diff` when the file content has changed since the proposal.
+#[must_use]
+pub fn diff_conflict_section(file_path: &str) -> SlackBlock {
+    severity_section(
+        "error",
+        &format!(
+            "Patch conflict: `{file_path}` has changed since the proposal was created. \
+             Re-submit with `force: true` to override."
+        ),
+    )
+}
+
+/// T065 — Build a warning section for a `check_diff` force-apply notification.
+///
+/// Used by `accept_diff` when a diff is applied despite a hash mismatch.
+#[must_use]
+pub fn diff_force_warning_section(file_path: &str) -> SlackBlock {
+    severity_section(
+        "warning",
+        &format!(
+            "Force-applying diff to `{file_path}` \u{2014} file content has diverged since proposal"
+        ),
+    )
+}

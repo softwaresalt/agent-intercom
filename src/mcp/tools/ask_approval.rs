@@ -68,6 +68,35 @@ pub async fn handle(
     );
 
     async move {
+        // ── Early Slack channel check (T061 / S033) ─────────
+        // Return a descriptive error instead of blocking indefinitely when
+        // Slack is not configured or no channel_id is set for this session.
+        if state.slack.is_none() || channel_id.is_none() {
+            let (error_code, error_message) = if state.slack.is_none() {
+                (
+                    "slack_unavailable",
+                    "Slack service is not configured; check_clearance requires Slack",
+                )
+            } else {
+                (
+                    "no_channel",
+                    "no Slack channel configured for this session; \
+                     set channel_id in the SSE URL to enable approval requests",
+                )
+            };
+            let body = serde_json::json!({
+                "status": "error",
+                "error_code": error_code,
+                "error_message": error_message,
+            });
+            return Ok(CallToolResult::success(vec![rmcp::model::Content::json(
+                body,
+            )
+            .unwrap_or_else(|_| {
+                rmcp::model::Content::text(format!("{error_code}: {error_message}"))
+            })]));
+        }
+
         // ── Resolve session ──────────────────────────────────
         let session_repo = SessionRepo::new(Arc::clone(&state.db));
         let sessions = session_repo.list_active().await.map_err(|err| {

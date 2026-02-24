@@ -39,18 +39,27 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["approved", "rejected", "timeout"]
+            "enum": ["approved", "rejected", "timeout", "error"]
           },
           "request_id": {
             "type": "string",
-            "description": "Unique identifier. Pass to accept_diff to apply approved changes."
+            "description": "Unique identifier. Pass to check_diff to apply approved changes. Absent when status=error."
           },
           "reason": {
             "type": "string",
             "description": "Optional rejection note from the operator (only present when status=rejected)"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why check_clearance failed without blocking."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when status=error)"
           }
         },
-        "required": ["status", "request_id"]
+        "required": ["status"]
       }
     },
 
@@ -171,6 +180,15 @@
           "instruction": {
             "type": "string",
             "description": "Revised instruction text (present only when decision=refine)"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel"],
+            "description": "Present only when transmit fails immediately (e.g., no Slack channel configured)"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when error_code is set)"
           }
         },
         "required": ["decision"]
@@ -322,6 +340,15 @@
           "instruction": {
             "type": "string",
             "description": "New instruction text from operator, or null if bare resume"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel"],
+            "description": "Present only when standby fails immediately (e.g., no Slack channel configured)"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when error_code is set)"
           }
         },
         "required": ["status"]

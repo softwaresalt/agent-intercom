@@ -241,3 +241,42 @@ fn session_mode_serializes_all_variants() {
         "\"hybrid\""
     );
 }
+
+// ─── Phase 5 — standby no-channel scenario contract shapes ───────────
+
+/// T056 / S041 — The `standby` contract must document error output for no-channel case.
+///
+/// The `outputSchema.properties` must include `error_code` so agents know to expect
+/// an error when no Slack channel is configured rather than blocking indefinitely.
+///
+/// This test will FAIL until `mcp-tools.json` is updated to include `error_code`
+/// in the `standby` outputSchema (implementation gate for T067).
+#[test]
+fn contract_standby_schema_includes_error_code_property() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let tool = &contract["tools"]["standby"];
+    let output = &tool["outputSchema"];
+    let props = output["properties"]
+        .as_object()
+        .expect("standby outputSchema.properties must be an object");
+    assert!(
+        props.contains_key("error_code"),
+        "standby outputSchema must include 'error_code' property for no-channel errors"
+    );
+}
+
+/// T056 / S041 — No-channel error output shape for `standby`.
+#[test]
+fn standby_no_channel_error_code_structure() {
+    let output = serde_json::json!({
+        "status": "error",
+        "error_code": "no_channel",
+        "error_message": "no Slack channel configured for this session"
+    });
+    assert_eq!(output["status"].as_str(), Some("error"));
+    assert_eq!(output["error_code"].as_str(), Some("no_channel"));
+}

@@ -149,32 +149,32 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation (TDD required)**
 
-- [ ] T047 [P] [US2] Write contract test verifying `check_diff` (accept_diff) posts Slack message on successful patch apply in `tests/contract/accept_diff_tests.rs` (S028)
-- [ ] T048 [P] [US2] Write contract test verifying `check_diff` posts Slack alert on patch conflict (hash mismatch without force) in `tests/contract/accept_diff_tests.rs` (S029)
-- [ ] T049 [P] [US2] Write contract test verifying `check_diff` posts Slack warning on force-apply in `tests/contract/accept_diff_tests.rs` (S030)
-- [ ] T050 [P] [US2] Write contract test verifying `check_diff` applies patch without Slack message when no channel configured in `tests/contract/accept_diff_tests.rs` (S031)
-- [ ] T051 [P] [US2] Write contract test verifying `check_diff` posts Slack confirmation for new file write in `tests/contract/accept_diff_tests.rs` (S032)
-- [ ] T052 [P] [US2] Write contract test verifying `check_clearance` (ask_approval) returns descriptive error when no Slack channel configured in `tests/contract/ask_approval_tests.rs` (S033)
-- [ ] T053 [P] [US2] Write contract test verifying `check_clearance` returns error when Slack service is unavailable in `tests/contract/ask_approval_tests.rs` (S034)
-- [ ] T054 [P] [US2] Write contract test verifying rejection posts confirmation to Slack in `tests/contract/ask_approval_tests.rs` (S036, S037)
-- [ ] T055 [P] [US2] Write contract test verifying `transmit` (forward_prompt) returns error when no Slack channel configured in `tests/contract/forward_prompt_tests.rs` (S040)
-- [ ] T056 [P] [US2] Write contract test verifying `standby` (wait_for_instruction) returns error when no Slack channel configured — new file `tests/contract/wait_for_instruction_tests.rs` or add to existing (S041)
-- [ ] T057 [US2] Run tests and confirm all new notification assertions FAIL (red gate) before proceeding
+- [x] T047 [P] [US2] Write contract test verifying `check_diff` (accept_diff) posts Slack message on successful patch apply in `tests/contract/accept_diff_tests.rs` (S028)
+- [x] T048 [P] [US2] Write contract test verifying `check_diff` posts Slack alert on patch conflict (hash mismatch without force) in `tests/contract/accept_diff_tests.rs` (S029)
+- [x] T049 [P] [US2] Write contract test verifying `check_diff` posts Slack warning on force-apply in `tests/contract/accept_diff_tests.rs` (S030)
+- [x] T050 [P] [US2] Write contract test verifying `check_diff` applies patch without Slack message when no channel configured in `tests/contract/accept_diff_tests.rs` (S031)
+- [x] T051 [P] [US2] Write contract test verifying `check_diff` posts Slack confirmation for new file write in `tests/contract/accept_diff_tests.rs` (S032)
+- [x] T052 [P] [US2] Write contract test verifying `check_clearance` (ask_approval) returns descriptive error when no Slack channel configured in `tests/contract/ask_approval_tests.rs` (S033)
+- [x] T053 [P] [US2] Write contract test verifying `check_clearance` returns error when Slack service is unavailable in `tests/contract/ask_approval_tests.rs` (S034)
+- [x] T054 [P] [US2] Write contract test verifying rejection posts confirmation to Slack in `tests/contract/ask_approval_tests.rs` (S036, S037)
+- [x] T055 [P] [US2] Write contract test verifying `transmit` (forward_prompt) returns error when no Slack channel configured in `tests/contract/forward_prompt_tests.rs` (S040)
+- [x] T056 [P] [US2] Write contract test verifying `standby` (wait_for_instruction) returns error when no Slack channel configured — new file `tests/contract/wait_for_instruction_tests.rs` or add to existing (S041)
+- [x] T057 [US2] Run tests and confirm all new notification assertions FAIL (red gate) before proceeding
 
 ### Implementation for User Story 2
 
-- [ ] T058 [US2] Add Slack success notification in `src/mcp/tools/accept_diff.rs` after successful patch application: post file path + bytes written via `SlackService` (FR-012)
-- [ ] T059 [US2] Add Slack alert notification in `src/mcp/tools/accept_diff.rs` when patch conflict (hash mismatch) detected: post conflict details via `SlackService` (FR-013)
-- [ ] T060 [US2] Ensure Slack warning notification in `src/mcp/tools/accept_diff.rs` always fires on `force: true` with hash mismatch (FR-014)
-- [ ] T061 [US2] Add descriptive error return in `src/mcp/tools/ask_approval.rs` when no Slack channel configured (replace silent block with `CallToolResult` error) (FR-015)
-- [ ] T062 [US2] Add Slack notification for rejection delivery confirmation in `src/mcp/tools/ask_approval.rs` or `src/slack/events.rs` (FR-018)
-- [ ] T063 [P] [US2] Add Block Kit builder for accept_diff success notification in `src/slack/blocks.rs`
-- [ ] T064 [P] [US2] Add Block Kit builder for accept_diff conflict alert in `src/slack/blocks.rs`
-- [ ] T065 [P] [US2] Add Block Kit builder for accept_diff force-apply warning in `src/slack/blocks.rs`
-- [ ] T066 [P] [US2] Add Block Kit builder for rejection delivery confirmation in `src/slack/blocks.rs`
-- [ ] T067 [US2] Add error return for `transmit` (forward_prompt) and `standby` (wait_for_instruction) when no Slack channel configured in `src/mcp/tools/forward_prompt.rs` and `src/mcp/tools/wait_for_instruction.rs` (FR-016, FR-017 — verify existing behavior; add error path if missing)
-- [ ] T068 [US2] Run `cargo test` and confirm all notification tests pass (green gate) — EXIT GATE for Phase 5
-- [ ] T069 [US2] Run `cargo clippy -- -D warnings` and confirm zero warnings on notification code
+- [x] T058 [US2] Add Slack success notification in `src/mcp/tools/accept_diff.rs` after successful patch application: post file path + bytes written via `SlackService` (FR-012)
+- [x] T059 [US2] Add Slack alert notification in `src/mcp/tools/accept_diff.rs` when patch conflict (hash mismatch) detected: post conflict details via `SlackService` (FR-013)
+- [x] T060 [US2] Ensure Slack warning notification in `src/mcp/tools/accept_diff.rs` always fires on `force: true` with hash mismatch (FR-014)
+- [x] T061 [US2] Add descriptive error return in `src/mcp/tools/ask_approval.rs` when no Slack channel configured (replace silent block with `CallToolResult` error) (FR-015)
+- [x] T062 [US2] Add Slack notification for rejection delivery confirmation in `src/mcp/tools/ask_approval.rs` or `src/slack/events.rs` (FR-018)
+- [x] T063 [P] [US2] Add Block Kit builder for accept_diff success notification in `src/slack/blocks.rs`
+- [x] T064 [P] [US2] Add Block Kit builder for accept_diff conflict alert in `src/slack/blocks.rs`
+- [x] T065 [P] [US2] Add Block Kit builder for accept_diff force-apply warning in `src/slack/blocks.rs`
+- [x] T066 [P] [US2] Add Block Kit builder for rejection delivery confirmation in `src/slack/blocks.rs`
+- [x] T067 [US2] Add error return for `transmit` (forward_prompt) and `standby` (wait_for_instruction) when no Slack channel configured in `src/mcp/tools/forward_prompt.rs` and `src/mcp/tools/wait_for_instruction.rs` (FR-016, FR-017 — verify existing behavior; add error path if missing)
+- [x] T068 [US2] Run `cargo test` and confirm all notification tests pass (green gate) — EXIT GATE for Phase 5
+- [x] T069 [US2] Run `cargo clippy -- -D warnings` and confirm zero warnings on notification code
 
 **Checkpoint**: All 5 notification gaps fixed. Every lifecycle event produces a Slack notification when a channel is configured. No silent failures.
 

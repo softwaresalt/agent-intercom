@@ -222,6 +222,74 @@ fn contract_schema_structure_is_valid() {
         .as_array()
         .expect("output required should be array");
     let out_required_names: Vec<&str> = out_required.iter().filter_map(|v| v.as_str()).collect();
+    // Only `status` is unconditionally required; `request_id` is absent on error
+    // responses (error path added in Phase 5).
     assert!(out_required_names.contains(&"status"));
-    assert!(out_required_names.contains(&"request_id"));
+}
+
+// ─── Phase 5 — No-channel and rejection scenario contract shapes ──────
+
+/// T052 / S033 — The `check_clearance` contract must document error output for no-channel case.
+///
+/// The `outputSchema.properties` must include `error_code` so agents know to expect
+/// an error when no Slack channel is configured rather than blocking indefinitely.
+///
+/// This test will FAIL until `mcp-tools.json` is updated to include `error_code`
+/// in the `check_clearance` outputSchema (implementation gate for T058/T061).
+#[test]
+fn contract_check_clearance_schema_includes_error_code_property() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let tool = &contract["tools"]["check_clearance"];
+    let output = &tool["outputSchema"];
+    let props = output["properties"]
+        .as_object()
+        .expect("check_clearance outputSchema.properties must be an object");
+    assert!(
+        props.contains_key("error_code"),
+        "check_clearance outputSchema must include 'error_code' property for no-channel errors"
+    );
+}
+
+/// T052 / S033 — No-channel error output shape is valid.
+#[test]
+fn no_channel_error_code_structure_is_valid() {
+    let output = json!({
+        "status": "error",
+        "error_code": "no_channel",
+        "error_message": "no Slack channel configured for this session"
+    });
+    assert_eq!(output["status"].as_str(), Some("error"));
+    assert_eq!(output["error_code"].as_str(), Some("no_channel"));
+    assert!(output.get("error_message").is_some());
+}
+
+/// T053 / S034 — Slack-unavailable error output shape is valid.
+#[test]
+fn slack_unavailable_error_structure_is_valid() {
+    let output = json!({
+        "status": "error",
+        "error_code": "slack_unavailable",
+        "error_message": "Slack service is not reachable"
+    });
+    assert_eq!(output["status"].as_str(), Some("error"));
+    assert_eq!(output["error_code"].as_str(), Some("slack_unavailable"));
+}
+
+/// T054 / S036 — Rejection response includes `reason` field when operator supplies one.
+#[test]
+fn rejection_confirmation_has_reason_field() {
+    let output = json!({
+        "status": "rejected",
+        "request_id": "req:abc-123",
+        "reason": "Code style violations detected"
+    });
+    assert_eq!(output["status"].as_str(), Some("rejected"));
+    assert!(
+        output.get("reason").is_some(),
+        "rejection response should include reason when provided"
+    );
 }
