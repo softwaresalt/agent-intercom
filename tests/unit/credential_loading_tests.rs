@@ -4,7 +4,7 @@
 //! missing credential error message quality, optional `SLACK_TEAM_ID`,
 //! and empty env-var handling.
 
-use monocoque_agent_rc::config::GlobalConfig;
+use agent_intercom::config::GlobalConfig;
 
 fn sample_toml(workspace: &str) -> String {
     format!(
@@ -109,7 +109,7 @@ async fn missing_required_credential_error_names_both_sources() {
     let err_msg = format!("{}", result.unwrap_err());
     // The error should mention the keychain service name.
     assert!(
-        err_msg.contains("monocoque-agent-rc"),
+        err_msg.contains("agent-intercom"),
         "error should mention keychain service name, got: {err_msg}"
     );
     // The error should mention the environment variable name.

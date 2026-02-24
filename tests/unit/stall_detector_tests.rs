@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use monocoque_agent_rc::orchestrator::stall_detector::{StallDetector, StallEvent};
+use agent_intercom::orchestrator::stall_detector::{StallDetector, StallEvent};
 
 /// Helper to create a detector with short thresholds for testing.
 fn test_detector(

@@ -10,7 +10,7 @@ use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
 use tracing::{info, info_span, Instrument};
 
-use crate::mcp::handler::AgentRcServer;
+use crate::mcp::handler::IntercomServer;
 use crate::persistence::session_repo::SessionRepo;
 use crate::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
 use crate::policy::loader::PolicyLoader;
@@ -30,7 +30,7 @@ struct CheckAutoApproveInput {
 ///
 /// Returns `rmcp::ErrorData` on validation or infrastructure failures.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRcServer>,
+    context: ToolCallContext<'_, IntercomServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();

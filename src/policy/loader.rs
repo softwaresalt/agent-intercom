@@ -1,6 +1,6 @@
 //! Workspace policy file loader (T061).
 //!
-//! Parses `.agentrc/settings.json` from a workspace root into a
+//! Parses `.intercom/settings.json` from a workspace root into a
 //! [`WorkspacePolicy`]. On parse errors, returns a deny-all default
 //! and emits a tracing warning.
 
@@ -13,13 +13,13 @@ use crate::models::policy::WorkspacePolicy;
 use crate::Result;
 
 /// Relative path within a workspace root to the policy file.
-const POLICY_PATH: &str = ".agentrc/settings.json";
+const POLICY_PATH: &str = ".intercom/settings.json";
 
 /// Loads and validates a workspace policy.
 pub struct PolicyLoader;
 
 impl PolicyLoader {
-    /// Load a [`WorkspacePolicy`] from `{workspace_root}/.agentrc/settings.json`.
+    /// Load a [`WorkspacePolicy`] from `{workspace_root}/.intercom/settings.json`.
     ///
     /// # Behaviour
     ///

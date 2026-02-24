@@ -13,7 +13,7 @@ use slack_morphism::prelude::{SlackBlock, SlackChannelId};
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
 
-use crate::mcp::handler::{AgentRcServer, PromptResponse};
+use crate::mcp::handler::{IntercomServer, PromptResponse};
 use crate::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
@@ -47,7 +47,7 @@ fn default_prompt_type() -> PromptType {
 /// Returns `rmcp::ErrorData` on validation or infrastructure failures.
 #[allow(clippy::too_many_lines)] // Prompt flow is inherently sequential with many steps.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRcServer>,
+    context: ToolCallContext<'_, IntercomServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().map(str::to_owned);

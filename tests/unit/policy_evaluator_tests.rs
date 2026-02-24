@@ -3,9 +3,9 @@
 //! Validates command matching, tool matching, file pattern glob matching,
 //! and `risk_level_threshold` enforcement.
 
-use monocoque_agent_rc::models::approval::RiskLevel;
-use monocoque_agent_rc::models::policy::{FilePatterns, WorkspacePolicy};
-use monocoque_agent_rc::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
+use agent_intercom::models::approval::RiskLevel;
+use agent_intercom::models::policy::{FilePatterns, WorkspacePolicy};
+use agent_intercom::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
 
 /// Helper to build a policy with the given overrides applied to defaults.
 fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> WorkspacePolicy {

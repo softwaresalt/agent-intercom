@@ -12,10 +12,10 @@ use std::time::Duration;
 
 use tokio::sync::oneshot;
 
-use monocoque_agent_rc::config::GlobalConfig;
-use monocoque_agent_rc::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
-use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
-use monocoque_agent_rc::persistence::db;
+use agent_intercom::config::GlobalConfig;
+use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+use agent_intercom::persistence::approval_repo::ApprovalRepo;
+use agent_intercom::persistence::db;
 
 /// Build a minimal test configuration with in-memory DB.
 fn test_config() -> GlobalConfig {

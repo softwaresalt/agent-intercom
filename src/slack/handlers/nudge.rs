@@ -79,7 +79,7 @@ pub async fn handle_nudge_action(
             .await
             .map_err(|err| format!("failed to increment nudge: {err}"))?;
 
-        // Send monocoque/nudge notification to agent via stall detector handle.
+        // Send intercom/nudge notification to agent via stall detector handle.
         if let Some(ref detectors) = state.stall_detectors {
             let guards = detectors.lock().await;
             if let Some(handle) = guards.get(&alert.session_id) {

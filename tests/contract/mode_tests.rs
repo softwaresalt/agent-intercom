@@ -204,7 +204,7 @@ fn wait_output_instruction_null_on_bare_resume() {
 
 #[test]
 fn session_mode_deserializes_all_variants() {
-    use monocoque_agent_rc::models::session::SessionMode;
+    use agent_intercom::models::session::SessionMode;
 
     let remote: SessionMode = serde_json::from_str("\"remote\"").expect("remote");
     assert_eq!(remote, SessionMode::Remote);
@@ -218,7 +218,7 @@ fn session_mode_deserializes_all_variants() {
 
 #[test]
 fn session_mode_rejects_invalid_variant() {
-    use monocoque_agent_rc::models::session::SessionMode;
+    use agent_intercom::models::session::SessionMode;
 
     let result: std::result::Result<SessionMode, _> = serde_json::from_str("\"offline\"");
     assert!(result.is_err(), "offline is not a valid SessionMode");
@@ -226,7 +226,7 @@ fn session_mode_rejects_invalid_variant() {
 
 #[test]
 fn session_mode_serializes_all_variants() {
-    use monocoque_agent_rc::models::session::SessionMode;
+    use agent_intercom::models::session::SessionMode;
 
     assert_eq!(
         serde_json::to_string(&SessionMode::Remote).expect("ser"),

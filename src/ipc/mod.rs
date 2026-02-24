@@ -1,4 +1,4 @@
-//! Local IPC layer for `monocoque-ctl` interaction.
+//! Local IPC layer for `agent-intercom-ctl` interaction.
 //!
 //! Provides a named pipe (Windows) or Unix domain socket (Linux/macOS)
 //! server that accepts JSON-line commands from the companion CLI.

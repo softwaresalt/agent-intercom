@@ -1,6 +1,6 @@
-//! Slack slash command router for `/monocoque` commands.
+//! Slack slash command router for `/intercom` commands.
 //!
-//! Parses `/monocoque <command> [args]` from Slack slash command events,
+//! Parses `/intercom <command> [args]` from Slack slash command events,
 //! dispatches to handlers by command name, and verifies user authorization
 //! (FR-013). Session-scoped commands also verify session ownership.
 //!
@@ -24,7 +24,7 @@ use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::db::Database;
 use crate::persistence::session_repo::SessionRepo;
 
-/// Handle incoming `/monocoque` slash commands routed via Socket Mode.
+/// Handle incoming `/intercom` slash commands routed via Socket Mode.
 ///
 /// # Errors
 ///
@@ -141,7 +141,7 @@ async fn dispatch_command(
                     handle_run_command(other, &shell_command, user_id, state).await
                 }
                 Err(_) => Ok(format!(
-                    "Unknown command: `{other}`. Use `/monocoque help` for available commands."
+                    "Unknown command: `{other}`. Use `/intercom help` for available commands."
                 )),
             }
         }
@@ -161,7 +161,7 @@ fn handle_help(category: Option<&str>) -> String {
 }
 
 const FULL_HELP: &str = "\
-*Available `/monocoque` commands:*
+*Available `/intercom` commands:*
 
 *Session Management*
 • `session-start <prompt>` — Start a new agent session

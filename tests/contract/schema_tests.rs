@@ -3,7 +3,7 @@
 //! Verify that table creation and column definitions match the
 //! contracts/schema.sql.md specification.
 
-use monocoque_agent_rc::persistence::db;
+use agent_intercom::persistence::db;
 
 /// T004: File-backed `connect()` creates all 5 tables with correct columns.
 #[tokio::test]

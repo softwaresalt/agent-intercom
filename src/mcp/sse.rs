@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use super::handler::{AgentRcServer, AppState};
+use super::handler::{AppState, IntercomServer};
 use crate::{AppError, Result};
 
 /// Handler for `GET /health` — returns 200 OK with a plain-text body.
@@ -44,7 +44,7 @@ fn extract_channel_id(uri: &axum::http::Uri) -> Option<String> {
 
 /// Start the HTTP/SSE MCP transport on `config.http_port`.
 ///
-/// Each SSE connection creates a fresh [`AgentRcServer`] sharing the
+/// Each SSE connection creates a fresh [`IntercomServer`] sharing the
 /// same [`AppState`].  When the client connects with a `channel_id`
 /// query parameter the per-session Slack channel is overridden.
 ///
@@ -68,14 +68,14 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
 
     // Shared inbox: the middleware writes the channel_id extracted from
     // the query string; the factory closure reads it when creating the
-    // per-session AgentRcServer.  A semaphore serialises SSE connection
+    // per-session IntercomServer.  A semaphore serialises SSE connection
     // establishment so the inbox value is never clobbered by a concurrent
     // connection.
     let channel_inbox: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
     let connection_semaphore = Arc::new(Semaphore::new(1));
 
-    // Each inbound SSE connection gets its own AgentRcServer instance.
+    // Each inbound SSE connection gets its own IntercomServer instance.
     let inbox_for_factory = Arc::clone(&channel_inbox);
     let server_ct = {
         let state = Arc::clone(&state);
@@ -87,7 +87,7 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
             if let Some(ref ch) = channel_override {
                 info!(channel_id = %ch, "SSE session with per-workspace channel override");
             }
-            AgentRcServer::with_channel_override(Arc::clone(&state), channel_override)
+            IntercomServer::with_channel_override(Arc::clone(&state), channel_override)
         })
     };
 

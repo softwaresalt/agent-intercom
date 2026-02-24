@@ -2,8 +2,7 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
-use monocoque_agent_rc::models::{
+use agent_intercom::models::{
     approval::{ApprovalRequest, ApprovalStatus, RiskLevel},
     checkpoint::Checkpoint,
     policy::{FilePatterns, WorkspacePolicy},
@@ -12,6 +11,7 @@ use monocoque_agent_rc::models::{
     session::{Session, SessionMode, SessionStatus},
     stall::{StallAlert, StallAlertStatus},
 };
+use chrono::Utc;
 
 // ── Session ──────────────────────────────────────────
 

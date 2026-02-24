@@ -12,14 +12,14 @@
 
 use std::time::Duration;
 
-use monocoque_agent_rc::policy::watcher::PolicyWatcher;
+use agent_intercom::policy::watcher::PolicyWatcher;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Create a `.agentrc/settings.json` file in the given directory with the provided JSON body.
+/// Create a `.intercom/settings.json` file in the given directory with the provided JSON body.
 fn write_policy_file(dir: &std::path::Path, json: &str) {
-    let agentrc = dir.join(".agentrc");
-    std::fs::create_dir_all(&agentrc).expect("create .agentrc dir");
+    let agentrc = dir.join(".intercom");
+    std::fs::create_dir_all(&agentrc).expect("create .intercom dir");
     std::fs::write(agentrc.join("settings.json"), json).expect("write settings.json");
 }
 
@@ -33,7 +33,7 @@ async fn poll_until<F>(
     pred: F,
 ) -> bool
 where
-    F: Fn(&monocoque_agent_rc::models::policy::WorkspacePolicy) -> bool,
+    F: Fn(&agent_intercom::models::policy::WorkspacePolicy) -> bool,
 {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     while tokio::time::Instant::now() < deadline {
@@ -115,7 +115,7 @@ async fn policy_file_deletion_falls_back_to_deny_all() {
     assert!(initial.enabled, "initial policy should have enabled=true");
 
     // Delete the policy file.
-    let policy_path = root.join(".agentrc").join("settings.json");
+    let policy_path = root.join(".intercom").join("settings.json");
     std::fs::remove_file(&policy_path).expect("remove settings.json");
 
     // Poll until the deny-all default is reflected (up to 2 s).

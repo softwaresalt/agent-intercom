@@ -25,8 +25,8 @@
 
 **Purpose**: Verify baseline state before making changes
 
-- [ ] T001 Verify `003-agent-intercom-release` branch is checked out and clean (`git status`)
-- [ ] T002 Run `cargo test` and confirm all existing tests pass before any modifications
+- [x] T001 Verify `003-agent-intercom-release` branch is checked out and clean (`git status`)
+- [x] T002 Run `cargo test` and confirm all existing tests pass before any modifications
 
 ---
 
@@ -40,28 +40,28 @@
 
 ### Core Cargo Rename
 
-- [ ] T003 Update `Cargo.toml` package name from `monocoque-agent-rc` to `agent-intercom`, rename both `[[bin]]` entries to `agent-intercom` and `agent-intercom-ctl`, update `repository`/`homepage`/`description` metadata (FR-001, FR-002, FR-010)
-- [ ] T004 Update `src/lib.rs` crate root: module doc comment, any `extern crate` references, re-export docs mentioning old name
-- [ ] T005 Update `src/main.rs` binary entry point: crate references, about text, CLI metadata to `agent-intercom`
-- [ ] T006 Update `ctl/main.rs` CLI entry point: crate references, about text, CLI metadata to `agent-intercom-ctl`
+- [x] T003 Update `Cargo.toml` package name from `monocoque-agent-rc` to `agent-intercom`, rename both `[[bin]]` entries to `agent-intercom` and `agent-intercom-ctl`, update `repository`/`homepage`/`description` metadata (FR-001, FR-002, FR-010)
+- [x] T004 Update `src/lib.rs` crate root: module doc comment, any `extern crate` references, re-export docs mentioning old name
+- [x] T005 Update `src/main.rs` binary entry point: crate references, about text, CLI metadata to `agent-intercom`
+- [x] T006 Update `ctl/main.rs` CLI entry point: crate references, about text, CLI metadata to `agent-intercom-ctl`
 
 ### Core String Constants
 
-- [ ] T007 [P] Update `KEYCHAIN_SERVICE` constant from `"monocoque-agent-rc"` to `"agent-intercom"` in `src/config.rs` (FR-006)
-- [ ] T008 [P] Update IPC pipe/socket name from `"monocoque-agent-rc"` to `"agent-intercom"` in `src/ipc/socket.rs` and `ctl/main.rs` (FR-007)
-- [ ] T009 [P] Update environment variable prefix from `MONOCOQUE_` to `INTERCOM_` in `src/config.rs` and `src/orchestrator/spawner.rs` (FR-008)
-- [ ] T010 [P] Update policy directory constants from `".agentrc"` to `".intercom"` and `".agentrc/settings.json"` to `".intercom/settings.json"` in `src/policy/loader.rs` and `src/policy/watcher.rs` (FR-003)
-- [ ] T011 [P] Update Slack slash command root from `"/monocoque"` to `"/intercom"` in `src/slack/commands.rs` (FR-005)
+- [x] T007 [P] Update `KEYCHAIN_SERVICE` constant from `"monocoque-agent-rc"` to `"agent-intercom"` in `src/config.rs` (FR-006)
+- [x] T008 [P] Update IPC pipe/socket name from `"monocoque-agent-rc"` to `"agent-intercom"` in `src/ipc/socket.rs` and `ctl/main.rs` (FR-007)
+- [x] T009 [P] Update environment variable prefix from `MONOCOQUE_` to `INTERCOM_` in `src/config.rs` and `src/orchestrator/spawner.rs` (FR-008)
+- [x] T010 [P] Update policy directory constants from `".agentrc"` to `".intercom"` and `".agentrc/settings.json"` to `".intercom/settings.json"` in `src/policy/loader.rs` and `src/policy/watcher.rs` (FR-003)
+- [x] T011 [P] Update Slack slash command root from `"/monocoque"` to `"/intercom"` in `src/slack/commands.rs` (FR-005)
 
 ### Global Import Update
 
-- [ ] T012 Replace all `use monocoque_agent_rc::` with `use agent_intercom::` across all files in `src/` directory
-- [ ] T013 Replace all `use monocoque_agent_rc::` with `use agent_intercom::` across all files in `tests/` directory
-- [ ] T014 Replace all `monocoque_agent_rc` references in `ctl/main.rs` extern imports
-- [ ] T015 Replace all occurrences of "monocoque" in source code doc comments (`///`), module doc comments (`//!`), and log messages across `src/` (FR-009)
-- [ ] T015a Rename `AgentRcServer` struct and all its references in `src/mcp/handler.rs`, `src/mcp/context.rs`, `tests/` — the "Rc" suffix is residue from the old "monocoque-agent-**rc**" branding (see Analysis finding U1)
-- [ ] T016 Replace all occurrences of "monocoque" string literals in `config.toml`
-- [ ] T017 Run `cargo check` and confirm zero compilation errors — EXIT GATE for Phase 2
+- [x] T012 Replace all `use monocoque_agent_rc::` with `use agent_intercom::` across all files in `src/` directory
+- [x] T013 Replace all `use monocoque_agent_rc::` with `use agent_intercom::` across all files in `tests/` directory
+- [x] T014 Replace all `monocoque_agent_rc` references in `ctl/main.rs` extern imports
+- [x] T015 Replace all occurrences of "monocoque" in source code doc comments (`///`), module doc comments (`//!`), and log messages across `src/` (FR-009)
+- [x] T015a Rename `AgentRcServer` struct and all its references in `src/mcp/handler.rs`, `src/mcp/context.rs`, `tests/` — the "Rc" suffix is residue from the old "monocoque-agent-**rc**" branding (see Analysis finding U1)
+- [x] T016 Replace all occurrences of "monocoque" string literals in `config.toml`
+- [x] T017 Run `cargo check` and confirm zero compilation errors — EXIT GATE for Phase 2
 
 **Checkpoint**: Codebase compiles under the new name. All `use` paths resolve. Constants reference `agent-intercom`.
 

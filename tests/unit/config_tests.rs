@@ -1,4 +1,4 @@
-use monocoque_agent_rc::{config::GlobalConfig, AppError};
+use agent_intercom::{config::GlobalConfig, AppError};
 
 fn sample_toml(workspace: &str) -> String {
     format!(

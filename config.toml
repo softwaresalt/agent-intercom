@@ -1,4 +1,4 @@
-# monocoque-agent-rc configuration
+# agent-intercom configuration
 #
 # Slack credentials are loaded from environment variables (not this file):
 #   SLACK_BOT_TOKEN  - Bot user OAuth token (xoxb-...)
@@ -11,7 +11,7 @@
 #                                    (e.g. U0123456789,U9876543210)
 #
 # Alternatively, store Slack tokens in the OS keychain under service
-# "monocoque-agent-rc" with keys: slack_bot_token, slack_app_token, slack_team_id
+# "agent-intercom" with keys: slack_bot_token, slack_app_token, slack_team_id
 #
 # Per-workspace Slack channel:
 #   Each VS Code workspace MUST specify the target Slack channel by appending
@@ -22,16 +22,16 @@
 #
 #     {
 #       "servers": {
-#         "monocoque": {
+#         "intercom": {
 #           "type": "sse",
 #           "url": "http://127.0.0.1:3000/sse?channel_id=C0123FRONTEND"
 #         }
 #       }
 #     }
 
-default_workspace_root = "D:/Source/GitHub/monocoque-agent-rc"
+default_workspace_root = "D:/Source/GitHub/agent-intercom"
 http_port = 3000
-ipc_name = "monocoque-agent-rc"
+ipc_name = "agent-intercom"
 max_concurrent_sessions = 3
 host_cli = "D:/Tools/ghcpcli/copilot.exe"
 host_cli_args = ["--stdio"]

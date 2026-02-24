@@ -188,8 +188,8 @@ fn checkpoint_with_no_current_files_all_diverged() {
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::checkpoint::Checkpoint;
-use monocoque_agent_rc::persistence::{checkpoint_repo::CheckpointRepo, db};
+use agent_intercom::models::checkpoint::Checkpoint;
+use agent_intercom::persistence::{checkpoint_repo::CheckpointRepo, db};
 
 fn sample_checkpoint(session_id: &str) -> Checkpoint {
     let mut hashes = HashMap::new();

@@ -1,8 +1,8 @@
-//! Local IPC server for `monocoque-ctl` commands (T087).
+//! Local IPC server for `agent-intercom-ctl` commands (T087).
 //!
 //! Listens on a named pipe (Windows) or Unix domain socket (Linux/macOS)
 //! using the `interprocess` crate. Accepts line-delimited JSON commands
-//! from `monocoque-ctl` and routes them to the appropriate handler.
+//! from `agent-intercom-ctl` and routes them to the appropriate handler.
 //!
 //! ## Protocol
 //!
@@ -35,7 +35,7 @@ use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::{AppError, Result};
 
-/// Inbound IPC request from `monocoque-ctl`.
+/// Inbound IPC request from `agent-intercom-ctl`.
 #[derive(Debug, Deserialize)]
 struct IpcRequest {
     /// Command verb.
@@ -52,7 +52,7 @@ struct IpcRequest {
     auth_token: Option<String>,
 }
 
-/// Outbound IPC response to `monocoque-ctl`.
+/// Outbound IPC response to `agent-intercom-ctl`.
 #[derive(Debug, Serialize)]
 struct IpcResponse {
     /// Whether the command succeeded.

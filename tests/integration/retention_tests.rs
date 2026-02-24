@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 
-use monocoque_agent_rc::models::approval::{ApprovalRequest, RiskLevel};
-use monocoque_agent_rc::models::checkpoint::Checkpoint;
-use monocoque_agent_rc::models::prompt::{ContinuationPrompt, PromptType};
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::models::stall::StallAlert;
-use monocoque_agent_rc::persistence::{
+use agent_intercom::models::approval::{ApprovalRequest, RiskLevel};
+use agent_intercom::models::checkpoint::Checkpoint;
+use agent_intercom::models::prompt::{ContinuationPrompt, PromptType};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::models::stall::StallAlert;
+use agent_intercom::persistence::{
     approval_repo::ApprovalRepo, checkpoint_repo::CheckpointRepo, db, prompt_repo::PromptRepo,
     retention, session_repo::SessionRepo, stall_repo::StallAlertRepo,
 };

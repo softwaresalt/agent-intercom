@@ -9,8 +9,8 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
-use monocoque_agent_rc::persistence::{approval_repo::ApprovalRepo, db};
+use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+use agent_intercom::persistence::{approval_repo::ApprovalRepo, db};
 
 fn sample_request(session_id: &str) -> ApprovalRequest {
     ApprovalRequest::new(

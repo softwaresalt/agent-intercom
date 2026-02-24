@@ -6,13 +6,13 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::orchestrator::checkpoint_manager::{
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::orchestrator::checkpoint_manager::{
     create_checkpoint, hash_workspace_files, restore_checkpoint, DivergenceKind,
 };
-use monocoque_agent_rc::persistence::checkpoint_repo::CheckpointRepo;
-use monocoque_agent_rc::persistence::db;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::persistence::checkpoint_repo::CheckpointRepo;
+use agent_intercom::persistence::db;
+use agent_intercom::persistence::session_repo::SessionRepo;
 
 // ── Checkpoint creation captures file hashes ─────────────────
 

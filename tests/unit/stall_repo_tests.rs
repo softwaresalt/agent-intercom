@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
-use monocoque_agent_rc::models::progress::{ProgressItem, ProgressStatus};
-use monocoque_agent_rc::models::stall::{StallAlert, StallAlertStatus};
-use monocoque_agent_rc::persistence::{db, stall_repo::StallAlertRepo};
+use agent_intercom::models::progress::{ProgressItem, ProgressStatus};
+use agent_intercom::models::stall::{StallAlert, StallAlertStatus};
+use agent_intercom::persistence::{db, stall_repo::StallAlertRepo};
 
 fn sample_alert(session_id: &str) -> StallAlert {
     StallAlert::new(

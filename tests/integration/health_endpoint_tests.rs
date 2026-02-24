@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use monocoque_agent_rc::mcp::sse::serve_sse;
+use agent_intercom::mcp::sse::serve_sse;
 
 use super::test_helpers::{test_app_state, test_config};
 
@@ -40,7 +40,7 @@ async fn spawn_server() -> (String, CancellationToken) {
     let state = {
         let mut cfg = (*state.config).clone();
         cfg.http_port = port;
-        let new_state = monocoque_agent_rc::mcp::handler::AppState {
+        let new_state = agent_intercom::mcp::handler::AppState {
             config: Arc::new(cfg),
             db: Arc::clone(&state.db),
             slack: None,

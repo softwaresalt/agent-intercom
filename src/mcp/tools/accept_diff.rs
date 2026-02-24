@@ -13,7 +13,7 @@ use tracing::{info, info_span, warn, Instrument};
 
 use crate::diff::patcher::apply_patch;
 use crate::diff::writer::write_full_file;
-use crate::mcp::handler::AgentRcServer;
+use crate::mcp::handler::IntercomServer;
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
@@ -50,7 +50,7 @@ fn error_result(code: &str, message: &str) -> CallToolResult {
 /// Returns tool-level error codes for domain validation failures.
 #[allow(clippy::too_many_lines)] // Sequential validation + apply flow.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRcServer>,
+    context: ToolCallContext<'_, IntercomServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().map(str::to_owned);

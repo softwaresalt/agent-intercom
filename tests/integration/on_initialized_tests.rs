@@ -1,4 +1,4 @@
-//! Integration tests for `AgentRcServer::on_initialized` auto-session
+//! Integration tests for `IntercomServer::on_initialized` auto-session
 //! creation and spawned-agent session verification.
 //!
 //! Validates:
@@ -12,7 +12,7 @@
 //!
 //! # Coverage note
 //!
-//! `AgentRcServer::on_initialized` cannot be invoked directly in tests because
+//! `IntercomServer::on_initialized` cannot be invoked directly in tests because
 //! `NotificationContext<RoleServer>` requires a live MCP transport to construct.
 //! These tests verify the constituent repository operations that `on_initialized`
 //! delegates to (session creation, status update, stale-cleanup) rather than the
@@ -25,10 +25,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use monocoque_agent_rc::mcp::handler::{AgentRcServer, AppState};
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::persistence::db;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::mcp::handler::{AppState, IntercomServer};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::persistence::db;
+use agent_intercom::persistence::session_repo::SessionRepo;
 use tokio::sync::Mutex;
 
 use super::test_helpers::test_config;
@@ -222,16 +222,16 @@ async fn server_constructors_correct_overrides() {
     });
 
     // new() — no overrides.
-    let server_plain = AgentRcServer::new(Arc::clone(&state));
+    let server_plain = IntercomServer::new(Arc::clone(&state));
     assert_eq!(server_plain.effective_channel_id(), Some("C_TEST"));
 
     // with_channel_override — channel set.
     let server_ch =
-        AgentRcServer::with_channel_override(Arc::clone(&state), Some("C_CUSTOM".into()));
+        IntercomServer::with_channel_override(Arc::clone(&state), Some("C_CUSTOM".into()));
     assert_eq!(server_ch.effective_channel_id(), Some("C_CUSTOM"));
 
     // with_overrides — both channel and session.
-    let server_full = AgentRcServer::with_overrides(
+    let server_full = IntercomServer::with_overrides(
         Arc::clone(&state),
         Some("C_FULL".into()),
         Some("session-123".into()),

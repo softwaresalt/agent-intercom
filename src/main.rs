@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! `monocoque-agent-rc` — MCP remote agent server binary.
+//! `agent-intercom` — MCP remote agent server binary.
 //!
 //! Bootstraps configuration, starts the MCP transport (HTTP/SSE or stdio),
-//! the Slack Socket Mode integration, and the IPC server for `monocoque-ctl`.
+//! the Slack Socket Mode integration, and the IPC server for `agent-intercom-ctl`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,14 +13,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
-use monocoque_agent_rc::config::GlobalConfig;
-use monocoque_agent_rc::mcp::handler::{
+use agent_intercom::config::GlobalConfig;
+use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
-use monocoque_agent_rc::mcp::{sse, transport};
-use monocoque_agent_rc::persistence::{db, retention};
-use monocoque_agent_rc::slack::client::{SlackRuntime, SlackService};
-use monocoque_agent_rc::{AppError, Result};
+use agent_intercom::mcp::{sse, transport};
+use agent_intercom::persistence::{db, retention};
+use agent_intercom::slack::client::{SlackRuntime, SlackService};
+use agent_intercom::{AppError, Result};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
 enum LogFormat {
@@ -40,7 +40,7 @@ enum Transport {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "monocoque-agent-rc", about = "MCP remote agent server", version, long_about = None)]
+#[command(name = "agent-intercom", about = "MCP remote agent server", version, long_about = None)]
 struct Cli {
     /// Path to the TOML configuration file.
     ///
@@ -74,7 +74,7 @@ struct Cli {
 fn main() -> Result<()> {
     let args = Cli::parse();
     init_tracing(args.log_format)?;
-    info!("monocoque-agent-rc server bootstrap");
+    info!("agent-intercom server bootstrap");
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -232,7 +232,7 @@ async fn run(args: Cli) -> Result<()> {
     )
     .await;
 
-    info!("monocoque-agent-rc shut down");
+    info!("agent-intercom shut down");
 
     Ok(())
 }
@@ -298,10 +298,10 @@ async fn shutdown_with_timeout(
 ///
 /// Returns `AppError` if any persistence or Slack operation fails.
 async fn graceful_shutdown(state: &AppState) -> Result<()> {
-    use monocoque_agent_rc::models::approval::ApprovalStatus;
-    use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
-    use monocoque_agent_rc::persistence::prompt_repo::PromptRepo;
-    use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+    use agent_intercom::models::approval::ApprovalStatus;
+    use agent_intercom::persistence::approval_repo::ApprovalRepo;
+    use agent_intercom::persistence::prompt_repo::PromptRepo;
+    use agent_intercom::persistence::session_repo::SessionRepo;
 
     let _span = tracing::info_span!("graceful_shutdown").entered();
 
@@ -326,7 +326,7 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
         if let Err(err) = prompt_repo
             .update_decision(
                 &prompt.id,
-                monocoque_agent_rc::models::prompt::PromptDecision::Stop,
+                agent_intercom::models::prompt::PromptDecision::Stop,
                 Some("server shutdown".into()),
             )
             .await
@@ -344,7 +344,7 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
         if let Err(err) = session_repo
             .set_terminated(
                 &session.id,
-                monocoque_agent_rc::models::session::SessionStatus::Interrupted,
+                agent_intercom::models::session::SessionStatus::Interrupted,
             )
             .await
         {
@@ -359,7 +359,7 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
             info!("no global Slack channel configured; skipping shutdown notification");
         } else {
             let channel = slack_morphism::prelude::SlackChannelId(ch.clone());
-            let msg = monocoque_agent_rc::slack::client::SlackMessage::plain(
+            let msg = agent_intercom::slack::client::SlackMessage::plain(
                 channel,
                 format!(
                     "\u{26a0}\u{fe0f} Server shutting down. {} session(s), {} approval(s), {} prompt(s) interrupted.",
@@ -389,9 +389,9 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
 /// Check for interrupted sessions on startup and optionally re-post
 /// pending requests to Slack (T082).
 async fn check_interrupted_on_startup(state: &AppState) {
-    use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
-    use monocoque_agent_rc::persistence::prompt_repo::PromptRepo;
-    use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+    use agent_intercom::persistence::approval_repo::ApprovalRepo;
+    use agent_intercom::persistence::prompt_repo::PromptRepo;
+    use agent_intercom::persistence::session_repo::SessionRepo;
 
     let _span = tracing::info_span!("startup_recovery_check").entered();
 
@@ -431,7 +431,7 @@ async fn check_interrupted_on_startup(state: &AppState) {
             info!("no global Slack channel configured; skipping startup recovery notification");
         } else {
             let channel = slack_morphism::prelude::SlackChannelId(ch.clone());
-            let msg = monocoque_agent_rc::slack::client::SlackMessage::plain(
+            let msg = agent_intercom::slack::client::SlackMessage::plain(
                 channel,
                 format!(
                     "\u{1f504} Server restarted. Found {} interrupted session(s) \

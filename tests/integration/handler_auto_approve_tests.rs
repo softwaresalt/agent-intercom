@@ -1,7 +1,7 @@
 //! Integration tests for the `check_auto_approve` tool handler logic.
 //!
 //! Validates:
-//! - Workspace with `.agentrc/settings.json` policy file → correct evaluation
+//! - Workspace with `.intercom/settings.json` policy file → correct evaluation
 //! - Missing policy file → deny-all (`auto_approved`: false)
 //! - Policy matches tool name → `auto_approved`: true
 //! - Policy with `risk_level` threshold enforcement
@@ -10,10 +10,10 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::policy::WorkspacePolicy;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
-use monocoque_agent_rc::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
-use monocoque_agent_rc::policy::loader::PolicyLoader;
+use agent_intercom::models::policy::WorkspacePolicy;
+use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
+use agent_intercom::policy::loader::PolicyLoader;
 
 use super::test_helpers::{create_active_session, test_app_state, test_config};
 
@@ -51,8 +51,8 @@ async fn auto_approve_matching_tool_approved() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    // Create .agentrc/settings.json with a permissive policy.
-    let agentrc_dir = root.join(".agentrc");
+    // Create .intercom/settings.json with a permissive policy.
+    let agentrc_dir = root.join(".intercom");
     std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
@@ -82,7 +82,7 @@ async fn auto_approve_non_matching_tool_denied() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let agentrc_dir = root.join(".agentrc");
+    let agentrc_dir = root.join(".intercom");
     std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
@@ -113,7 +113,7 @@ async fn auto_approve_risk_level_blocks_high_risk() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let agentrc_dir = root.join(".agentrc");
+    let agentrc_dir = root.join(".intercom");
     std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
@@ -149,7 +149,7 @@ async fn auto_approve_file_pattern_match() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let agentrc_dir = root.join(".agentrc");
+    let agentrc_dir = root.join(".intercom");
     std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     let policy_json = serde_json::json!({
         "enabled": true,
@@ -185,7 +185,7 @@ async fn auto_approve_malformed_policy_denies_all() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
 
-    let agentrc_dir = root.join(".agentrc");
+    let agentrc_dir = root.join(".intercom");
     std::fs::create_dir_all(&agentrc_dir).expect("create dir");
     std::fs::write(agentrc_dir.join("settings.json"), "not valid json {{{").expect("write policy");
 

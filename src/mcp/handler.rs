@@ -90,8 +90,8 @@ pub struct AppState {
 /// `on_initialized` to clean up stale direct-connection sessions on reconnect.
 const LOCAL_AGENT_OWNER: &str = "agent:local";
 
-/// MCP server implementation that exposes the nine monocoque-agent-rc tools.
-pub struct AgentRcServer {
+/// MCP server implementation that exposes the nine agent-intercom tools.
+pub struct IntercomServer {
     state: Arc<AppState>,
     /// Per-session Slack channel override supplied via SSE query parameter.
     channel_id_override: Option<String>,
@@ -99,7 +99,7 @@ pub struct AgentRcServer {
     session_id_override: Option<String>,
 }
 
-impl AgentRcServer {
+impl IntercomServer {
     /// Create a new MCP server bound to shared application state.
     #[must_use]
     pub fn new(state: Arc<AppState>) -> Self {
@@ -164,7 +164,7 @@ impl AgentRcServer {
     }
 
     fn tool_router() -> &'static ToolRouter<Self> {
-        static ROUTER: std::sync::OnceLock<ToolRouter<AgentRcServer>> = std::sync::OnceLock::new();
+        static ROUTER: std::sync::OnceLock<ToolRouter<IntercomServer>> = std::sync::OnceLock::new();
         ROUTER.get_or_init(|| {
             let mut router = ToolRouter::new();
 
@@ -415,7 +415,7 @@ impl AgentRcServer {
     }
 }
 
-impl ServerHandler for AgentRcServer {
+impl ServerHandler for IntercomServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder()

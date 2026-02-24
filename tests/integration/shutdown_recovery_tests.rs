@@ -6,13 +6,13 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
-use monocoque_agent_rc::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
-use monocoque_agent_rc::persistence::db;
-use monocoque_agent_rc::persistence::prompt_repo::PromptRepo;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::persistence::approval_repo::ApprovalRepo;
+use agent_intercom::persistence::db;
+use agent_intercom::persistence::prompt_repo::PromptRepo;
+use agent_intercom::persistence::session_repo::SessionRepo;
 
 use super::test_helpers::{test_app_state, test_config};
 

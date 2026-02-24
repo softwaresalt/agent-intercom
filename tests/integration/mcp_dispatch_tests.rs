@@ -15,8 +15,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use monocoque_agent_rc::mcp::handler::AppState;
-use monocoque_agent_rc::mcp::sse::serve_sse;
+use agent_intercom::mcp::handler::AppState;
+use agent_intercom::mcp::sse::serve_sse;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

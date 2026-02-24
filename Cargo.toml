@@ -6,10 +6,10 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["Monocoque Team"]
+authors = ["Agent Intercom Team"]
 description = "MCP remote agent server — review and approve AI agent code changes via Slack"
-repository = "https://github.com/softwaresalt/monocoque-agent-rc"
-homepage = "https://github.com/softwaresalt/monocoque-agent-rc"
+repository = "https://github.com/softwaresalt/agent-intercom"
+homepage = "https://github.com/softwaresalt/agent-intercom"
 keywords = ["mcp", "ai-agent", "slack", "code-review", "automation"]
 categories = ["command-line-utilities", "network-programming"]
 
@@ -44,7 +44,7 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [package]
-name = "monocoque-agent-rc"
+name = "agent-intercom"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -87,9 +87,9 @@ regex = "1.12.3"
 serial_test = "3"
 
 [[bin]]
-name = "monocoque-agent-rc"
+name = "agent-intercom"
 path = "src/main.rs"
 
 [[bin]]
-name = "monocoque-ctl"
+name = "agent-intercom-ctl"
 path = "ctl/main.rs"

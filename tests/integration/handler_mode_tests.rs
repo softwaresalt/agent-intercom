@@ -9,8 +9,8 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::session::SessionMode;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::models::session::SessionMode;
+use agent_intercom::persistence::session_repo::SessionRepo;
 
 use super::test_helpers::{create_active_session_with_mode, test_app_state, test_config};
 

@@ -2,7 +2,7 @@
 //!
 //! Spawns host CLI processes for new agent sessions. Each session gets
 //! its own child process with `kill_on_drop(true)` for safety. The
-//! `MONOCOQUE_WORKSPACE_ROOT` environment variable is set so the agent
+//! `INTERCOM_WORKSPACE_ROOT` environment variable is set so the agent
 //! knows its working directory.
 
 use std::process::Stdio;
@@ -80,9 +80,9 @@ pub async fn spawn_session(
     let mut cmd = Command::new(&config.host_cli);
     cmd.args(&config.host_cli_args)
         .arg(prompt)
-        .env("MONOCOQUE_WORKSPACE_ROOT", &workspace_path)
-        .env("MONOCOQUE_SSE_URL", &sse_url)
-        .env("MONOCOQUE_SESSION_ID", &created.id)
+        .env("INTERCOM_WORKSPACE_ROOT", &workspace_path)
+        .env("INTERCOM_SSE_URL", &sse_url)
+        .env("INTERCOM_SESSION_ID", &created.id)
         .current_dir(&workspace_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

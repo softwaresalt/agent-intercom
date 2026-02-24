@@ -123,7 +123,7 @@ fn default_http_port() -> u16 {
 }
 
 fn default_ipc_name() -> String {
-    "monocoque-agent-rc".into()
+    "agent-intercom".into()
 }
 
 /// Database configuration for the `SQLite` persistence layer.
@@ -224,7 +224,7 @@ impl GlobalConfig {
     /// Load Slack credentials from OS keychain with env-var fallback, and load
     /// authorized user IDs from `SLACK_MEMBER_IDS`.
     ///
-    /// Tries the `monocoque-agent-rc` keyring service first for Slack tokens,
+    /// Tries the `agent-intercom` keyring service first for Slack tokens,
     /// then falls back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment
     /// variables. `SLACK_TEAM_ID` is optional (FR-041) and will not cause an
     /// error if absent.
@@ -326,12 +326,12 @@ impl GlobalConfig {
 }
 
 /// Keychain service identifier used for credential storage.
-const KEYCHAIN_SERVICE: &str = "monocoque-agent-rc";
+const KEYCHAIN_SERVICE: &str = "agent-intercom";
 
 /// Load a single credential from OS keychain with env-var fallback.
 ///
 /// Resolution order:
-/// 1. OS keychain service `monocoque-agent-rc`, key `{keyring_key}`
+/// 1. OS keychain service `agent-intercom`, key `{keyring_key}`
 /// 2. Environment variable `{env_key}`
 ///
 /// Empty values from either source are treated as absent.
