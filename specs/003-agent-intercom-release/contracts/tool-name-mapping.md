@@ -43,9 +43,9 @@ This document defines the authoritative mapping between old MCP tool names and n
 **Input schema**: Unchanged — `timeout_seconds`  
 **Output schema**: Unchanged — `instruction`, `source`
 
-### signal (was: heartbeat)
+### ping (was: heartbeat)
 
-**Name**: `signal`  
+**Name**: `ping`  
 **Blocking**: No  
 **Input schema**: Unchanged — `session_id` (optional), `progress`  
 **Output schema**: Unchanged — `session_id`, `status`, `stall_warning`

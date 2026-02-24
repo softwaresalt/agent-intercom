@@ -40,7 +40,7 @@ The following constants change as part of the rename but do not affect stored da
 | `check_auto_approve` | `auto_check` |
 | `forward_prompt` | `transmit` |
 | `wait_for_instruction` | `standby` |
-| `heartbeat` | `signal` |
+| `heartbeat` | `ping` |
 | `remote_log` | `broadcast` |
 | `recover_state` | `reboot` |
 | `set_operational_mode` | `switch_freq` |

@@ -144,7 +144,7 @@ Code uses `#[cfg(feature = "rmcp-upgrade")]` for conditional compilation. This e
 | `check_auto_approve` | `auto_check` | Automatic clearance check |
 | `forward_prompt` | `transmit` | Transmitting a message |
 | `wait_for_instruction` | `standby` | Entering standby mode |
-| `heartbeat` | `signal` | Periodic signal |
+| `heartbeat` | `ping` | Periodic liveness ping |
 | `remote_log` | `broadcast` | Broadcasting status |
 | `recover_state` | `reboot` | Recovery/reboot process |
 | `set_operational_mode` | `switch_freq` | Switching frequency/mode |

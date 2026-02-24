@@ -114,7 +114,7 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T033 [P] [US4] Write contract test verifying `tools/list` returns 9 tools with new names (check_clearance, check_diff, auto_check, transmit, standby, signal, broadcast, reboot, switch_freq) in `tests/contract/schema_tests.rs` or new file (S022)
+- [ ] T033 [P] [US4] Write contract test verifying `tools/list` returns 9 tools with new names (check_clearance, check_diff, auto_check, transmit, standby, ping, broadcast, reboot, switch_freq) in `tests/contract/schema_tests.rs` or new file (S022)
 - [ ] T034 [P] [US4] Write contract test verifying ServerInfo returns `name: "agent-intercom"` and `version` matches `env!("CARGO_PKG_VERSION")` in `tests/contract/schema_tests.rs` (S021)
 - [ ] T035 [P] [US4] Write contract test verifying old tool name `ask_approval` returns error when called in `tests/contract/` (S023)
 - [ ] T036 [P] [US4] Write contract test verifying each renamed tool preserves its input schema (check_clearance has same fields as ask_approval, etc.) in `tests/contract/` (S024, S025)
@@ -123,7 +123,7 @@
 
 ### Implementation for User Story 4
 
-- [ ] T039 [US4] Update `Tool::name` fields for all 9 tools in tool registration in `src/mcp/handler.rs` per mapping: ask_approval→check_clearance, accept_diff→check_diff, check_auto_approve→auto_check, forward_prompt→transmit, wait_for_instruction→standby, heartbeat→signal, remote_log→broadcast, recover_state→reboot, set_operational_mode→switch_freq (FR-025)
+- [ ] T039 [US4] Update `Tool::name` fields for all 9 tools in tool registration in `src/mcp/handler.rs` per mapping: ask_approval→check_clearance, accept_diff→check_diff, check_auto_approve→auto_check, forward_prompt→transmit, wait_for_instruction→standby, heartbeat→ping, remote_log→broadcast, recover_state→reboot, set_operational_mode→switch_freq (FR-025)
 - [ ] T040 [US4] Update `ToolRouter` dispatch keys to match new tool names in `src/mcp/handler.rs`
 - [ ] T041 [US4] Set `ServerInfo { name: "agent-intercom", version: env!("CARGO_PKG_VERSION") }` in `src/mcp/handler.rs` (FR-004, FR-037)
 - [ ] T042 [P] [US4] Update all tool name references in `src/mcp/tools/mod.rs` (tool module re-exports, any name constants)
@@ -196,7 +196,7 @@
 
 - [ ] T071 [P] [US3] Rewrite `README.md` with new product name, binary names (`agent-intercom`, `agent-intercom-ctl`), quick start instructions, and updated feature list (FR-019)
 - [ ] T072 [P] [US3] Update `docs/setup-guide.md` with new Slack app creation steps (using `/intercom` command), credential configuration (keychain service `agent-intercom`, `INTERCOM_` env vars), and first run instructions (FR-020)
-- [ ] T073 [P] [US3] Update `docs/user-guide.md` with all 9 MCP tools using new names (check_clearance, check_diff, auto_check, transmit, standby, signal, broadcast, reboot, switch_freq), all Slack commands under `/intercom`, workspace policy config in `.intercom/settings.json` (FR-021)
+- [ ] T073 [P] [US3] Update `docs/user-guide.md` with all 9 MCP tools using new names (check_clearance, check_diff, auto_check, transmit, standby, ping, broadcast, reboot, switch_freq), all Slack commands under `/intercom`, workspace policy config in `.intercom/settings.json` (FR-021)
 - [ ] T074 [P] [US3] Create new `docs/developer-guide.md` covering build instructions, test commands (`cargo test`), project structure, coding conventions, contribution workflow, and the approval workflow process (FR-022)
 - [ ] T075 [P] [US3] Complete `agent-intercom-ctl` CLI documentation in `docs/user-guide.md` or separate `docs/cli-reference.md` with usage examples for every subcommand (FR-023)
 - [ ] T076 [P] [US3] Create new `docs/migration-guide.md` documenting transition steps: keychain rename, env var prefix change (`MONOCOQUE_` → `INTERCOM_`), Slack app command update (`/monocoque` → `/intercom`), policy directory rename (`.agentrc/` → `.intercom/`), `mcp.json` URL update, binary name change (FR-024)

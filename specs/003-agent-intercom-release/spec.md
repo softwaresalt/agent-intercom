@@ -178,7 +178,7 @@ A maintainer triggers a release workflow that produces versioned, platform-speci
   | `check_auto_approve` | `auto_check` | Automatic clearance check |
   | `forward_prompt` | `transmit` | Transmitting a message to the operator |
   | `wait_for_instruction` | `standby` | Entering standby awaiting operator |
-  | `heartbeat` | `signal` | Periodic liveness signal |
+  | `heartbeat` | `ping` | Periodic liveness ping |
   | `remote_log` | `broadcast` | Broadcasting a status message |
   | `recover_state` | `reboot` | Recovering from prior session state |
   | `set_operational_mode` | `switch_freq` | Switching operational frequency/mode |
@@ -226,7 +226,7 @@ A maintainer triggers a release workflow that produces versioned, platform-speci
 
 ### Session 2026-02-23
 
-- Q: What tool naming scheme should be used for FR-025 intercom-themed tool names? → A: Radio/intercom terminology with specific overrides: `check_clearance` (ask_approval), `check_diff` (accept_diff), `auto_check` (check_auto_approve), `transmit` (forward_prompt), `standby` (wait_for_instruction), `signal` (heartbeat), `broadcast` (remote_log), `reboot` (recover_state), `switch_freq` (set_operational_mode).
+- Q: What tool naming scheme should be used for FR-025 intercom-themed tool names? → A: Radio/intercom terminology with specific overrides: `check_clearance` (ask_approval), `check_diff` (accept_diff), `auto_check` (check_auto_approve), `transmit` (forward_prompt), `standby` (wait_for_instruction), `ping` (heartbeat), `broadcast` (remote_log), `reboot` (recover_state), `switch_freq` (set_operational_mode).
 - Q: How long should the deprecation period last for old .agentrc/ directory and MONOCOQUE_ env vars? → A: No deprecation period. Hard cutover — old names stop working immediately.
 
 ## Assumptions

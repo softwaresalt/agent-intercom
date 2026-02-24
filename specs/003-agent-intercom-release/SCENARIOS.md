@@ -71,7 +71,7 @@
 | Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
 |---|---|---|---|---|---|---|
 | S021 | ServerInfo reports correct name | Server running | MCP client connects, requests server info | `name: "agent-intercom"`, `version: "{crate_version}"` | ServerInfo returned | happy-path |
-| S022 | Tool list uses new names | Server running | MCP client calls `tools/list` | Returns 9 tools: check_clearance, check_diff, auto_check, transmit, standby, signal, broadcast, reboot, switch_freq | List returned | happy-path |
+| S022 | Tool list uses new names | Server running | MCP client calls `tools/list` | Returns 9 tools: check_clearance, check_diff, auto_check, transmit, standby, ping, broadcast, reboot, switch_freq | List returned | happy-path |
 | S023 | Old tool name rejected | Server running | MCP client calls `call_tool` with name `ask_approval` | Error: unknown tool `ask_approval` | Error returned | error |
 | S024 | check_clearance schema unchanged | Server running | MCP client inspects `check_clearance` input schema | Same fields as old `ask_approval`: title, diff, file_path, description, risk_level | Schema returned | happy-path |
 | S025 | check_diff schema unchanged | Server running | MCP client inspects `check_diff` input schema | Same fields as old `accept_diff`: request_id, force | Schema returned | happy-path |

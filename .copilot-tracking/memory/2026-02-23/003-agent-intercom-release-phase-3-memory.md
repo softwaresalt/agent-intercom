@@ -90,7 +90,7 @@ Phase 4 renames all 9 MCP tools using the mapping defined in the spec:
 | `check_auto_approve` | `auto_check` |
 | `forward_prompt` | `transmit` |
 | `wait_for_instruction` | `standby` |
-| `heartbeat` | `signal` |
+| `heartbeat` | `ping` |
 | `remote_log` | `broadcast` |
 | `recover_state` | `reboot` |
 | `set_operational_mode` | `switch_freq` |

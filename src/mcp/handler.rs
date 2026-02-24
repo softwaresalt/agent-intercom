@@ -242,7 +242,7 @@ impl IntercomServer {
     }
 
     #[allow(clippy::too_many_lines)] // Tool definitions are intentionally verbose for clarity.
-    fn all_tools() -> Vec<Tool> {
+    pub(crate) fn all_tools() -> Vec<Tool> {
         vec![
             Tool {
                 name: "ask_approval".into(),
