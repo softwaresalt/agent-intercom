@@ -65,12 +65,17 @@ jobs:
         id: cliff
         shell: bash
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPO: ${{ github.repository }}
         run: |
+          BODY="$(git-cliff --latest --strip header 2>/dev/null || true)"
+          if [ -z "$BODY" ]; then
+            BODY="No changelog entries for this release."
+          fi
           {
-            echo "content<<CLIFF_EOF"
-            git-cliff --latest --strip header
-            echo "CLIFF_EOF"
+            printf '%s\n' "content<<CLIFF_EOF"
+            printf '%s\n' "$BODY"
+            printf '%s\n' "CLIFF_EOF"
           } >> "$GITHUB_OUTPUT"
 
   # ── Cross-platform release builds ────────────────────────────────────────────
