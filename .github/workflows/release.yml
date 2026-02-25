@@ -54,15 +54,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Install git-cliff as a pre-built binary instead of using the Docker-based
+      # action, which broke when Debian Buster (the action's base image) went EOL.
+      - name: Install git-cliff
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
       - name: Generate changelog with git-cliff
         id: cliff
-        uses: orhun/git-cliff-action@v3
-        with:
-          # Use built-in conventional-commits preset; no cliff.toml required.
-          args: --latest --strip header
+        shell: bash
         env:
-          OUTPUT: CHANGES.md
           GITHUB_REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "content<<CLIFF_EOF"
+            git-cliff --latest --strip header
+            echo "CLIFF_EOF"
+          } >> "$GITHUB_OUTPUT"
 
   # ── Cross-platform release builds ────────────────────────────────────────────
   # fail-fast: true ensures a partial platform failure aborts the entire release.
