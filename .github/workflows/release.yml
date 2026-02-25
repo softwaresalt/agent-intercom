@@ -73,9 +73,9 @@ jobs:
             BODY="No changelog entries for this release."
           fi
           {
-            echo "content<<CLIFF_EOF"
-            echo "$BODY"
-            echo "CLIFF_EOF"
+            printf '%s\n' "content<<CLIFF_EOF"
+            printf '%s\n' "$BODY"
+            printf '%s\n' "CLIFF_EOF"
           } >> "$GITHUB_OUTPUT"
 
   # ── Cross-platform release builds ────────────────────────────────────────────
