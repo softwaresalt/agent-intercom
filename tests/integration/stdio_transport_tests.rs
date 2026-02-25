@@ -17,10 +17,15 @@
 /// removes or renames `serve_stdio`, this test will fail to compile.
 #[test]
 fn transport_module_exports_serve_stdio() {
-    // Take a function pointer to `serve_stdio` to verify it exists and has
-    // the expected signature. This fails at compile time if the function is
-    // removed, renamed, or its signature changes.
-    let _fn_ptr = agent_intercom::mcp::transport::serve_stdio;
+    // Bind `serve_stdio` to verify it exists and has the expected signature.
+    // This fails at compile time if the function is removed or renamed.
+    // Using `std::mem::size_of_val` creates an observable side-effect that
+    // satisfies `clippy::no_effect_underscore_binding` on newer toolchains.
+    let serve_stdio_fn = agent_intercom::mcp::transport::serve_stdio;
+    assert!(
+        std::mem::size_of_val(&serve_stdio_fn) == 0,
+        "async fn items are zero-sized"
+    );
 
     // Also verify the crate name appears in the type path as a basic sanity
     // check that we are importing from the right crate.
