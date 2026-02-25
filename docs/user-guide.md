@@ -261,8 +261,8 @@ Each VS Code workspace can send notifications to a different Slack channel. Set 
 {
   "servers": {
     "agent-intercom": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=C0123FRONTEND"
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=C0123FRONTEND"
     }
   }
 }
@@ -273,8 +273,8 @@ Each VS Code workspace can send notifications to a different Slack channel. Set 
 {
   "servers": {
     "agent-intercom": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=C0456BACKEND"
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=C0456BACKEND"
     }
   }
 }

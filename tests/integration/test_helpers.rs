@@ -86,6 +86,7 @@ pub async fn test_app_state(config: GlobalConfig) -> Arc<AppState> {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Default::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     })
@@ -101,6 +102,7 @@ pub fn test_app_state_with_db(config: GlobalConfig, db: Arc<SqlitePool>) -> Arc<
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Default::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     })

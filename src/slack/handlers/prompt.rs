@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use slack_morphism::prelude::{
-    SlackBasicChannelInfo, SlackHistoryMessage, SlackInteractionActionInfo,
+    SlackBasicChannelInfo, SlackHistoryMessage, SlackInteractionActionInfo, SlackTriggerId,
 };
 use tracing::{info, warn};
 
@@ -25,6 +25,8 @@ use crate::slack::blocks;
 /// * `action` — the `SlackInteractionActionInfo` containing `action_id` and
 ///   `value` (the `prompt_id`).
 /// * `user_id` — Slack user ID of the person who clicked.
+/// * `trigger_id` — the Slack trigger ID from the block action event,
+///   needed to open a modal for "Refine".
 /// * `channel` — channel where the message lives (for `chat.update`).
 /// * `message` — the original Slack message (for retrieving `ts`).
 /// * `state` — shared application state.
@@ -32,9 +34,11 @@ use crate::slack::blocks;
 /// # Errors
 ///
 /// Returns an error string if processing fails.
+#[allow(clippy::too_many_lines)] // Dispatch + modal caching requires verbose match arms.
 pub async fn handle_prompt_action(
     action: &SlackInteractionActionInfo,
     user_id: &str,
+    trigger_id: &SlackTriggerId,
     channel: Option<&SlackBasicChannelInfo>,
     message: Option<&SlackHistoryMessage>,
     state: &Arc<AppState>,
@@ -62,13 +66,38 @@ pub async fn handle_prompt_action(
     let (decision, instruction) = if action_id == "prompt_continue" {
         (PromptDecision::Continue, None)
     } else if action_id == "prompt_refine" {
-        // For Refine, ideally we open a modal to collect instruction text.
-        // For now, use a default instruction placeholder; modal support
-        // will be added when Slack modal submission handling is wired.
-        (
-            PromptDecision::Refine,
-            Some("(refined via Slack)".to_owned()),
-        )
+        // Open a modal to collect instruction text from the operator.
+        // The oneshot will be resolved when the modal is submitted
+        // (handled by modal::handle_view_submission).
+        if let Some(ref slack) = state.slack {
+            let callback_id = format!("prompt_refine:{prompt_id}");
+
+            // Cache the original message coordinates so the ViewSubmission
+            // handler can update the message from "⏳ Processing…" to a
+            // final status line (FR-022).
+            let msg_ts = message.map(|m| m.origin.ts.to_string());
+            let chan_id = channel.map(|c| c.id.to_string());
+            if let (Some(ts), Some(ch)) = (msg_ts, chan_id) {
+                let mut ctx = state.pending_modal_contexts.lock().await;
+                ctx.insert(callback_id.clone(), (ch, ts));
+            }
+
+            let modal = blocks::instruction_modal(
+                &callback_id,
+                "Refine",
+                "Type your revised instructions\u{2026}",
+            );
+            if let Err(err) = slack.open_modal(trigger_id.clone(), modal).await {
+                warn!(%err, prompt_id, "failed to open refine modal");
+                // Clean up cached context on failure.
+                let mut ctx = state.pending_modal_contexts.lock().await;
+                ctx.remove(&callback_id);
+                return Err(format!("failed to open refine modal: {err}"));
+            }
+        }
+        // Return early — the oneshot is NOT resolved here; it will be
+        // resolved when the ViewSubmission event arrives from the modal.
+        return Ok(());
     } else if action_id == "prompt_stop" {
         (PromptDecision::Stop, None)
     } else {

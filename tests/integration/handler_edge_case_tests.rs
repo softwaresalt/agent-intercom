@@ -60,6 +60,7 @@ async fn stall_detector_reset_works() {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Default::default(),
         stall_detectors: Some(Arc::clone(&detectors)),
         ipc_auth_token: None,
     });
@@ -331,6 +332,7 @@ async fn ipc_auth_some_means_enabled() {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Default::default(),
         stall_detectors: None,
         ipc_auth_token: Some("test-secret-token".into()),
     });

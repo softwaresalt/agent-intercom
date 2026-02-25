@@ -227,8 +227,8 @@ Add the server to your workspace's `.vscode/mcp.json`:
 {
   "servers": {
     "agent-intercom": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id={your-slack-channel-id}"
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id={your-slack-channel-id}"
     }
   }
 }

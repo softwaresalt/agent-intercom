@@ -43,5 +43,13 @@
             "matchCommandLine": true
         },
         "Out-Null": true
+    },
+    "chat.mcp.serverSampling": {
+        "agent-intercom/.vscode/mcp.json: intercom": {
+            "allowedModels": [
+                "copilot/claude-opus-4.6",
+                "copilot/claude-sonnet-4.6"
+            ]
+        }
     }
 }

@@ -63,6 +63,15 @@ pub type PendingWaits = Arc<Mutex<HashMap<String, oneshot::Sender<WaitResponse>>
 /// Thread-safe map of per-session stall detector handles keyed by `session_id`.
 pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 
+/// Cached original-message coordinates for modal-submission button updates.
+///
+/// When a button handler opens a Slack modal (e.g. "Resume with Instructions"
+/// or "Refine"), it stores the original message's `(channel_id, message_ts)`
+/// keyed by the modal `callback_id`. The `ViewSubmission` handler retrieves
+/// these later to replace the "⏳ Processing…" indicator with a final status
+/// line (FR-022).
+pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
+
 /// Shared application state accessible by all MCP tool handlers.
 pub struct AppState {
     /// Global configuration.
@@ -77,6 +86,8 @@ pub struct AppState {
     pub pending_prompts: PendingPrompts,
     /// Pending wait-for-instruction senders keyed by `session_id`.
     pub pending_waits: PendingWaits,
+    /// Cached modal message contexts for FR-022 button replacement.
+    pub pending_modal_contexts: PendingModalContexts,
     /// Per-session stall detector handles keyed by `session_id`.
     pub stall_detectors: Option<StallDetectors>,
     /// Shared secret for IPC authentication (`None` disables auth).

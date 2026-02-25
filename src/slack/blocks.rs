@@ -4,8 +4,10 @@
 //! severity-formatted text, action buttons, and diff rendering.
 
 use slack_morphism::prelude::{
-    SlackActionBlockElement, SlackActionsBlock, SlackBlock, SlackBlockButtonElement, SlackBlockId,
-    SlackBlockPlainTextOnly, SlackBlockText, SlackSectionBlock,
+    SlackActionBlockElement, SlackActionId, SlackActionsBlock, SlackBlock, SlackBlockButtonElement,
+    SlackBlockId, SlackBlockPlainTextInputElement, SlackBlockPlainTextOnly, SlackBlockText,
+    SlackCallbackId, SlackInputBlock, SlackInputBlockElement, SlackModalView, SlackSectionBlock,
+    SlackView,
 };
 
 /// Build a severity-formatted section block for log messages.
@@ -147,5 +149,34 @@ pub fn diff_force_warning_section(file_path: &str) -> SlackBlock {
         &format!(
             "Force-applying diff to `{file_path}` \u{2014} file content has diverged since proposal"
         ),
+    )
+}
+
+/// Build a Slack modal view for collecting operator instructions.
+///
+/// The modal contains a single multiline plain-text input. The
+/// `callback_id` encodes `{source}:{entity_id}` so the `ViewSubmission`
+/// handler can route the instruction to the correct pending oneshot
+/// (e.g. `"wait_instruct:session-id"` or `"prompt_refine:prompt-id"`).
+#[must_use]
+pub fn instruction_modal(callback_id: &str, title: &str, placeholder: &str) -> SlackView {
+    let input_element =
+        SlackBlockPlainTextInputElement::new(SlackActionId("instruction_text".to_owned()))
+            .with_multiline(true)
+            .with_placeholder(SlackBlockPlainTextOnly::from(placeholder));
+
+    let input_block = SlackInputBlock::new(
+        SlackBlockPlainTextOnly::from("Instructions"),
+        SlackInputBlockElement::PlainTextInput(input_element),
+    )
+    .with_block_id(SlackBlockId("instruction_block".to_owned()));
+
+    SlackView::Modal(
+        SlackModalView::new(
+            SlackBlockPlainTextOnly::from(title),
+            vec![input_block.into()],
+        )
+        .with_callback_id(SlackCallbackId(callback_id.to_owned()))
+        .with_submit(SlackBlockPlainTextOnly::from("Submit")),
     )
 }

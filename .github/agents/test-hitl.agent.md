@@ -1,6 +1,7 @@
 ---
 description: "Human-in-the-loop integration test agent. Executes structured test scenarios against a live agent-intercom server with real Slack integration and reports results."
-tools: [agent-rc/check_auto_approve, agent-rc/ask_approval, agent-rc/accept_diff, agent-rc/forward_prompt, agent-rc/wait_for_instruction, agent-rc/heartbeat, agent-rc/remote_log, agent-rc/set_operational_mode, agent-rc/recover_state, edit/createFile, edit/editFiles, read/readFile, search/fileSearch, search/textSearch, search/listDirectory, execute/runInTerminal, execute/getTerminalOutput, read/problems, todo]
+tools: [execute/getTerminalOutput, execute/runInTerminal, read/problems, read/readFile, edit/createFile, edit/editFiles, search/fileSearch, search/listDirectory, search/textSearch, agent-intercom/*, todo]
+model: Claude Sonnet 4.6
 ---
 
 # HITL Test Agent
@@ -21,21 +22,22 @@ Read and follow the complete workflow defined in the skill file at `.github/skil
 
 1. Read the skill file first. It is the authoritative workflow definition.
 2. Execute scenarios **in order**, one at a time.
-3. Before each scenario, call `remote_log` with `message: "[TEST] Starting scenario {N}: {name}"` and `level: "info"`.
-4. After each scenario, call `remote_log` with `message: "[TEST] Result: {PASS|FAIL} — {name} — {details}"` and `level: "success"` for PASS or `level: "warning"` for FAIL.
+3. Before each scenario, call `broadcast` with `message: "[TEST] Starting scenario {N}: {name}"` and `level: "info"`.
+4. After each scenario, call `broadcast` with `message: "[TEST] Result: {PASS|FAIL} — {name} — {details}"` and `level: "success"` for PASS or `level: "warning"` for FAIL.
 5. **Wait for operator responses.** Do not timeout or skip. The operator is actively monitoring Slack.
 6. If a scenario expects rejection, include the instruction in the `description` field: "HITL TEST: Please REJECT this proposal."
 7. If a scenario expects approval, include the instruction in the `description` field: "HITL TEST: Please APPROVE this proposal."
-8. Never write files directly. Always use the approval workflow (`check_auto_approve` → `ask_approval` → `accept_diff`).
+8. Never write files directly. Always use the approval workflow (`auto_check` → `check_clearance` → `check_diff`).
 9. One file per approval. One command per terminal call.
 10. After all scenarios complete, produce a summary table with pass/fail status for each.
 11. Use actual parameter names from the MCP tool contracts:
-    - `remote_log`: `message` (string), `level` (info|success|warning|error)
-    - `forward_prompt`: `prompt_text` (string), `prompt_type` (optional, defaults to question)
-    - `wait_for_instruction`: `message` (string), `timeout_seconds` (integer, 0=indefinite)
-    - `set_operational_mode`: `mode` (remote|local|hybrid)
-    - `ask_approval`: `title`, `diff`, `file_path`, `description` (optional), `risk_level` (optional: low|high|critical)
-    - `accept_diff`: `request_id`, `force` (optional boolean)
-    - `check_auto_approve`: `tool_name`, `context` (optional object)
-    - `heartbeat`: `status_message` (optional string)
+    - `auto_check`: `tool_name` (string, required), `context` (object, optional)
+    - `check_clearance`: `title` (string, required), `diff` (string, required), `file_path` (string, required), `description` (string, optional), `risk_level` (string: low|high|critical, default: low)
+    - `check_diff`: `request_id` (string, required), `force` (boolean, optional, default: false)
+    - `transmit`: `prompt_text` (string, required), `prompt_type` (string: continuation|clarification|error_recovery|resource_warning, default: continuation), `elapsed_seconds` (integer, optional), `actions_taken` (integer, optional)
+    - `broadcast`: `message` (string, required), `level` (string: info|success|warning|error, default: info), `thread_ts` (string, optional)
+    - `reboot`: `session_id` (string, optional)
+    - `switch_freq`: `mode` (string: remote|local|hybrid, required)
+    - `standby`: `message` (string, optional), `timeout_seconds` (integer, optional, default: 0)
+    - `ping`: `status_message` (string, optional), `progress_snapshot` (array of {label, status: done|in_progress|pending}, optional)
 12. Do not fabricate tool responses. If a tool returns an error, record it as a FAIL with the actual error.

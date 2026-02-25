@@ -1,6 +1,6 @@
 //! Workspace auto-approve policy modules.
 //!
-//! Provides policy loading from `.agentrc/settings.json`, evaluation
+//! Provides policy loading from `.intercom/settings.json`, evaluation
 //! of auto-approve rules, and hot-reload via file system watching.
 
 pub mod evaluator;

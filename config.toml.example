@@ -18,7 +18,7 @@
 #
 # ── Per-workspace Slack channel ──────────────────────────────────────────────
 #
-# Each VS Code workspace specifies its target Slack channel via the SSE URL
+# Each VS Code workspace specifies its target Slack channel via the MCP URL
 # in .vscode/mcp.json. There is no global channel fallback.
 #
 # Example .vscode/mcp.json:
@@ -26,8 +26,8 @@
 #   {
 #     "servers": {
 #       "intercom": {
-#         "type": "sse",
-#         "url": "http://127.0.0.1:3000/sse?channel_id=C0123YOURCHANNEL"
+#         "type": "http",
+#         "url": "http://127.0.0.1:3000/mcp?channel_id=C0123YOURCHANNEL"
 #       }
 #     }
 #   }

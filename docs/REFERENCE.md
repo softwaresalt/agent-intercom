@@ -164,7 +164,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 **Behavior:**
 
 1. Resolves the active session's `workspace_root`.
-2. Loads the workspace policy from `.agentrc/settings.json`.
+2. Loads the workspace policy from `.intercom/settings.json`.
 3. Evaluates the policy (see [Policy System](#10-policy-system) for evaluation order).
 4. Returns immediately with the result.
 
@@ -603,7 +603,7 @@ status = "git status"
 3. Pauses the stall detector timer during execution.
 4. Posts the output to Slack.
 
-**Security:** Only commands explicitly listed in `config.commands` can be invoked as Slack aliases (FR-014). MCP auto-approve policy is governed separately by `.agentrc/settings.json` (ADR-0012).
+**Security:** Only commands explicitly listed in `config.commands` can be invoked as Slack aliases (FR-014). MCP auto-approve policy is governed separately by `.intercom/settings.json` (ADR-0012).
 
 ---
 
@@ -839,14 +839,14 @@ Keychain access uses `tokio::task::spawn_blocking` since the `keyring` crate is 
 
 ### 6.3 Per-Workspace Channel Override
 
-Each VS Code workspace can target a different Slack channel by appending a `channel_id` query parameter to the SSE URL:
+Each VS Code workspace can target a different Slack channel by appending a `channel_id` query parameter to the MCP URL:
 
 ```json
 {
   "servers": {
     "agent-intercom": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=C0123FRONTEND"
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=C0123FRONTEND"
     }
   }
 }
@@ -1185,7 +1185,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 ### 10.1 Policy File
 
-**Location:** `{workspace_root}/.agentrc/settings.json`
+**Location:** `{workspace_root}/.intercom/settings.json`
 
 **Example:**
 
@@ -1206,7 +1206,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 ### 10.2 Policy Loader
 
-**File:** `.agentrc/settings.json` relative to workspace root.
+**File:** `.intercom/settings.json` relative to workspace root.
 
 | Condition | Behavior |
 |---|---|
@@ -1238,11 +1238,11 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 **Library:** `notify` crate (recommended watcher).
 
 **Behavior:**
-- Watches the `.agentrc/` directory per workspace for file create/modify/remove events on `settings.json`.
+- Watches the `.intercom/` directory per workspace for file create/modify/remove events on `settings.json`.
 - On change, reloads the policy via `PolicyLoader` and updates the in-memory cache.
 - Cache type: `PolicyCache = Arc<RwLock<HashMap<PathBuf, WorkspacePolicy>>>`.
 - Watchers are registered when sessions start and unregistered when sessions terminate.
-- If `.agentrc/` directory doesn't exist yet, the watcher is stored but deferred.
+- If `.intercom/` directory doesn't exist yet, the watcher is stored but deferred.
 
 ---
 

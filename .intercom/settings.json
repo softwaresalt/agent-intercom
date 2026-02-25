@@ -16,10 +16,15 @@
   ],
 
   "tools": [
-    "heartbeat",
-    "remote_log",
-    "recover_state",
-    "check_auto_approve"
+    "ping",
+    "broadcast",
+    "transmit",
+    "check_clearance",
+    "check_diff",
+    "auto_check",
+    "reboot",
+    "switch_freq",
+    "standby"
   ],
 
   "file_patterns": {

@@ -156,6 +156,7 @@ async fn run(args: Cli) -> Result<()> {
         pending_approvals,
         pending_prompts,
         pending_waits,
+        pending_modal_contexts: Arc::default(),
         stall_detectors: Some(StallDetectors::default()),
         ipc_auth_token,
     });
@@ -179,9 +180,11 @@ async fn run(args: Cli) -> Result<()> {
     let stdio_handle = if start_stdio {
         let stdio_ct = ct.clone();
         let stdio_state = Arc::clone(&state);
+        let stdio_shutdown_ct = ct.clone();
         Some(tokio::spawn(async move {
             if let Err(err) = transport::serve_stdio(stdio_state, stdio_ct).await {
-                error!(%err, "stdio transport failed");
+                error!(%err, "stdio transport failed — initiating shutdown");
+                stdio_shutdown_ct.cancel();
             }
         }))
     } else {
@@ -198,9 +201,11 @@ async fn run(args: Cli) -> Result<()> {
     let sse_handle = if start_sse {
         let sse_ct = ct.clone();
         let sse_state = Arc::clone(&state);
+        let sse_shutdown_ct = ct.clone();
         Some(tokio::spawn(async move {
             if let Err(err) = sse::serve_http(sse_state, sse_ct).await {
-                error!(%err, "http transport failed");
+                error!(%err, "http transport failed — initiating shutdown");
+                sse_shutdown_ct.cancel();
             }
         }))
     } else {

@@ -47,6 +47,7 @@ async fn spawn_server() -> (String, CancellationToken) {
             pending_approvals: Arc::clone(&state.pending_approvals),
             pending_prompts: Arc::clone(&state.pending_prompts),
             pending_waits: Arc::clone(&state.pending_waits),
+            pending_modal_contexts: Default::default(),
             stall_detectors: None,
             ipc_auth_token: None,
         };

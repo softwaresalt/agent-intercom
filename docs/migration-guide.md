@@ -109,8 +109,8 @@ Change the server key name to `agent-intercom`:
 {
   "servers": {
     "monocoque-agent-rc": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=..."
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=..."
     }
   }
 }
@@ -119,8 +119,8 @@ Change the server key name to `agent-intercom`:
 {
   "servers": {
     "agent-intercom": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=..."
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=..."
     }
   }
 }

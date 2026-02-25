@@ -48,6 +48,7 @@ async fn on_initialized_direct_connection_creates_session() {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Default::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     });
@@ -217,6 +218,7 @@ async fn server_constructors_correct_overrides() {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Default::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     });
