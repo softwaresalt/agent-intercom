@@ -416,10 +416,10 @@ pub async fn serve_sse(state: Arc<AppState>, ct: CancellationToken) -> Result<()
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
-    #[allow(clippy::expect_used)]
     fn parse_uri(s: &str) -> axum::http::Uri {
         s.parse().expect("valid URI")
     }

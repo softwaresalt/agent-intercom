@@ -85,7 +85,7 @@ fn ipc_app_state(
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
-        pending_modal_contexts: Default::default(),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: auth_token,
     })

@@ -173,9 +173,15 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["error"],
+            "description": "Present only on early error (no Slack channel or Slack service unavailable)"
+          },
           "decision": {
             "type": "string",
-            "enum": ["continue", "refine", "stop"]
+            "enum": ["continue", "refine", "stop"],
+            "description": "Operator decision. Present only on the success path."
           },
           "instruction": {
             "type": "string",
@@ -183,15 +189,14 @@
           },
           "error_code": {
             "type": "string",
-            "enum": ["no_channel"],
-            "description": "Present only when transmit fails immediately (e.g., no Slack channel configured)"
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why transmit failed without blocking."
           },
           "error_message": {
             "type": "string",
-            "description": "Human-readable error description (only present when error_code is set)"
+            "description": "Human-readable error description (only present when status=error)"
           }
-        },
-        "required": ["decision"]
+        }
       }
     },
 
@@ -335,7 +340,7 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["resumed", "timeout"]
+            "enum": ["resumed", "timeout", "error"]
           },
           "instruction": {
             "type": "string",
@@ -343,12 +348,12 @@
           },
           "error_code": {
             "type": "string",
-            "enum": ["no_channel"],
-            "description": "Present only when standby fails immediately (e.g., no Slack channel configured)"
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why standby failed without blocking."
           },
           "error_message": {
             "type": "string",
-            "description": "Human-readable error description (only present when error_code is set)"
+            "description": "Human-readable error description (only present when status=error)"
           }
         },
         "required": ["status"]

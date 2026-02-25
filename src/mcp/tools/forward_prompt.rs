@@ -80,7 +80,7 @@ pub async fn handle(
                 (
                     "no_channel",
                     "no Slack channel configured for this session; \
-                     set channel_id in the SSE URL to enable prompt forwarding",
+                     set channel_id in the /mcp URL query string to enable prompt forwarding",
                 )
             };
             let body = serde_json::json!({

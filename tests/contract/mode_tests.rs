@@ -280,3 +280,159 @@ fn standby_no_channel_error_code_structure() {
     assert_eq!(output["status"].as_str(), Some("error"));
     assert_eq!(output["error_code"].as_str(), Some("no_channel"));
 }
+
+/// `standby` contract must include `slack_unavailable` in the `error_code` enum.
+#[test]
+fn contract_standby_error_code_includes_slack_unavailable() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let enum_vals =
+        &contract["tools"]["standby"]["outputSchema"]["properties"]["error_code"]["enum"];
+    let codes: Vec<&str> = enum_vals
+        .as_array()
+        .expect("error_code enum must be an array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        codes.contains(&"slack_unavailable"),
+        "standby error_code enum must include 'slack_unavailable'; got {codes:?}"
+    );
+}
+
+/// `standby` contract status enum must include `error` variant.
+#[test]
+fn contract_standby_status_includes_error() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let enum_vals = &contract["tools"]["standby"]["outputSchema"]["properties"]["status"]["enum"];
+    let statuses: Vec<&str> = enum_vals
+        .as_array()
+        .expect("status enum must be an array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        statuses.contains(&"error"),
+        "standby status enum must include 'error'; got {statuses:?}"
+    );
+}
+
+// ─── Phase 5b — transmit error scenario contract shapes ──────────────
+
+/// The `transmit` contract must include `error_code` in its `outputSchema`.
+#[test]
+fn contract_transmit_schema_includes_error_code_property() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let tool = &contract["tools"]["transmit"];
+    let output = &tool["outputSchema"];
+    let props = output["properties"]
+        .as_object()
+        .expect("transmit outputSchema.properties must be an object");
+    assert!(
+        props.contains_key("error_code"),
+        "transmit outputSchema must include 'error_code' property for early errors"
+    );
+}
+
+/// The `transmit` contract must include a `status` field for the error path.
+#[test]
+fn contract_transmit_schema_includes_status_property() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let tool = &contract["tools"]["transmit"];
+    let output = &tool["outputSchema"];
+    let props = output["properties"]
+        .as_object()
+        .expect("transmit outputSchema.properties must be an object");
+    assert!(
+        props.contains_key("status"),
+        "transmit outputSchema must include 'status' property for error path"
+    );
+}
+
+/// The `transmit` contract must NOT require `decision` (error path lacks it).
+#[test]
+fn contract_transmit_schema_does_not_require_decision() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let tool = &contract["tools"]["transmit"];
+    let required = &tool["outputSchema"]["required"];
+    if let Some(arr) = required.as_array() {
+        let required_fields: Vec<&str> = arr.iter().filter_map(serde_json::Value::as_str).collect();
+        assert!(
+            !required_fields.contains(&"decision"),
+            "transmit outputSchema must not require 'decision' because the \
+             error path returns status/error_code instead"
+        );
+    }
+    // If required is null/absent, that's also fine — nothing is required.
+}
+
+/// `transmit` `error_code` enum must include both `no_channel` and `slack_unavailable`.
+#[test]
+fn contract_transmit_error_code_includes_both_variants() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let enum_vals =
+        &contract["tools"]["transmit"]["outputSchema"]["properties"]["error_code"]["enum"];
+    let codes: Vec<&str> = enum_vals
+        .as_array()
+        .expect("error_code enum must be an array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        codes.contains(&"no_channel"),
+        "transmit error_code enum must include 'no_channel'; got {codes:?}"
+    );
+    assert!(
+        codes.contains(&"slack_unavailable"),
+        "transmit error_code enum must include 'slack_unavailable'; got {codes:?}"
+    );
+}
+
+/// No-channel error output shape for `transmit`.
+#[test]
+fn transmit_no_channel_error_code_structure() {
+    let output = serde_json::json!({
+        "status": "error",
+        "error_code": "no_channel",
+        "error_message": "no Slack channel configured for this session"
+    });
+    assert_eq!(output["status"].as_str(), Some("error"));
+    assert_eq!(output["error_code"].as_str(), Some("no_channel"));
+    // decision must NOT be present on error path
+    assert!(output.get("decision").is_none());
+}
+
+/// Slack-unavailable error output shape for `transmit`.
+#[test]
+fn transmit_slack_unavailable_error_code_structure() {
+    let output = serde_json::json!({
+        "status": "error",
+        "error_code": "slack_unavailable",
+        "error_message": "Slack service is not configured; transmit requires Slack"
+    });
+    assert_eq!(output["status"].as_str(), Some("error"));
+    assert_eq!(output["error_code"].as_str(), Some("slack_unavailable"));
+}

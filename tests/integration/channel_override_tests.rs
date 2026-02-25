@@ -57,7 +57,7 @@ async fn test_state() -> Arc<AppState> {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
-        pending_modal_contexts: Default::default(),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     })
@@ -145,7 +145,7 @@ default_nudge_message = "continue"
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
-        pending_modal_contexts: Default::default(),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     });

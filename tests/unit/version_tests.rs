@@ -13,13 +13,12 @@ fn cargo_pkg_version_is_valid_semver() {
     let version = env!("CARGO_PKG_VERSION");
     assert!(!version.is_empty(), "CARGO_PKG_VERSION must not be empty");
     // Semver requires at least MAJOR.MINOR.PATCH
-    let parts: Vec<&str> = version.splitn(4, '.').collect();
-    assert!(
-        parts.len() >= 2,
-        "CARGO_PKG_VERSION must have at least MAJOR.MINOR, got: {version}"
-    );
-    // Each part before a pre-release marker must be numeric
     let major_minor_patch: Vec<&str> = version.split('-').next().unwrap_or("").split('.').collect();
+    assert!(
+        major_minor_patch.len() >= 3,
+        "CARGO_PKG_VERSION must have at least MAJOR.MINOR.PATCH, got: {version}"
+    );
+    // Each numeric component must parse as u64
     for part in &major_minor_patch {
         assert!(
             part.parse::<u64>().is_ok(),

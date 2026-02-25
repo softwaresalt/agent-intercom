@@ -14,13 +14,16 @@
 /// any rmcp SDK changes.
 ///
 /// This is a compile-time stability check: if the rmcp 0.13 upgrade accidentally
-/// removes or renames `serve_stdio`, this module will fail to compile.
+/// removes or renames `serve_stdio`, this test will fail to compile.
 #[test]
 fn transport_module_exports_serve_stdio() {
-    // Instantiate a type that lives in the `mcp::transport` module to confirm
-    // the module compiles correctly and `serve_stdio` remains accessible.
-    // We use `std::any::type_name` on the return type of a function call
-    // rather than calling the async function (which would require a runtime).
+    // Take a function pointer to `serve_stdio` to verify it exists and has
+    // the expected signature. This fails at compile time if the function is
+    // removed, renamed, or its signature changes.
+    let _fn_ptr = agent_intercom::mcp::transport::serve_stdio;
+
+    // Also verify the crate name appears in the type path as a basic sanity
+    // check that we are importing from the right crate.
     let module_path = std::any::type_name::<agent_intercom::mcp::handler::AppState>();
     assert!(
         module_path.contains("agent_intercom"),

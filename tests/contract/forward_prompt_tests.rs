@@ -224,13 +224,21 @@ fn contract_schema_structure_is_valid() {
     // Output schema checks.
     let output = &tool["outputSchema"];
     assert_eq!(output["type"], "object");
-    let out_required = output["required"]
-        .as_array()
-        .expect("output required should be array");
-    let out_required_names: Vec<&str> = out_required.iter().filter_map(|v| v.as_str()).collect();
+
+    // `required` must be absent or must NOT contain `decision` — the error path
+    // returns `{status, error_code, error_message}` with no `decision` field.
+    if let Some(arr) = output["required"].as_array() {
+        let out_required_names: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            !out_required_names.contains(&"decision"),
+            "decision must NOT be required — error path omits it"
+        );
+    }
+
+    // The schema must include a `status` field for the error path.
     assert!(
-        out_required_names.contains(&"decision"),
-        "decision must be required in output"
+        output["properties"]["status"].is_object(),
+        "outputSchema must include 'status' property for early errors"
     );
 
     // Verify decision enum values.

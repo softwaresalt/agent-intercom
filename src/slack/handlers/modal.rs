@@ -97,20 +97,23 @@ async fn resolve_wait(
 ) -> Result<(), String> {
     let callback_id = format!("wait_instruct:{session_id}");
 
-    let mut pending = state.pending_waits.lock().await;
-    if let Some(tx) = pending.remove(session_id) {
-        let response = WaitResponse {
-            status: "resumed".to_owned(),
-            instruction: Some(instruction.to_owned()),
-        };
-        if tx.send(response).is_err() {
-            warn!(session_id, "wait oneshot receiver already dropped");
+    // Scope the mutex guard so it is dropped before any `.await` call.
+    {
+        let mut pending = state.pending_waits.lock().await;
+        if let Some(tx) = pending.remove(session_id) {
+            let response = WaitResponse {
+                status: "resumed".to_owned(),
+                instruction: Some(instruction.to_owned()),
+            };
+            if tx.send(response).is_err() {
+                warn!(session_id, "wait oneshot receiver already dropped");
+            }
+        } else {
+            warn!(
+                session_id,
+                "no pending wait oneshot found (may have timed out)"
+            );
         }
-    } else {
-        warn!(
-            session_id,
-            "no pending wait oneshot found (may have timed out)"
-        );
     }
 
     // FR-022: Replace the "⏳ Processing…" indicator with a final status.
@@ -144,21 +147,23 @@ async fn resolve_prompt(
         .await
         .map_err(|err| format!("failed to update prompt decision: {err}"))?;
 
-    // Resolve the oneshot channel.
-    let mut pending = state.pending_prompts.lock().await;
-    if let Some(tx) = pending.remove(prompt_id) {
-        let response = PromptResponse {
-            decision: "refine".to_owned(),
-            instruction: Some(instruction.to_owned()),
-        };
-        if tx.send(response).is_err() {
-            warn!(prompt_id, "prompt oneshot receiver already dropped");
+    // Resolve the oneshot channel — scope the guard so it drops before `.await`.
+    {
+        let mut pending = state.pending_prompts.lock().await;
+        if let Some(tx) = pending.remove(prompt_id) {
+            let response = PromptResponse {
+                decision: "refine".to_owned(),
+                instruction: Some(instruction.to_owned()),
+            };
+            if tx.send(response).is_err() {
+                warn!(prompt_id, "prompt oneshot receiver already dropped");
+            }
+        } else {
+            warn!(
+                prompt_id,
+                "no pending prompt oneshot found (may have timed out)"
+            );
         }
-    } else {
-        warn!(
-            prompt_id,
-            "no pending prompt oneshot found (may have timed out)"
-        );
     }
 
     // FR-022: Replace the "⏳ Processing…" indicator with a final status.

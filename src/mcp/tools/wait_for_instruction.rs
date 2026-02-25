@@ -79,7 +79,7 @@ pub async fn handle(
                 (
                     "no_channel",
                     "no Slack channel configured for this session; \
-                     set channel_id in the SSE URL to enable standby mode",
+                     set channel_id in the /mcp URL query string to enable standby mode",
                 )
             };
             let body = serde_json::json!({
