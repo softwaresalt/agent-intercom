@@ -93,6 +93,20 @@ default = []
 # once the ssed13 transport rewrite in src/mcp/sse.rs is complete.
 rmcp-upgrade = []
 
+[workspace.metadata.release]
+# Do not publish to crates.io — this is a private binary, not a library crate.
+publish = false
+# Only allow releases from the main branch.
+allow-branch = ["main"]
+# Tag format: v0.1.0, v0.1.1-beta.1, etc.
+tag-name = "v{{version}}"
+# Commit message for version bump.
+pre-release-commit-message = "chore: release v{{version}}"
+# Push to origin after tagging.
+push-remote = "origin"
+# Skip cargo publish verification (no registry target).
+verify = false
+
 [[bin]]
 name = "agent-intercom"
 path = "src/main.rs"
