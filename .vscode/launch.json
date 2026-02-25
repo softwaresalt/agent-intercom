@@ -4,11 +4,11 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug monocoque-agent-rc",
+      "name": "Debug agent-intercom",
       "cargo": {
-        "args": ["build", "--bin=monocoque-agent-rc"],
+        "args": ["build", "--bin=agent-intercom"],
         "filter": {
-          "name": "monocoque-agent-rc",
+          "name": "agent-intercom",
           "kind": "bin"
         }
       },
@@ -24,11 +24,11 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug monocoque-ctl",
+      "name": "Debug agent-intercom-ctl",
       "cargo": {
-        "args": ["build", "--bin=monocoque-ctl"],
+        "args": ["build", "--bin=agent-intercom-ctl"],
         "filter": {
-          "name": "monocoque-ctl",
+          "name": "agent-intercom-ctl",
           "kind": "bin"
         }
       },

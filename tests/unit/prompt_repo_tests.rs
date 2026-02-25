@@ -9,8 +9,8 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
-use monocoque_agent_rc::persistence::{db, prompt_repo::PromptRepo};
+use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
+use agent_intercom::persistence::{db, prompt_repo::PromptRepo};
 
 fn sample_prompt(session_id: &str) -> ContinuationPrompt {
     ContinuationPrompt::new(

@@ -88,6 +88,7 @@ async fn replace_buttons_with_processing(
 /// # Errors
 ///
 /// Returns an error if the interaction cannot be processed.
+#[allow(clippy::too_many_lines)] // Dispatch logic requires exhaustive match arms.
 pub async fn handle_interaction(
     event: SlackInteractionEvent,
     _client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
@@ -158,6 +159,7 @@ pub async fn handle_interaction(
                         if let Err(err) = handlers::prompt::handle_prompt_action(
                             action,
                             &user_id,
+                            &block_event.trigger_id,
                             block_event.channel.as_ref(),
                             block_event.message.as_ref(),
                             app,
@@ -182,6 +184,7 @@ pub async fn handle_interaction(
                         if let Err(err) = handlers::wait::handle_wait_action(
                             action,
                             &user_id,
+                            &block_event.trigger_id,
                             block_event.channel.as_ref(),
                             block_event.message.as_ref(),
                             app,
@@ -194,6 +197,24 @@ pub async fn handle_interaction(
                         warn!(action_id, "unknown action_id prefix");
                     }
                 }
+            }
+        }
+        SlackInteractionEvent::ViewSubmission(view_event) => {
+            let user_id = view_event.user.id.to_string();
+
+            let Some(ref app) = app_state else {
+                warn!("app state not available; cannot process view submission");
+                return Ok(());
+            };
+
+            if !is_authorized(&user_id, app) {
+                return Ok(());
+            }
+
+            info!(user_id, "dispatching view submission");
+
+            if let Err(err) = handlers::modal::handle_view_submission(view_event, app).await {
+                warn!(%err, "view submission handler failed");
             }
         }
         _ => {

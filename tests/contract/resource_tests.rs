@@ -153,7 +153,7 @@ fn mismatched_channel_id_is_rejected() {
 
 #[test]
 fn uri_parsing_extracts_channel_id() {
-    use monocoque_agent_rc::mcp::resources::slack_channel::parse_channel_uri;
+    use agent_intercom::mcp::resources::slack_channel::parse_channel_uri;
 
     let uri = format!("slack://channel/{VALID_CHANNEL_ID}/recent");
     let result = parse_channel_uri(&uri);
@@ -163,7 +163,7 @@ fn uri_parsing_extracts_channel_id() {
 
 #[test]
 fn uri_parsing_rejects_malformed_uri() {
-    use monocoque_agent_rc::mcp::resources::slack_channel::parse_channel_uri;
+    use agent_intercom::mcp::resources::slack_channel::parse_channel_uri;
 
     let bad_uris = [
         "slack://channel/recent",
@@ -183,7 +183,7 @@ fn uri_parsing_rejects_malformed_uri() {
 
 #[test]
 fn limit_default_is_20() {
-    use monocoque_agent_rc::mcp::resources::slack_channel::DEFAULT_LIMIT;
+    use agent_intercom::mcp::resources::slack_channel::DEFAULT_LIMIT;
 
     assert_eq!(DEFAULT_LIMIT, 20);
 }
@@ -204,14 +204,14 @@ fn limit_maximum_is_100() {
 
 #[test]
 fn resource_template_has_correct_name() {
-    use monocoque_agent_rc::mcp::resources::slack_channel::RESOURCE_NAME;
+    use agent_intercom::mcp::resources::slack_channel::RESOURCE_NAME;
 
     assert_eq!(RESOURCE_NAME, "Slack Channel History");
 }
 
 #[test]
 fn resource_template_has_description() {
-    use monocoque_agent_rc::mcp::resources::slack_channel::RESOURCE_DESCRIPTION;
+    use agent_intercom::mcp::resources::slack_channel::RESOURCE_DESCRIPTION;
 
     assert!(
         !RESOURCE_DESCRIPTION.is_empty(),

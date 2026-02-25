@@ -1,18 +1,18 @@
 //! Unit tests for policy loader (T116).
 //!
-//! Validates `.agentrc/settings.json` parsing, malformed file fallback
+//! Validates `.intercom/settings.json` parsing, malformed file fallback
 //! to deny-all, and missing file handling.
 
 use std::fs;
 use std::path::Path;
 
-use monocoque_agent_rc::models::approval::RiskLevel;
-use monocoque_agent_rc::policy::loader::PolicyLoader;
+use agent_intercom::models::approval::RiskLevel;
+use agent_intercom::policy::loader::PolicyLoader;
 
-/// Helper: write a policy JSON file under `workspace_root/.agentrc/settings.json`.
+/// Helper: write a policy JSON file under `workspace_root/.intercom/settings.json`.
 fn write_policy(workspace_root: &Path, json: &str) {
-    let dir = workspace_root.join(".agentrc");
-    fs::create_dir_all(&dir).expect("create .agentrc dir");
+    let dir = workspace_root.join(".intercom");
+    fs::create_dir_all(&dir).expect("create .intercom dir");
     fs::write(dir.join("settings.json"), json).expect("write settings.json");
 }
 
@@ -141,7 +141,7 @@ fn commands_loaded_without_filtering() {
 #[test]
 fn missing_policy_file_returns_deny_all() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // No .agentrc/settings.json created.
+    // No .intercom/settings.json created.
 
     let policy =
         PolicyLoader::load(dir.path()).expect("should return deny-all when file is missing");
@@ -153,10 +153,45 @@ fn missing_policy_file_returns_deny_all() {
 #[test]
 fn missing_agentrc_dir_returns_deny_all() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // Even the .agentrc directory doesn't exist.
+    // Even the .intercom directory doesn't exist.
 
     let policy =
         PolicyLoader::load(dir.path()).expect("should return deny-all when directory is missing");
 
     assert!(!policy.enabled);
+}
+
+// ── US1: Policy directory constant assertion (T021) ──────────────────
+
+/// T021: Policy directory uses `.intercom` (not `.agentrc`).
+///
+/// Verifies that `PolicyLoader::load` reads from `.intercom/settings.json`.
+#[test]
+fn policy_directory_is_dot_intercom() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    // Write a policy under .intercom/ — the new directory name.
+    write_policy(
+        dir.path(),
+        r#"{"enabled": true, "auto_approve_commands": ["cargo check"]}"#,
+    );
+
+    let policy = PolicyLoader::load(dir.path()).expect("load from .intercom");
+    assert!(
+        policy.enabled,
+        "should load policy from .intercom/settings.json"
+    );
+
+    // Verify it does NOT load from .agentrc/ by creating one there too.
+    let old_dir = dir.path().join(".agentrc");
+    std::fs::create_dir_all(&old_dir).expect("create .agentrc dir");
+    std::fs::write(old_dir.join("settings.json"), r#"{"enabled": false}"#)
+        .expect("write old settings");
+
+    // Re-load: should still get enabled=true from .intercom, not false from .agentrc.
+    let policy2 = PolicyLoader::load(dir.path()).expect("load from .intercom again");
+    assert!(
+        policy2.enabled,
+        "policy should come from .intercom, not .agentrc"
+    );
 }

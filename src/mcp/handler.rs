@@ -9,9 +9,9 @@ use rmcp::handler::server::{
     ServerHandler,
 };
 use rmcp::model::{
-    CallToolRequestParam, CallToolResult, ListResourceTemplatesResult, ListResourcesResult,
-    ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam, ReadResourceResult,
-    ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParam, CallToolResult, Implementation, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParam, ReadResourceRequestParam,
+    ReadResourceResult, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use sqlx::SqlitePool;
@@ -63,6 +63,15 @@ pub type PendingWaits = Arc<Mutex<HashMap<String, oneshot::Sender<WaitResponse>>
 /// Thread-safe map of per-session stall detector handles keyed by `session_id`.
 pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 
+/// Cached original-message coordinates for modal-submission button updates.
+///
+/// When a button handler opens a Slack modal (e.g. "Resume with Instructions"
+/// or "Refine"), it stores the original message's `(channel_id, message_ts)`
+/// keyed by the modal `callback_id`. The `ViewSubmission` handler retrieves
+/// these later to replace the "⏳ Processing…" indicator with a final status
+/// line (FR-022).
+pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
+
 /// Shared application state accessible by all MCP tool handlers.
 pub struct AppState {
     /// Global configuration.
@@ -77,6 +86,8 @@ pub struct AppState {
     pub pending_prompts: PendingPrompts,
     /// Pending wait-for-instruction senders keyed by `session_id`.
     pub pending_waits: PendingWaits,
+    /// Cached modal message contexts for FR-022 button replacement.
+    pub pending_modal_contexts: PendingModalContexts,
     /// Per-session stall detector handles keyed by `session_id`.
     pub stall_detectors: Option<StallDetectors>,
     /// Shared secret for IPC authentication (`None` disables auth).
@@ -90,8 +101,8 @@ pub struct AppState {
 /// `on_initialized` to clean up stale direct-connection sessions on reconnect.
 const LOCAL_AGENT_OWNER: &str = "agent:local";
 
-/// MCP server implementation that exposes the nine monocoque-agent-rc tools.
-pub struct AgentRcServer {
+/// MCP server implementation that exposes the nine agent-intercom tools.
+pub struct IntercomServer {
     state: Arc<AppState>,
     /// Per-session Slack channel override supplied via SSE query parameter.
     channel_id_override: Option<String>,
@@ -99,7 +110,7 @@ pub struct AgentRcServer {
     session_id_override: Option<String>,
 }
 
-impl AgentRcServer {
+impl IntercomServer {
     /// Create a new MCP server bound to shared application state.
     #[must_use]
     pub fn new(state: Arc<AppState>) -> Self {
@@ -164,54 +175,54 @@ impl AgentRcServer {
     }
 
     fn tool_router() -> &'static ToolRouter<Self> {
-        static ROUTER: std::sync::OnceLock<ToolRouter<AgentRcServer>> = std::sync::OnceLock::new();
+        static ROUTER: std::sync::OnceLock<ToolRouter<IntercomServer>> = std::sync::OnceLock::new();
         ROUTER.get_or_init(|| {
             let mut router = ToolRouter::new();
 
             for tool in Self::all_tools() {
                 let name = tool.name.to_string();
                 match name.as_str() {
-                    "ask_approval" => {
+                    "check_clearance" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::ask_approval::handle(context))
                         }));
                     }
-                    "accept_diff" => {
+                    "check_diff" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::accept_diff::handle(context))
                         }));
                     }
-                    "heartbeat" => {
+                    "ping" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::heartbeat::handle(context))
                         }));
                     }
-                    "remote_log" => {
+                    "broadcast" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::remote_log::handle(context))
                         }));
                     }
-                    "forward_prompt" => {
+                    "transmit" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::forward_prompt::handle(context))
                         }));
                     }
-                    "check_auto_approve" => {
+                    "auto_check" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::check_auto_approve::handle(context))
                         }));
                     }
-                    "recover_state" => {
+                    "reboot" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::recover_state::handle(context))
                         }));
                     }
-                    "set_operational_mode" => {
+                    "switch_freq" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::set_operational_mode::handle(context))
                         }));
                     }
-                    "wait_for_instruction" => {
+                    "standby" => {
                         router.add_route(ToolRoute::new_dyn(tool, |context| {
                             Box::pin(crate::mcp::tools::wait_for_instruction::handle(context))
                         }));
@@ -242,10 +253,10 @@ impl AgentRcServer {
     }
 
     #[allow(clippy::too_many_lines)] // Tool definitions are intentionally verbose for clarity.
-    fn all_tools() -> Vec<Tool> {
+    pub(crate) fn all_tools() -> Vec<Tool> {
         vec![
             Tool {
-                name: "ask_approval".into(),
+                name: "check_clearance".into(),
                 description: Some(
                     "Submit a code proposal for remote operator approval via Slack. \
                      Blocks until the operator responds or the timeout elapses."
@@ -264,9 +275,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "accept_diff".into(),
+                name: "check_diff".into(),
                 description: Some(
                     "Apply previously approved code changes to the local file system.".into(),
                 ),
@@ -280,9 +294,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "check_auto_approve".into(),
+                name: "auto_check".into(),
                 description: Some(
                     "Query the workspace auto-approve policy to determine whether an \
                      operation can bypass the remote approval gate."
@@ -298,9 +315,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "forward_prompt".into(),
+                name: "transmit".into(),
                 description: Some(
                     "Forward an agent-generated continuation prompt to the remote \
                      operator via Slack. Blocks until the operator responds."
@@ -318,9 +338,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "remote_log".into(),
+                name: "broadcast".into(),
                 description: Some(
                     "Send a non-blocking status log message to the Slack channel.".into(),
                 ),
@@ -335,9 +358,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "recover_state".into(),
+                name: "reboot".into(),
                 description: Some(
                     "Retrieve the last known state from persistent storage. Called on \
                      startup to check for interrupted sessions or pending requests."
@@ -351,9 +377,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "set_operational_mode".into(),
+                name: "switch_freq".into(),
                 description: Some(
                     "Switch between remote, local, and hybrid operational modes at runtime.".into(),
                 ),
@@ -366,9 +395,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "wait_for_instruction".into(),
+                name: "standby".into(),
                 description: Some(
                     "Place the agent in standby, polling for a resume signal or new \
                      command from the operator via Slack."
@@ -383,9 +415,12 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
             Tool {
-                name: "heartbeat".into(),
+                name: "ping".into(),
                 description: Some(
                     "Lightweight liveness signal. Resets the stall detection timer and \
                      optionally stores a structured progress snapshot."
@@ -410,14 +445,22 @@ impl AgentRcServer {
                 })),
                 output_schema: None,
                 annotations: None,
+                title: None,
+                icons: None,
+                meta: None,
             },
         ]
     }
 }
 
-impl ServerHandler for AgentRcServer {
+impl ServerHandler for IntercomServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
+            server_info: Implementation {
+                name: env!("CARGO_PKG_NAME").into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                ..Default::default()
+            },
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
@@ -606,6 +649,7 @@ impl ServerHandler for AgentRcServer {
             None => ListResourcesResult {
                 resources: vec![],
                 next_cursor: None,
+                ..Default::default()
             },
         };
         std::future::ready(Ok(result))

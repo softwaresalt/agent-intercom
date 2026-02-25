@@ -13,7 +13,7 @@ use tracing::{info, info_span, warn, Instrument};
 
 use crate::diff::patcher::apply_patch;
 use crate::diff::writer::write_full_file;
-use crate::mcp::handler::AgentRcServer;
+use crate::mcp::handler::IntercomServer;
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
@@ -50,7 +50,7 @@ fn error_result(code: &str, message: &str) -> CallToolResult {
 /// Returns tool-level error codes for domain validation failures.
 #[allow(clippy::too_many_lines)] // Sequential validation + apply flow.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRcServer>,
+    context: ToolCallContext<'_, IntercomServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().map(str::to_owned);
@@ -75,10 +75,7 @@ pub async fn handle(
             .get_by_id(&input.request_id)
             .await
             .map_err(|err| {
-                rmcp::ErrorData::internal_error(
-                    format!("approval query failed: {err}"),
-                    None,
-                )
+                rmcp::ErrorData::internal_error(format!("approval query failed: {err}"), None)
             })?
         else {
             return Ok(error_result(
@@ -110,10 +107,7 @@ pub async fn handle(
             .get_by_id(&approval.session_id)
             .await
             .map_err(|err| {
-                rmcp::ErrorData::internal_error(
-                    format!("session query failed: {err}"),
-                    None,
-                )
+                rmcp::ErrorData::internal_error(format!("session query failed: {err}"), None)
             })?
         else {
             return Err(rmcp::ErrorData::internal_error(
@@ -124,10 +118,9 @@ pub async fn handle(
         let workspace_root = std::path::PathBuf::from(&session.workspace_root);
 
         // ── Validate file path ───────────────────────────────
-        let Ok(validated_path) = crate::diff::validate_workspace_path(
-            &workspace_root,
-            &approval.file_path,
-        ) else {
+        let Ok(validated_path) =
+            crate::diff::validate_workspace_path(&workspace_root, &approval.file_path)
+        else {
             return Ok(error_result(
                 "path_violation",
                 "file path escapes workspace root",
@@ -153,6 +146,20 @@ pub async fn handle(
         );
 
         if !hash_matches && !input.force {
+            // T059 / S029 — Post conflict alert to Slack before returning error.
+            if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
+                let channel = SlackChannelId(ch.clone());
+                let msg = SlackMessage {
+                    channel,
+                    text: Some(format!(
+                        "\u{274c} Patch conflict: {} has changed since proposal",
+                        approval.file_path
+                    )),
+                    blocks: Some(vec![blocks::diff_conflict_section(&approval.file_path)]),
+                    thread_ts: None,
+                };
+                let _ = slack.enqueue(msg).await;
+            }
             return Ok(error_result(
                 "patch_conflict",
                 "file content has changed since proposal was created",
@@ -175,12 +182,8 @@ pub async fn handle(
                         "\u{26a0}\u{fe0f} Force-applying diff to {} (content diverged)",
                         approval.file_path
                     )),
-                    blocks: Some(vec![blocks::severity_section(
-                        "warning",
-                        &format!(
-                            "Force-applying diff to `{}` — file content has diverged since proposal",
-                            approval.file_path
-                        ),
+                    blocks: Some(vec![blocks::diff_force_warning_section(
+                        &approval.file_path,
                     )]),
                     thread_ts: None,
                 };
@@ -189,21 +192,13 @@ pub async fn handle(
         }
 
         // ── Determine write mode and apply ───────────────────
-        let is_unified_diff = approval.diff_content.starts_with("--- ")
-            || approval.diff_content.starts_with("diff ");
+        let is_unified_diff =
+            approval.diff_content.starts_with("--- ") || approval.diff_content.starts_with("diff ");
 
         let write_result = if is_unified_diff {
-            apply_patch(
-                &validated_path,
-                &approval.diff_content,
-                &workspace_root,
-            )
+            apply_patch(&validated_path, &approval.diff_content, &workspace_root)
         } else {
-            write_full_file(
-                &validated_path,
-                &approval.diff_content,
-                &workspace_root,
-            )
+            write_full_file(&validated_path, &approval.diff_content, &workspace_root)
         };
 
         let summary = match write_result {
@@ -230,12 +225,9 @@ pub async fn handle(
                     "\u{2705} Applied: {} ({} bytes)",
                     approval.file_path, summary.bytes_written
                 )),
-                blocks: Some(vec![blocks::severity_section(
-                    "success",
-                    &format!(
-                        "Applied approved changes to `{}` ({} bytes written)",
-                        approval.file_path, summary.bytes_written
-                    ),
+                blocks: Some(vec![blocks::diff_applied_section(
+                    &approval.file_path,
+                    summary.bytes_written,
                 )]),
                 thread_ts: None,
             };

@@ -5,7 +5,7 @@
 use serde_json::json;
 
 /// The tool name as registered in the MCP server.
-const TOOL_NAME: &str = "check_auto_approve";
+const TOOL_NAME: &str = "auto_check";
 
 // ─── Input schema validation ──────────────────────────────────────────
 

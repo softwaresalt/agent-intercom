@@ -38,7 +38,7 @@ pub const RESOURCE_DESCRIPTION: &str = "Recent chat history from the configured 
 /// # Examples
 ///
 /// ```
-/// use monocoque_agent_rc::mcp::resources::slack_channel::parse_channel_uri;
+/// use agent_intercom::mcp::resources::slack_channel::parse_channel_uri;
 ///
 /// assert_eq!(parse_channel_uri("slack://channel/C012345/recent"), Some("C012345"));
 /// assert_eq!(parse_channel_uri("http://example.com"), None);
@@ -62,6 +62,8 @@ pub fn resource_templates() -> ListResourceTemplatesResult {
             name: RESOURCE_NAME.into(),
             description: Some(RESOURCE_DESCRIPTION.into()),
             mime_type: Some("application/json".into()),
+            title: None,
+            icons: None,
         },
         None,
     );
@@ -69,6 +71,7 @@ pub fn resource_templates() -> ListResourceTemplatesResult {
     ListResourceTemplatesResult {
         resource_templates: vec![template],
         next_cursor: None,
+        ..Default::default()
     }
 }
 
@@ -83,6 +86,9 @@ pub fn list_resources(channel_id: &str) -> ListResourcesResult {
             description: Some(RESOURCE_DESCRIPTION.into()),
             mime_type: Some("application/json".into()),
             size: None,
+            title: None,
+            icons: None,
+            meta: None,
         },
         None,
     );
@@ -90,6 +96,7 @@ pub fn list_resources(channel_id: &str) -> ListResourcesResult {
     ListResourcesResult {
         resources: vec![resource],
         next_cursor: None,
+        ..Default::default()
     }
 }
 

@@ -6,10 +6,10 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["Monocoque Team"]
+authors = ["Agent Intercom Team"]
 description = "MCP remote agent server — review and approve AI agent code changes via Slack"
-repository = "https://github.com/softwaresalt/monocoque-agent-rc"
-homepage = "https://github.com/softwaresalt/monocoque-agent-rc"
+repository = "https://github.com/softwaresalt/agent-intercom"
+homepage = "https://github.com/softwaresalt/agent-intercom"
 keywords = ["mcp", "ai-agent", "slack", "code-review", "automation"]
 categories = ["command-line-utilities", "network-programming"]
 
@@ -20,7 +20,7 @@ diffy = "0.4"
 interprocess = { version = "2.0", features = ["tokio"] }
 keyring = "3"
 notify = "6.1"
-rmcp = { version = "0.5", features = ["server", "transport-sse-server", "transport-io"] }
+rmcp = { version = "0.13.0", features = ["server", "transport-streamable-http-server", "transport-io"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -44,7 +44,7 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [package]
-name = "monocoque-agent-rc"
+name = "agent-intercom"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -86,10 +86,17 @@ regex = "1.12.3"
 [dev-dependencies]
 serial_test = "3"
 
+[features]
+# No features are enabled by default. All optional capabilities must be opted in explicitly.
+default = []
+# Placeholder gate for the rmcp 0.13 upgrade (US5). Enable with --features rmcp-upgrade
+# once the ssed13 transport rewrite in src/mcp/sse.rs is complete.
+rmcp-upgrade = []
+
 [[bin]]
-name = "monocoque-agent-rc"
+name = "agent-intercom"
 path = "src/main.rs"
 
 [[bin]]
-name = "monocoque-ctl"
+name = "agent-intercom-ctl"
 path = "ctl/main.rs"

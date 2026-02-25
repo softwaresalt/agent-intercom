@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MCP Remote Agent Server — Tool Contracts",
-  "description": "JSON-RPC tool definitions exposed by the monocoque-agent-rc MCP server. Each tool follows the MCP tool calling convention: the agent sends a tools/call request with the tool name and arguments, and the server returns a result with content blocks.",
+  "description": "JSON-RPC tool definitions exposed by the agent-intercom MCP server. Each tool follows the MCP tool calling convention: the agent sends a tools/call request with the tool name and arguments, and the server returns a result with content blocks.",
 
   "tools": {
-    "ask_approval": {
+    "check_clearance": {
       "description": "Submit a code proposal for remote operator approval via Slack. Blocks until the operator responds or the timeout elapses.",
       "inputSchema": {
         "type": "object",
@@ -39,22 +39,31 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["approved", "rejected", "timeout"]
+            "enum": ["approved", "rejected", "timeout", "error"]
           },
           "request_id": {
             "type": "string",
-            "description": "Unique identifier. Pass to accept_diff to apply approved changes."
+            "description": "Unique identifier. Pass to check_diff to apply approved changes. Absent when status=error."
           },
           "reason": {
             "type": "string",
             "description": "Optional rejection note from the operator (only present when status=rejected)"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why check_clearance failed without blocking."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when status=error)"
           }
         },
-        "required": ["status", "request_id"]
+        "required": ["status"]
       }
     },
 
-    "accept_diff": {
+    "check_diff": {
       "description": "Apply previously approved code changes to the local file system. Validates approval status, checks file integrity, and performs atomic writes.",
       "inputSchema": {
         "type": "object",
@@ -102,7 +111,7 @@
       }
     },
 
-    "check_auto_approve": {
+    "auto_check": {
       "description": "Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate.",
       "inputSchema": {
         "type": "object",
@@ -135,7 +144,7 @@
       }
     },
 
-    "forward_prompt": {
+    "transmit": {
       "description": "Forward an agent-generated continuation prompt to the remote operator via Slack. Blocks until the operator responds or the timeout elapses.",
       "inputSchema": {
         "type": "object",
@@ -164,20 +173,34 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["error"],
+            "description": "Present only on early error (no Slack channel or Slack service unavailable)"
+          },
           "decision": {
             "type": "string",
-            "enum": ["continue", "refine", "stop"]
+            "enum": ["continue", "refine", "stop"],
+            "description": "Operator decision. Present only on the success path."
           },
           "instruction": {
             "type": "string",
             "description": "Revised instruction text (present only when decision=refine)"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why transmit failed without blocking."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when status=error)"
           }
-        },
-        "required": ["decision"]
+        }
       }
     },
 
-    "remote_log": {
+    "broadcast": {
       "description": "Send a non-blocking status log message to the Slack channel. Does not block agent execution.",
       "inputSchema": {
         "type": "object",
@@ -212,7 +235,7 @@
       }
     },
 
-    "recover_state": {
+    "reboot": {
       "description": "Retrieve the last known state from the persistent database. Called by the agent on startup to check for interrupted sessions or pending requests.",
       "inputSchema": {
         "type": "object",
@@ -272,7 +295,7 @@
       }
     },
 
-    "set_operational_mode": {
+    "switch_freq": {
       "description": "Switch the server between remote, local, and hybrid operational modes at runtime.",
       "inputSchema": {
         "type": "object",
@@ -295,7 +318,7 @@
       }
     },
 
-    "wait_for_instruction": {
+    "standby": {
       "description": "Place the agent in standby, polling for a resume signal or new command from the operator via Slack.",
       "inputSchema": {
         "type": "object",
@@ -317,18 +340,27 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["resumed", "timeout"]
+            "enum": ["resumed", "timeout", "error"]
           },
           "instruction": {
             "type": "string",
             "description": "New instruction text from operator, or null if bare resume"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why standby failed without blocking."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when status=error)"
           }
         },
         "required": ["status"]
       }
     },
 
-    "heartbeat": {
+    "ping": {
       "description": "Lightweight liveness signal. Resets the stall detection timer during long-running local operations. Optionally accepts a structured progress snapshot (ordered list of todo items with labels and statuses) that the server stores on the session record for enriching stall alerts, nudge messages, and crash recovery. Returns immediately.",
       "inputSchema": {
         "type": "object",

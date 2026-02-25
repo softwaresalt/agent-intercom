@@ -1,10 +1,10 @@
 # User Guide
 
-A complete guide to operating monocoque-agent-rc — the Agent Remote Control MCP server for agentic development IDEs.
+A complete guide to operating agent-intercom — the Agent Intercom MCP server for agentic development IDEs.
 
 ## How It Works
 
-monocoque-agent-rc sits between your AI coding agent (GitHub Copilot, Claude, Cursor) and your Slack workspace. When the agent wants to make code changes, the server:
+agent-intercom sits between your AI coding agent (GitHub Copilot, Claude, Cursor) and your Slack workspace. When the agent wants to make code changes, the server:
 
 1. **Posts an approval request** to your Slack channel with the proposed diff.
 2. **Blocks the agent** until you click Accept or Reject.
@@ -14,16 +14,16 @@ This gives you remote visibility and control over what autonomous agents do in y
 
 ```mermaid
 flowchart LR
-    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/SSE)&nbsp;"| Server["monocoque-<br/>agent-rc"]
+    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/SSE)&nbsp;"| Server["agent-<br/>intercom"]
     Server <-->|"&nbsp;Socket&nbsp;<br/>&nbsp;Mode&nbsp;"| Slack["Slack<br/>Channel"]
-    Server <-->|"&nbsp;IPC&nbsp;"| Ctl["monocoque-ctl<br/>(local CLI)"]
+    Server <-->|"&nbsp;IPC&nbsp;"| Ctl["agent-intercom-ctl<br/>(local CLI)"]
 ```
 
 ## Operational Modes
 
 The server supports three routing modes, switchable at runtime:
 
-| Mode | Slack | IPC (monocoque-ctl) | Use Case |
+| Mode | Slack | IPC (agent-intercom-ctl) | Use Case |
 |---|---|---|---|
 | **Remote** | Active | Inactive | Monitor and control from anywhere via Slack |
 | **Local** | Inactive | Active | Fast local approvals via CLI when at your desk |
@@ -32,22 +32,22 @@ The server supports three routing modes, switchable at runtime:
 Switch modes via Slack:
 
 ```
-/monocoque mode remote
-/monocoque mode local
-/monocoque mode hybrid
+/intercom mode remote
+/intercom mode local
+/intercom mode hybrid
 ```
 
 Or via the local CLI:
 
 ```bash
-monocoque-ctl mode hybrid
+agent-intercom-ctl mode hybrid
 ```
 
 ## MCP Tools
 
 These are the tools the server exposes to AI agents via the Model Context Protocol. Agents call these tools automatically during their workflow.
 
-### ask_approval
+### check_clearance
 
 Submits a code change proposal for your approval. **Blocks the agent** until you respond.
 
@@ -59,7 +59,7 @@ When called, you see a Slack message with:
 
 Click **Accept** to let the agent proceed, or **Reject** to deny the change.
 
-### accept_diff
+### check_diff
 
 Applies a previously approved diff to the filesystem. Called by the agent after you approve a change.
 
@@ -68,11 +68,11 @@ Applies a previously approved diff to the filesystem. Called by the agent after 
 - Uses atomic writes (temp file + rename) to prevent corruption.
 - Can force-apply with `force: true` if the file has diverged.
 
-### check_auto_approve
+### auto_check
 
 Queries the workspace auto-approve policy to check if an operation can skip the approval gate. Non-blocking. Returns whether the operation is auto-approved and which rule matched.
 
-### forward_prompt
+### transmit
 
 Forwards a continuation prompt to you via Slack. **Blocks the agent** until you respond.
 
@@ -85,7 +85,7 @@ Prompt types: continuation (🔄), clarification (❓), error recovery (⚠️),
 
 If you don't respond within 30 minutes (configurable), the agent auto-continues.
 
-### wait_for_instruction
+### standby
 
 Places the agent in standby mode. **Blocks** until you respond.
 
@@ -94,19 +94,19 @@ You see a waiting message with:
 - **Resume with Instructions** — provide new directions
 - **Stop Session** — terminate the agent session
 
-### heartbeat
+### ping
 
 A lightweight liveness signal. Resets the stall detection timer and optionally stores a structured progress snapshot. Non-blocking.
 
-### remote_log
+### broadcast
 
 Sends a status log message to Slack with severity-based formatting (ℹ️ info, ✅ success, ⚠️ warning, ❌ error). Non-blocking.
 
-### recover_state
+### reboot
 
 Called by agents on startup to check for interrupted sessions from a prior server crash. Returns pending approval requests, prompts, and the last checkpoint.
 
-### set_operational_mode
+### switch_freq
 
 Switches between remote, local, and hybrid modes at runtime.
 
@@ -122,17 +122,17 @@ Returns up to 100 recent messages (default 20) in JSON format.
 
 ## Slack Commands
 
-All commands use the `/monocoque` slash command prefix. Only authorized users (listed in `SLACK_MEMBER_IDS`) can execute commands.
+All commands use the `/intercom` slash command prefix. Only authorized users (listed in `SLACK_MEMBER_IDS`) can execute commands.
 
 ### Session Management
 
 | Command | Description |
 |---|---|
-| `/monocoque sessions` | List all active sessions with status, workspace, and last activity |
-| `/monocoque session-start <prompt>` | Start a new agent session with the given task prompt |
-| `/monocoque session-pause [session_id]` | Pause a running session (defaults to your most recent) |
-| `/monocoque session-resume [session_id]` | Resume a paused session |
-| `/monocoque session-clear [session_id]` | Terminate and clean up a session (5s grace period, then force-kill) |
+| `/intercom sessions` | List all active sessions with status, workspace, and last activity |
+| `/intercom session-start <prompt>` | Start a new agent session with the given task prompt |
+| `/intercom session-pause [session_id]` | Pause a running session (defaults to your most recent) |
+| `/intercom session-resume [session_id]` | Resume a paused session |
+| `/intercom session-clear [session_id]` | Terminate and clean up a session (5s grace period, then force-kill) |
 
 ### Checkpoints
 
@@ -140,9 +140,9 @@ Checkpoints snapshot the workspace state so you can detect what changed.
 
 | Command | Description |
 |---|---|
-| `/monocoque session-checkpoint [session_id] [label]` | Create a named checkpoint (hashes all workspace files) |
-| `/monocoque session-checkpoints [session_id]` | List all checkpoints for a session |
-| `/monocoque session-restore <checkpoint_id>` | Restore a checkpoint; shows files that have diverged |
+| `/intercom session-checkpoint [session_id] [label]` | Create a named checkpoint (hashes all workspace files) |
+| `/intercom session-checkpoints [session_id]` | List all checkpoints for a session |
+| `/intercom session-restore <checkpoint_id>` | Restore a checkpoint; shows files that have diverged |
 
 Divergence types reported on restore:
 - **Modified** — file content changed since checkpoint
@@ -153,15 +153,15 @@ Divergence types reported on restore:
 
 | Command | Description |
 |---|---|
-| `/monocoque list-files [path] [--depth N]` | List the workspace directory tree (default depth: 3) |
-| `/monocoque show-file <path> [--lines START:END]` | Display file contents with syntax highlighting |
+| `/intercom list-files [path] [--depth N]` | List the workspace directory tree (default depth: 3) |
+| `/intercom show-file <path> [--lines START:END]` | Display file contents with syntax highlighting |
 
 ### Custom Commands
 
 Any command alias defined in `config.toml [commands]` can be invoked directly:
 
 ```
-/monocoque status
+/intercom status
 ```
 
 This executes the mapped shell command (`git status`) in the workspace root and posts the output to Slack.
@@ -169,12 +169,12 @@ This executes the mapped shell command (`git status`) in the workspace root and 
 ### Help
 
 ```
-/monocoque help [category]
+/intercom help [category]
 ```
 
 Categories: `session`, `checkpoint`, `files`, or omit for all.
 
-## Local CLI (monocoque-ctl)
+## Local CLI (agent-intercom-ctl)
 
 The companion CLI communicates with the server via IPC (named pipes on Windows, Unix sockets on Linux/macOS).
 
@@ -182,29 +182,29 @@ The companion CLI communicates with the server via IPC (named pipes on Windows, 
 
 ```bash
 # List active sessions
-monocoque-ctl list
+agent-intercom-ctl list
 
 # Approve a pending request
-monocoque-ctl approve <request_id>
+agent-intercom-ctl approve <request_id>
 
 # Reject a pending request
-monocoque-ctl reject <request_id> --reason "needs error handling"
+agent-intercom-ctl reject <request_id> --reason "needs error handling"
 
 # Resume a waiting agent
-monocoque-ctl resume
-monocoque-ctl resume "focus on the API tests next"
+agent-intercom-ctl resume
+agent-intercom-ctl resume "focus on the API tests next"
 
 # Switch operational mode
-monocoque-ctl mode local
-monocoque-ctl mode remote
-monocoque-ctl mode hybrid
+agent-intercom-ctl mode local
+agent-intercom-ctl mode remote
+agent-intercom-ctl mode hybrid
 ```
 
 ### Options
 
 | Flag | Default | Description |
 |---|---|---|
-| `--ipc-name` | `monocoque-agent-rc` | IPC socket name (must match the server) |
+| `--ipc-name` | `agent-intercom` | IPC socket name (must match the server) |
 
 ## Stall Detection
 
@@ -227,12 +227,12 @@ The server monitors agent activity and alerts you when an agent goes idle.
 
 ## Auto-Approve Policy
 
-Create `.agentrc/settings.json` in your workspace root to let low-risk operations bypass the approval gate.
+Create `.intercom/settings.json` in your workspace root to let low-risk operations bypass the approval gate.
 
 ```json
 {
   "enabled": true,
-  "tools": ["heartbeat", "remote_log", "check_auto_approve"],
+  "tools": ["ping", "broadcast", "auto_check"],
   "file_patterns": {
     "write": ["**/*.md", "docs/**", "tests/**"],
     "read": ["**/*"]
@@ -260,9 +260,9 @@ Each VS Code workspace can send notifications to a different Slack channel. Set 
 // Workspace A → #frontend-agent channel
 {
   "servers": {
-    "monocoque-agent-rc": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=C0123FRONTEND"
+    "agent-intercom": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=C0123FRONTEND"
     }
   }
 }
@@ -272,9 +272,9 @@ Each VS Code workspace can send notifications to a different Slack channel. Set 
 // Workspace B → #backend-agent channel
 {
   "servers": {
-    "monocoque-agent-rc": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=C0456BACKEND"
+    "agent-intercom": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=C0456BACKEND"
     }
   }
 }

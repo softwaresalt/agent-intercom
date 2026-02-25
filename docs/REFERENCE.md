@@ -1,6 +1,6 @@
-# monocoque-agent-rc — Comprehensive Reference
+# agent-intercom — Comprehensive Reference
 
-> Agent Remote Control (ARC) MCP Server for Agentic Development IDEs.
+> Agent Intercom MCP Server for Agentic Development IDEs.
 
 ---
 
@@ -10,7 +10,7 @@
 2. [MCP Resources](#2-mcp-resources)
 3. [Slack Commands](#3-slack-commands)
 4. [Slack Interactive Actions](#4-slack-interactive-actions)
-5. [IPC Commands (monocoque-ctl)](#5-ipc-commands-monocoque-ctl)
+5. [IPC Commands (agent-intercom-ctl)](#5-ipc-commands-agent-intercom-ctl)
 6. [Configuration](#6-configuration)
 7. [Database Schema](#7-database-schema)
 8. [Domain Models](#8-domain-models)
@@ -30,7 +30,7 @@
 
 Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine tools are always registered and visible; inapplicable calls return descriptive errors. The stall detection timer is reset before and after every tool call.
 
-### 1.1 `ask_approval`
+### 1.1 `check_clearance`
 
 **Purpose:** Submit a code proposal for remote operator approval via Slack. **Blocks** the agent until the operator responds (Accept/Reject) or the configured timeout elapses.
 
@@ -73,7 +73,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ---
 
-### 1.2 `accept_diff`
+### 1.2 `check_diff`
 
 **Purpose:** Apply previously approved code changes to the local file system. **Non-blocking.**
 
@@ -132,7 +132,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ---
 
-### 1.3 `check_auto_approve`
+### 1.3 `auto_check`
 
 **Purpose:** Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate. **Non-blocking.**
 
@@ -164,13 +164,13 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 **Behavior:**
 
 1. Resolves the active session's `workspace_root`.
-2. Loads the workspace policy from `.agentrc/settings.json`.
+2. Loads the workspace policy from `.intercom/settings.json`.
 3. Evaluates the policy (see [Policy System](#10-policy-system) for evaluation order).
 4. Returns immediately with the result.
 
 ---
 
-### 1.4 `forward_prompt`
+### 1.4 `transmit`
 
 **Purpose:** Forward an agent-generated continuation prompt to the remote operator via Slack with Continue/Refine/Stop buttons. **Blocks** the agent until the operator responds or the configured timeout elapses.
 
@@ -209,7 +209,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ---
 
-### 1.5 `remote_log`
+### 1.5 `broadcast`
 
 **Purpose:** Send a non-blocking status log message to the Slack channel with severity-based formatting. Returns immediately.
 
@@ -245,7 +245,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ---
 
-### 1.6 `recover_state`
+### 1.6 `reboot`
 
 **Purpose:** Retrieve the last known state from persistent storage on startup. Called by the agent to check for interrupted sessions or pending requests. **Non-blocking.**
 
@@ -290,7 +290,7 @@ Fields `pending_requests`, `last_checkpoint`, and `progress_snapshot` are omitte
 
 ---
 
-### 1.7 `set_operational_mode`
+### 1.7 `switch_freq`
 
 **Purpose:** Switch between remote, local, and hybrid operational modes at runtime. Persists the mode to the database. **Non-blocking.**
 
@@ -325,7 +325,7 @@ Fields `pending_requests`, `last_checkpoint`, and `progress_snapshot` are omitte
 
 ---
 
-### 1.8 `wait_for_instruction`
+### 1.8 `standby`
 
 **Purpose:** Place the agent in standby, posting a waiting status to Slack with Resume/Stop buttons. **Blocks** until the operator responds or timeout elapses.
 
@@ -357,7 +357,7 @@ Fields `pending_requests`, `last_checkpoint`, and `progress_snapshot` are omitte
 
 ---
 
-### 1.9 `heartbeat`
+### 1.9 `ping`
 
 **Purpose:** Lightweight liveness signal. Resets the stall detection timer and optionally stores a structured progress snapshot. **Non-blocking.**
 
@@ -440,7 +440,7 @@ Fields `pending_requests`, `last_checkpoint`, and `progress_snapshot` are omitte
 
 ## 3. Slack Commands
 
-All commands are invoked via `/monocoque <command>`. Every command enforces authorization — checks the calling user against `config.authorized_user_ids` (loaded from `SLACK_MEMBER_IDS` env var). Unauthorized users are silently ignored.
+All commands are invoked via `/intercom <command>`. Every command enforces authorization — checks the calling user against `config.authorized_user_ids` (loaded from `SLACK_MEMBER_IDS` env var). Unauthorized users are silently ignored.
 
 ### 3.1 `help [category]`
 
@@ -478,9 +478,9 @@ All commands are invoked via `/monocoque <command>`. Every command enforces auth
 1. Enforces `max_concurrent_sessions` limit.
 2. Creates a `Session` record.
 3. Spawns the host CLI process with environment variables:
-   - `MONOCOQUE_WORKSPACE_ROOT` — resolved workspace path
-   - `MONOCOQUE_SSE_URL` — HTTP endpoint for the spawned agent
-   - `MONOCOQUE_SESSION_ID` — session UUID
+   - `INTERCOM_WORKSPACE_ROOT` — resolved workspace path
+   - `INTERCOM_SSE_URL` — HTTP endpoint for the spawned agent
+   - `INTERCOM_SESSION_ID` — session UUID
 4. Activates the session upon successful process start.
 5. Posts confirmation to Slack with session ID and workspace.
 
@@ -603,7 +603,7 @@ status = "git status"
 3. Pauses the stall detector timer during execution.
 4. Posts the output to Slack.
 
-**Security:** Only commands explicitly listed in `config.commands` can be invoked as Slack aliases (FR-014). MCP auto-approve policy is governed separately by `.agentrc/settings.json` (ADR-0012).
+**Security:** Only commands explicitly listed in `config.commands` can be invoked as Slack aliases (FR-014). MCP auto-approve policy is governed separately by `.intercom/settings.json` (ADR-0012).
 
 ---
 
@@ -621,14 +621,14 @@ All interactive actions flow through a centralized dispatcher that provides:
 
 | Action ID | Effect | Resolves To |
 |---|---|---|
-| `approve_accept` | Sets status to `Approved`, resolves oneshot channel | `ask_approval` returns `status: "approved"` |
-| `approve_reject` | Sets status to `Rejected` with reason `"rejected by operator"`, resolves oneshot | `ask_approval` returns `status: "rejected"` |
+| `approve_accept` | Sets status to `Approved`, resolves oneshot channel | `check_clearance` returns `status: "approved"` |
+| `approve_reject` | Sets status to `Rejected` with reason `"rejected by operator"`, resolves oneshot | `check_clearance` returns `status: "rejected"` |
 
 ### 4.3 Prompt Actions
 
 | Action ID | Effect | Resolves To |
 |---|---|---|
-| `prompt_continue` | Resolves with `Continue` decision | `forward_prompt` returns `decision: "continue"` |
+| `prompt_continue` | Resolves with `Continue` decision | `transmit` returns `decision: "continue"` |
 | `prompt_refine` | Resolves with `Refine` decision and placeholder instruction | `forward_prompt` returns `decision: "refine"` |
 | `prompt_stop` | Resolves with `Stop` decision | `forward_prompt` returns `decision: "stop"` |
 
@@ -650,15 +650,15 @@ All interactive actions flow through a centralized dispatcher that provides:
 
 ---
 
-## 5. IPC Commands (monocoque-ctl)
+## 5. IPC Commands (agent-intercom-ctl)
 
-`monocoque-ctl` is a local CLI companion binary that communicates with the server via named pipes (Windows) / Unix domain sockets.
+`agent-intercom-ctl` is a local CLI companion binary that communicates with the server via named pipes (Windows) / Unix domain sockets.
 
 ### 5.1 CLI Arguments
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--ipc-name` | `string` | `"monocoque-agent-rc"` | IPC socket name (must match server's `ipc_name` config) |
+| `--ipc-name` | `string` | `"agent-intercom"` | IPC socket name (must match server's `ipc_name` config) |
 
 ### 5.2 Commands
 
@@ -773,7 +773,7 @@ The main configuration file is parsed into `GlobalConfig`. Path: specified via `
 | `host_cli` | `string` | **Yes** | — | Path to the host CLI binary (e.g., `"claude"`, `"gh"`, `"copilot.exe"`) |
 | `host_cli_args` | `Vec<string>` | No | `[]` | Default arguments passed to the host CLI on spawn |
 | `http_port` | `u16` | No | `3000` | HTTP port for the SSE transport (binds to `127.0.0.1`) |
-| `ipc_name` | `string` | No | `"monocoque-agent-rc"` | Named pipe / Unix socket identifier |
+| `ipc_name` | `string` | No | `"agent-intercom"` | Named pipe / Unix socket identifier |
 | `retention_days` | `u32` | No | `30` | Days after session termination before data is purged |
 
 #### `[database]`
@@ -823,7 +823,7 @@ Credentials are loaded at runtime via `GlobalConfig::load_credentials()`. **Neve
 
 **Resolution Order (per credential):**
 
-1. **OS Keychain**: Service `"monocoque-agent-rc"`, key name matching the credential.
+1. **OS Keychain**: Service `"agent-intercom"`, key name matching the credential.
 2. **Environment Variable**: Fallback if keychain lookup fails or returns empty.
 
 Keychain access uses `tokio::task::spawn_blocking` since the `keyring` crate is synchronous I/O.
@@ -839,14 +839,14 @@ Keychain access uses `tokio::task::spawn_blocking` since the `keyring` crate is 
 
 ### 6.3 Per-Workspace Channel Override
 
-Each VS Code workspace can target a different Slack channel by appending a `channel_id` query parameter to the SSE URL:
+Each VS Code workspace can target a different Slack channel by appending a `channel_id` query parameter to the MCP URL:
 
 ```json
 {
   "servers": {
-    "monocoque": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3000/sse?channel_id=C0123FRONTEND"
+    "agent-intercom": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=C0123FRONTEND"
     }
   }
 }
@@ -859,14 +859,14 @@ When omitted, the global `slack.channel_id` is used.
 ```toml
 default_workspace_root = "D:/Source/GitHub/my-project"
 http_port = 3000
-ipc_name = "monocoque-agent-rc"
+ipc_name = "agent-intercom"
 max_concurrent_sessions = 3
 host_cli = "D:/Tools/ghcpcli/copilot.exe"
 host_cli_args = ["--stdio"]
 retention_days = 30
 
 [database]
-path = "data/agent-rc.db"
+path = "data/agent-intercom.db"
 
 [slack]
 channel_id = "C0AFXFQP1TJ"
@@ -1185,7 +1185,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 ### 10.1 Policy File
 
-**Location:** `{workspace_root}/.agentrc/settings.json`
+**Location:** `{workspace_root}/.intercom/settings.json`
 
 **Example:**
 
@@ -1206,7 +1206,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 ### 10.2 Policy Loader
 
-**File:** `.agentrc/settings.json` relative to workspace root.
+**File:** `.intercom/settings.json` relative to workspace root.
 
 | Condition | Behavior |
 |---|---|
@@ -1238,11 +1238,11 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 **Library:** `notify` crate (recommended watcher).
 
 **Behavior:**
-- Watches the `.agentrc/` directory per workspace for file create/modify/remove events on `settings.json`.
+- Watches the `.intercom/` directory per workspace for file create/modify/remove events on `settings.json`.
 - On change, reloads the policy via `PolicyLoader` and updates the in-memory cache.
 - Cache type: `PolicyCache = Arc<RwLock<HashMap<PathBuf, WorkspacePolicy>>>`.
 - Watchers are registered when sessions start and unregistered when sessions terminate.
-- If `.agentrc/` directory doesn't exist yet, the watcher is stored but deferred.
+- If `.intercom/` directory doesn't exist yet, the watcher is stored but deferred.
 
 ---
 
@@ -1273,9 +1273,9 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 6. Spawns the host CLI process with:
    - Arguments: `host_cli_args` + `prompt`
    - Environment variables:
-     - `MONOCOQUE_WORKSPACE_ROOT` — resolved workspace path
-     - `MONOCOQUE_SSE_URL` — SSE endpoint URL
-     - `MONOCOQUE_SESSION_ID` — session UUID
+     - `INTERCOM_WORKSPACE_ROOT` — resolved workspace path
+     - `INTERCOM_SSE_URL` — SSE endpoint URL
+     - `INTERCOM_SESSION_ID` — session UUID
    - Working directory: workspace path
    - stdin: null, stdout: piped, stderr: piped
    - `kill_on_drop(true)`
@@ -1369,7 +1369,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 ## 13. CLI Arguments
 
-### 13.1 `monocoque-agent-rc`
+### 13.1 `agent-intercom`
 
 | Argument | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -1377,11 +1377,11 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 | `--log-format` | `text` \| `json` | No | `text` | Log output format |
 | `--workspace` | `PathBuf` | No | — | Override the default workspace root |
 
-### 13.2 `monocoque-ctl`
+### 13.2 `agent-intercom-ctl`
 
 | Argument | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `--ipc-name` | `string` | No | `"monocoque-agent-rc"` | IPC socket name |
+| `--ipc-name` | `string` | No | `"agent-intercom"` | IPC socket name |
 | Subcommand | — | **Yes** | — | `list`, `approve`, `reject`, `resume`, `mode` |
 
 ---
@@ -1622,5 +1622,5 @@ $env:SLACK_TEAM_ID   = [System.Environment]::GetEnvironmentVariable("SLACK_TEAM_
 $env:SLACK_MEMBER_IDS = [System.Environment]::GetEnvironmentVariable("SLACK_MEMBER_IDS", "User")
 $env:RUST_LOG        = "info"
 
-.\target\debug\monocoque-agent-rc.exe --config config.toml
+.\target\debug\agent-intercom.exe --config config.toml
 ```

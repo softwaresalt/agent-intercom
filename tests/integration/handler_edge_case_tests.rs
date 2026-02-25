@@ -6,16 +6,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use monocoque_agent_rc::mcp::handler::{
+use agent_intercom::mcp::handler::{
     AppState, ApprovalResponse, PromptResponse, StallDetectors, WaitResponse,
 };
-use monocoque_agent_rc::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
-use monocoque_agent_rc::models::progress::{ProgressItem, ProgressStatus};
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::orchestrator::stall_detector::StallDetector;
-use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
-use monocoque_agent_rc::persistence::db;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+use agent_intercom::models::progress::{ProgressItem, ProgressStatus};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::orchestrator::stall_detector::StallDetector;
+use agent_intercom::persistence::approval_repo::ApprovalRepo;
+use agent_intercom::persistence::db;
+use agent_intercom::persistence::session_repo::SessionRepo;
 use tokio::sync::Mutex;
 
 use super::test_helpers::{
@@ -60,6 +60,7 @@ async fn stall_detector_reset_works() {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: Some(Arc::clone(&detectors)),
         ipc_auth_token: None,
     });
@@ -68,9 +69,8 @@ async fn stall_detector_reset_works() {
 
     // Create a stall detector via the builder (StallDetector::new → spawn).
     let cancel = tokio_util::sync::CancellationToken::new();
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel::<
-        monocoque_agent_rc::orchestrator::stall_detector::StallEvent,
-    >(10);
+    let (event_tx, _event_rx) =
+        tokio::sync::mpsc::channel::<agent_intercom::orchestrator::stall_detector::StallEvent>(10);
     let detector = StallDetector::new(
         session.id.clone(),
         std::time::Duration::from_secs(300), // inactivity_threshold
@@ -112,7 +112,7 @@ async fn no_channel_effective_channel_is_none() {
     let state = test_app_state(config).await;
     // Use the helper-produced config which has empty [slack] channel.
 
-    let server = monocoque_agent_rc::mcp::handler::AgentRcServer::new(Arc::clone(&state));
+    let server = agent_intercom::mcp::handler::IntercomServer::new(Arc::clone(&state));
     assert_eq!(server.effective_channel_id(), None);
 }
 
@@ -332,6 +332,7 @@ async fn ipc_auth_some_means_enabled() {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: Some("test-secret-token".into()),
     });

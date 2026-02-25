@@ -4,14 +4,14 @@
 //! missing credential error message quality, optional `SLACK_TEAM_ID`,
 //! and empty env-var handling.
 
-use monocoque_agent_rc::config::GlobalConfig;
+use agent_intercom::config::GlobalConfig;
 
 fn sample_toml(workspace: &str) -> String {
     format!(
         r#"
 default_workspace_root = '{workspace}'
 http_port = 3000
-ipc_name = "monocoque-agent-rc"
+ipc_name = "agent-intercom"
 max_concurrent_sessions = 1
 host_cli = "claude"
 
@@ -56,7 +56,7 @@ async fn env_var_only_credential_loading() {
     let (_temp, mut config) = make_config();
 
     // Set env vars (these will be used since the keychain service
-    // "monocoque-agent-rc" is almost certainly absent in CI/test envs).
+    // "agent-intercom" is almost certainly absent in CI/test envs).
     unsafe {
         std::env::set_var("SLACK_APP_TOKEN", "xapp-test-app-token");
         std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-bot-token");
@@ -109,7 +109,7 @@ async fn missing_required_credential_error_names_both_sources() {
     let err_msg = format!("{}", result.unwrap_err());
     // The error should mention the keychain service name.
     assert!(
-        err_msg.contains("monocoque-agent-rc"),
+        err_msg.contains("agent-intercom"),
         "error should mention keychain service name, got: {err_msg}"
     );
     // The error should mention the environment variable name.

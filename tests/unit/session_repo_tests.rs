@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::persistence::{db, session_repo::SessionRepo};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::persistence::{db, session_repo::SessionRepo};
 
 /// T005: In-memory `connect_memory()` creates pool with all 5 tables.
 #[tokio::test]

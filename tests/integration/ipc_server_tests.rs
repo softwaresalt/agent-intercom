@@ -16,17 +16,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use agent_intercom::config::GlobalConfig;
+use agent_intercom::ipc::server::spawn_ipc_server;
+use agent_intercom::mcp::handler::{AppState, ApprovalResponse, WaitResponse};
+use agent_intercom::models::approval::{ApprovalRequest, RiskLevel};
+use agent_intercom::models::session::{SessionMode, SessionStatus};
+use agent_intercom::persistence::approval_repo::ApprovalRepo;
+use agent_intercom::persistence::db;
+use agent_intercom::persistence::session_repo::SessionRepo;
 use interprocess::local_socket::{
     traits::Stream as SyncStreamTrait, GenericNamespaced, Stream, ToNsName,
 };
-use monocoque_agent_rc::config::GlobalConfig;
-use monocoque_agent_rc::ipc::server::spawn_ipc_server;
-use monocoque_agent_rc::mcp::handler::{AppState, ApprovalResponse, WaitResponse};
-use monocoque_agent_rc::models::approval::{ApprovalRequest, RiskLevel};
-use monocoque_agent_rc::models::session::{SessionMode, SessionStatus};
-use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
-use monocoque_agent_rc::persistence::db;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
 use sqlx::SqlitePool;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -85,6 +85,7 @@ fn ipc_app_state(
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: auth_token,
     })

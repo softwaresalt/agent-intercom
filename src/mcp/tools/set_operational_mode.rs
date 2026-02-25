@@ -11,7 +11,7 @@ use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
 use tracing::{info, info_span, Instrument};
 
-use crate::mcp::handler::AgentRcServer;
+use crate::mcp::handler::IntercomServer;
 use crate::models::session::SessionMode;
 use crate::persistence::session_repo::SessionRepo;
 
@@ -28,7 +28,7 @@ struct SetModeInput {
 ///
 /// Returns `rmcp::ErrorData` on validation or persistence failures.
 pub async fn handle(
-    context: ToolCallContext<'_, AgentRcServer>,
+    context: ToolCallContext<'_, IntercomServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
     let channel_id = context.service.effective_channel_id().map(str::to_owned);

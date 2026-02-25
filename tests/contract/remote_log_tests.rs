@@ -7,7 +7,7 @@
 use serde_json::json;
 
 /// The tool name as registered in the MCP server.
-const TOOL_NAME: &str = "remote_log";
+const TOOL_NAME: &str = "broadcast";
 
 /// Valid severity level enum values per contract.
 const VALID_LEVELS: &[&str] = &["info", "success", "warning", "error"];
@@ -124,7 +124,7 @@ fn output_posted_false_when_slack_unavailable() {
 
 #[test]
 fn severity_info_renders_info_emoji() {
-    let block = monocoque_agent_rc::slack::blocks::severity_section("info", "test message");
+    let block = agent_intercom::slack::blocks::severity_section("info", "test message");
     let json = serde_json::to_value(&block).expect("block should serialize");
     let text = json["text"]["text"].as_str().unwrap_or_default();
     assert!(
@@ -136,7 +136,7 @@ fn severity_info_renders_info_emoji() {
 
 #[test]
 fn severity_success_renders_checkmark() {
-    let block = monocoque_agent_rc::slack::blocks::severity_section("success", "tests passed");
+    let block = agent_intercom::slack::blocks::severity_section("success", "tests passed");
     let json = serde_json::to_value(&block).expect("block should serialize");
     let text = json["text"]["text"].as_str().unwrap_or_default();
     assert!(
@@ -148,7 +148,7 @@ fn severity_success_renders_checkmark() {
 
 #[test]
 fn severity_warning_renders_caution() {
-    let block = monocoque_agent_rc::slack::blocks::severity_section("warning", "low disk");
+    let block = agent_intercom::slack::blocks::severity_section("warning", "low disk");
     let json = serde_json::to_value(&block).expect("block should serialize");
     let text = json["text"]["text"].as_str().unwrap_or_default();
     assert!(
@@ -160,7 +160,7 @@ fn severity_warning_renders_caution() {
 
 #[test]
 fn severity_error_renders_error_icon() {
-    let block = monocoque_agent_rc::slack::blocks::severity_section("error", "build failed");
+    let block = agent_intercom::slack::blocks::severity_section("error", "build failed");
     let json = serde_json::to_value(&block).expect("block should serialize");
     let text = json["text"]["text"].as_str().unwrap_or_default();
     assert!(
@@ -174,7 +174,7 @@ fn severity_error_renders_error_icon() {
 
 #[test]
 fn tool_name_matches_contract() {
-    assert_eq!(TOOL_NAME, "remote_log");
+    assert_eq!(TOOL_NAME, "broadcast");
 }
 
 #[test]

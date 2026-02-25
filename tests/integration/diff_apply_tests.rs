@@ -12,12 +12,12 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-use monocoque_agent_rc::config::GlobalConfig;
-use monocoque_agent_rc::diff::patcher::apply_patch;
-use monocoque_agent_rc::diff::writer::write_full_file;
-use monocoque_agent_rc::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
-use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
-use monocoque_agent_rc::persistence::db;
+use agent_intercom::config::GlobalConfig;
+use agent_intercom::diff::patcher::apply_patch;
+use agent_intercom::diff::writer::write_full_file;
+use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+use agent_intercom::persistence::approval_repo::ApprovalRepo;
+use agent_intercom::persistence::db;
 
 /// Build a minimal test configuration with in-memory DB.
 fn test_config(ws: &TempDir) -> GlobalConfig {

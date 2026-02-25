@@ -1,0 +1,96 @@
+# agent-intercom configuration example
+#
+# Copy this file to config.toml and fill in the values for your environment.
+#
+# ── Slack credentials ────────────────────────────────────────────────────────
+#
+# Slack credentials are loaded from environment variables (not this file).
+# Set the following before starting agent-intercom:
+#
+#   SLACK_BOT_TOKEN   Bot user OAuth token          (xoxb-...)
+#   SLACK_APP_TOKEN   App-level token (Socket Mode)  (xapp-...)
+#   SLACK_TEAM_ID     Slack workspace team ID         (T...)
+#   SLACK_MEMBER_IDS  Comma-separated Slack user IDs of authorized operators
+#                     (e.g. U0123456789,U9876543210)
+#
+# Alternatively, store Slack tokens in the OS keychain under the service name
+# "agent-intercom" with keys: slack_bot_token, slack_app_token, slack_team_id
+#
+# ── Per-workspace Slack channel ──────────────────────────────────────────────
+#
+# Each VS Code workspace specifies its target Slack channel via the MCP URL
+# in .vscode/mcp.json. There is no global channel fallback.
+#
+# Example .vscode/mcp.json:
+#
+#   {
+#     "servers": {
+#       "intercom": {
+#         "type": "http",
+#         "url": "http://127.0.0.1:3000/mcp?channel_id=C0123YOURCHANNEL"
+#       }
+#     }
+#   }
+
+# Absolute path to your primary Git workspace root.
+# The MCP agent will operate within this directory.
+default_workspace_root = "/path/to/your/workspace"
+
+# Port for the HTTP/SSE MCP transport endpoint.
+# Must match the port in .vscode/mcp.json for every connected workspace.
+http_port = 3000
+
+# Name of the local IPC socket used by agent-intercom-ctl.
+# Keep the default unless you run multiple server instances.
+ipc_name = "agent-intercom"
+
+# Maximum number of concurrent agent sessions.
+max_concurrent_sessions = 3
+
+# Shell command that starts the AI coding agent.
+# For GitHub Copilot CLI: "copilot" with ["--stdio"]
+# For Claude CLI:         "claude"  with ["--stdio"]
+host_cli = "claude"
+host_cli_args = ["--stdio"]
+
+# How many days to retain session data before automatic purge.
+retention_days = 30
+
+[database]
+# Path to the SQLite database file (relative to the config.toml location).
+path = "data/agent-intercom.db"
+
+[slack]
+# No fields are required here.
+# All Slack credentials come from environment variables or the OS keychain.
+# See the credential documentation above.
+
+[timeouts]
+# Seconds to wait for operator approval before timing out.
+approval_seconds = 3600
+
+# Seconds to wait for a prompt response before timing out.
+prompt_seconds = 1800
+
+# Seconds to wait for a standby instruction (0 = wait indefinitely).
+wait_seconds = 0
+
+[stall]
+# Enable automatic stall detection and escalation.
+enabled = true
+
+# Seconds of inactivity before the agent is considered stalled.
+inactivity_threshold_seconds = 300
+
+# Seconds after a stall is detected before escalation is triggered.
+escalation_threshold_seconds = 120
+
+# Maximum number of stall recovery retries before marking the session blocked.
+max_retries = 3
+
+# Message sent to the agent when a stall is detected.
+default_nudge_message = "Continue working on the current task. Pick up where you left off."
+
+[commands]
+# Shell command used to check the current workspace status.
+status = "git status"

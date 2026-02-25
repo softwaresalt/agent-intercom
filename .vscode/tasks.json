@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Run monocoque-agent-rc (debug)",
+      "label": "Run agent-intercom (debug)",
       "type": "shell",
       "command": "pwsh",
       "args": ["-NoExit", "-File", "${workspaceFolder}/run-debug.ps1"],
@@ -13,7 +13,7 @@
         "reveal": "always",
         "focus": false,
         "panel": "dedicated",
-        "label": "monocoque-agent-rc"
+        "label": "agent-intercom"
       },
       "problemMatcher": []
     }

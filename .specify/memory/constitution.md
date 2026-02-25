@@ -1,33 +1,33 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 1.0.0 → 1.1.0
-Bump rationale: Persistence layer migration SurrealDB → SQLite (MINOR)
+Version change: 1.1.0 → 2.0.0
+Bump rationale: MAJOR — binary rename (monocoque-agent-rc → agent-intercom +
+  monocoque-ctl → agent-intercom-ctl) + rmcp SDK upgrade 0.5 → 0.13
+  (transport protocol changed from SSE to Streamable HTTP)
 
 Modified principles:
-  - VI. Single-Binary Simplicity — updated persistence reference
+  - II. MCP Protocol Fidelity — updated rmcp version and custom notification prefix
+  - VI. Single-Binary Simplicity — updated binary names
 
 Modified sections:
-  - Technical Constraints — persistence entry updated
+  - Technical Constraints — rmcp version, feature name, transport
+  - Governance — updated project name reference
 
 Removed sections: (none)
 
 Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ aligned (Constitution Check
-    section already references constitution gates)
-  - .specify/templates/spec-template.md ✅ aligned (no constitution-
-    specific references required)
-  - .specify/templates/tasks-template.md ✅ aligned (phase structure
-    and checkpoint pattern compatible)
-  - .specify/templates/checklist-template.md ✅ aligned (generic
-    template, no constitution-specific tokens)
-  - .specify/templates/agent-file-template.md ✅ aligned (no
-    constitution-specific tokens)
+  - .specify/templates/plan-template.md ✅ no changes required
+  - .specify/templates/spec-template.md ✅ no changes required
+  - .specify/templates/tasks-template.md ✅ no changes required
+  - .specify/templates/checklist-template.md ✅ no changes required
+  - .specify/templates/agent-file-template.md ✅ no changes required
 
-Follow-up TODOs: (none)
+Amendment: v2.0.0 ratified post-merge of 003-agent-intercom-release
+(branch: 003-agent-intercom-release, commit: b6f5898)
 -->
 
-# monocoque-agent-rc Constitution
+# agent-intercom Constitution
 
 ## Core Principles
 
@@ -49,10 +49,10 @@ unattended operation.
 ### II. MCP Protocol Fidelity
 
 The server MUST implement the Model Context Protocol via the `rmcp`
-0.5 SDK. All MCP tools MUST be unconditionally visible to every
+0.13 SDK. All MCP tools MUST be unconditionally visible to every
 connected agent regardless of configuration. Tools called in
 inapplicable contexts MUST return a descriptive error rather than
-being hidden. Custom notifications (e.g., `monocoque/nudge`) MUST
+being hidden. Custom notifications (e.g., `intercom/nudge`) MUST
 use the standard MCP notification mechanism.
 
 **Rationale**: Consistent tool surface ensures agents can discover
@@ -111,7 +111,7 @@ issues would require reproducing the exact scenario.
 ### VI. Single-Binary Simplicity
 
 The project MUST produce a single workspace with two binaries
-(`monocoque-agent-rc` and `monocoque-ctl`). Dependencies MUST be
+(`agent-intercom` and `agent-intercom-ctl`). Dependencies MUST be
 managed via `Cargo.toml` workspace dependencies. New dependencies
 MUST be justified by a concrete requirement — do not add libraries
 speculatively. Prefer the standard library over external crates
@@ -129,9 +129,9 @@ file copy.
 
 - **Language**: Rust stable, edition 2021
 - **Async runtime**: Tokio (full features)
-- **MCP SDK**: `rmcp` 0.5 with `server`, `transport-sse-server`,
+- **MCP SDK**: `rmcp` 0.13 with `server`, `transport-streamable-http-server`,
   and `transport-io` features
-- **HTTP/SSE**: Axum 0.8
+- **HTTP Transport**: Axum 0.8 with `StreamableHttpService` at `/mcp` (Streamable HTTP protocol)
 - **Slack**: `slack-morphism` with Socket Mode
 - **Persistence**: SQLite via sqlx (bundled libsqlite3 for
   production, in-memory for tests)
@@ -168,7 +168,7 @@ file copy.
 ## Governance
 
 This constitution supersedes all other development practices for
-the monocoque-agent-rc project. All code reviews and automated
+the agent-intercom project. All code reviews and automated
 checks MUST verify compliance with these principles.
 
 - **Amendments**: Any change to this constitution MUST be documented
@@ -186,4 +186,4 @@ checks MUST verify compliance with these principles.
   principle violated, the justification, and the simpler
   alternative that was rejected.
 
-**Version**: 1.0.0 | **Ratified**: 2026-02-10 | **Last Amended**: 2026-02-10
+**Version**: 2.0.0 | **Ratified**: 2026-02-10 | **Last Amended**: 2026-02-23

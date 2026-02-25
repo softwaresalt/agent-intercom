@@ -7,7 +7,7 @@
 use serde_json::json;
 
 /// The tool name as registered in the MCP server.
-const TOOL_NAME: &str = "forward_prompt";
+const TOOL_NAME: &str = "transmit";
 
 /// Valid `prompt_type` enum values per contract.
 const VALID_PROMPT_TYPES: &[&str] = &[
@@ -180,7 +180,7 @@ fn output_instruction_present_only_when_refine() {
 
 #[test]
 fn tool_name_matches_contract() {
-    assert_eq!(TOOL_NAME, "forward_prompt");
+    assert_eq!(TOOL_NAME, "transmit");
 }
 
 /// Verify the tool definition from `mcp-tools.json` matches what the server
@@ -224,13 +224,21 @@ fn contract_schema_structure_is_valid() {
     // Output schema checks.
     let output = &tool["outputSchema"];
     assert_eq!(output["type"], "object");
-    let out_required = output["required"]
-        .as_array()
-        .expect("output required should be array");
-    let out_required_names: Vec<&str> = out_required.iter().filter_map(|v| v.as_str()).collect();
+
+    // `required` must be absent or must NOT contain `decision` — the error path
+    // returns `{status, error_code, error_message}` with no `decision` field.
+    if let Some(arr) = output["required"].as_array() {
+        let out_required_names: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            !out_required_names.contains(&"decision"),
+            "decision must NOT be required — error path omits it"
+        );
+    }
+
+    // The schema must include a `status` field for the error path.
     assert!(
-        out_required_names.contains(&"decision"),
-        "decision must be required in output"
+        output["properties"]["status"].is_object(),
+        "outputSchema must include 'status' property for early errors"
     );
 
     // Verify decision enum values.
@@ -247,4 +255,43 @@ fn contract_schema_structure_is_valid() {
             "decision enum should contain '{expected}'"
         );
     }
+}
+
+// ─── Phase 5 — No-channel error scenario contract shapes ─────────────
+
+/// T055 / S040 — The `transmit` contract must document error output for no-channel case.
+///
+/// The `outputSchema.properties` must include `error_code` so agents know to expect
+/// an error when no Slack channel is configured rather than blocking indefinitely.
+///
+/// This test will FAIL until `mcp-tools.json` is updated to include `error_code`
+/// in the `transmit` outputSchema (implementation gate for T067).
+#[test]
+fn contract_transmit_schema_includes_error_code_property() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
+    ))
+    .expect("mcp-tools.json should be valid JSON");
+
+    let tool = &contract["tools"]["transmit"];
+    let output = &tool["outputSchema"];
+    let props = output["properties"]
+        .as_object()
+        .expect("transmit outputSchema.properties must be an object");
+    assert!(
+        props.contains_key("error_code"),
+        "transmit outputSchema must include 'error_code' property for no-channel errors"
+    );
+}
+
+/// T055 / S040 — No-channel error output shape for `transmit`.
+#[test]
+fn transmit_no_channel_error_code_structure() {
+    let output = json!({
+        "status": "error",
+        "error_code": "no_channel",
+        "error_message": "no Slack channel configured for this session"
+    });
+    assert_eq!(output["status"].as_str(), Some("error"));
+    assert_eq!(output["error_code"].as_str(), Some("no_channel"));
 }

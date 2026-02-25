@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::orchestrator::session_manager;
-use monocoque_agent_rc::orchestrator::spawner;
-use monocoque_agent_rc::persistence::db;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::orchestrator::session_manager;
+use agent_intercom::orchestrator::spawner;
+use agent_intercom::persistence::db;
+use agent_intercom::persistence::session_repo::SessionRepo;
 
 // ── Pause active session ─────────────────────────────────────
 

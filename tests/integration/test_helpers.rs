@@ -7,11 +7,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use monocoque_agent_rc::config::GlobalConfig;
-use monocoque_agent_rc::mcp::handler::{AgentRcServer, AppState};
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::persistence::db;
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::config::GlobalConfig;
+use agent_intercom::mcp::handler::{AppState, IntercomServer};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::persistence::db;
+use agent_intercom::persistence::session_repo::SessionRepo;
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 
@@ -86,6 +86,7 @@ pub async fn test_app_state(config: GlobalConfig) -> Arc<AppState> {
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     })
@@ -101,15 +102,16 @@ pub fn test_app_state_with_db(config: GlobalConfig, db: Arc<SqlitePool>) -> Arc<
         pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         pending_prompts: Arc::new(Mutex::new(HashMap::new())),
         pending_waits: Arc::new(Mutex::new(HashMap::new())),
+        pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
     })
 }
 
-/// Create an `AgentRcServer` with a channel override.
+/// Create an `IntercomServer` with a channel override.
 #[allow(dead_code)]
-pub fn test_server(state: Arc<AppState>, channel_id: Option<&str>) -> AgentRcServer {
-    AgentRcServer::with_channel_override(state, channel_id.map(String::from))
+pub fn test_server(state: Arc<AppState>, channel_id: Option<&str>) -> IntercomServer {
+    IntercomServer::with_channel_override(state, channel_id.map(String::from))
 }
 
 /// Create and activate a session in the database, returning the active session.

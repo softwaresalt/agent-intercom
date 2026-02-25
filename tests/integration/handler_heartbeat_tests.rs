@@ -10,9 +10,9 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::models::progress::{ProgressItem, ProgressStatus};
-use monocoque_agent_rc::models::session::{Session, SessionMode, SessionStatus};
-use monocoque_agent_rc::persistence::session_repo::SessionRepo;
+use agent_intercom::models::progress::{ProgressItem, ProgressStatus};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::persistence::session_repo::SessionRepo;
 
 use super::test_helpers::{create_active_session, test_app_state, test_config};
 
@@ -85,7 +85,7 @@ async fn heartbeat_stores_progress_snapshot() {
 
 #[tokio::test]
 async fn heartbeat_rejects_empty_label_in_snapshot() {
-    use monocoque_agent_rc::models::progress::validate_snapshot;
+    use agent_intercom::models::progress::validate_snapshot;
 
     let snapshot = vec![ProgressItem {
         label: String::new(),

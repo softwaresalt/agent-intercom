@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! `monocoque-ctl` — local CLI companion for `monocoque-agent-rc`.
+//! `agent-intercom-ctl` — local CLI companion for `agent-intercom`.
 //!
 //! Connects to the IPC socket and sends JSON commands to the server.
 //! Designed for local overrides when the operator is physically present.
@@ -12,14 +12,14 @@ use interprocess::local_socket::{traits::Stream as _, GenericNamespaced, Stream,
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "monocoque-ctl",
-    about = "Local CLI for monocoque-agent-rc server",
+    name = "agent-intercom-ctl",
+    about = "Local CLI for agent-intercom server",
     version,
     long_about = None
 )]
 struct Cli {
     /// IPC socket name (must match server's `ipc_name` config).
-    #[arg(long, default_value = "monocoque-agent-rc")]
+    #[arg(long, default_value = "agent-intercom")]
     ipc_name: String,
 
     #[command(subcommand)]
@@ -114,7 +114,7 @@ fn main() {
         Err(err) => {
             eprintln!("Failed to connect to server: {err}");
             eprintln!(
-                "Is monocoque-agent-rc running with ipc_name '{}'?",
+                "Is agent-intercom running with ipc_name '{}'?",
                 args.ipc_name
             );
             std::process::exit(1);

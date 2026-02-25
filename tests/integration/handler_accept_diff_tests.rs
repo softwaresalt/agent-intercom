@@ -13,17 +13,17 @@
 
 use std::sync::Arc;
 
-use monocoque_agent_rc::diff::validate_workspace_path;
-use monocoque_agent_rc::mcp::tools::util::compute_file_hash;
-use monocoque_agent_rc::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
-use monocoque_agent_rc::persistence::approval_repo::ApprovalRepo;
+use agent_intercom::diff::validate_workspace_path;
+use agent_intercom::mcp::tools::util::compute_file_hash;
+use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+use agent_intercom::persistence::approval_repo::ApprovalRepo;
 
 use super::test_helpers::{create_active_session, test_app_state, test_config};
 
 // ── Helper: create an approved request with file on disk ─────
 
 async fn setup_approved_request(
-    state: &Arc<monocoque_agent_rc::mcp::handler::AppState>,
+    state: &Arc<agent_intercom::mcp::handler::AppState>,
     session_id: &str,
     file_path: &str,
     diff_content: &str,
@@ -76,7 +76,7 @@ async fn accept_diff_full_file_write_applied() {
     let validated = validate_workspace_path(root, file_path).expect("valid path");
 
     // Write.
-    let result = monocoque_agent_rc::diff::writer::write_full_file(&validated, content, root);
+    let result = agent_intercom::diff::writer::write_full_file(&validated, content, root);
     assert!(result.is_ok(), "write should succeed");
 
     // Verify file exists and contents.
@@ -140,7 +140,7 @@ async fn accept_diff_unified_patch_applied() {
     let is_unified = diff.starts_with("--- ") || diff.starts_with("diff ");
     assert!(is_unified, "should detect as unified diff");
 
-    let result = monocoque_agent_rc::diff::patcher::apply_patch(&validated, diff, root);
+    let result = agent_intercom::diff::patcher::apply_patch(&validated, diff, root);
     assert!(result.is_ok(), "patch should succeed: {:?}", result.err());
 
     let patched = std::fs::read_to_string(&full).expect("read file");
@@ -327,7 +327,7 @@ async fn accept_diff_hash_mismatch_with_force_applies() {
     // Write new content (simulating force-apply).
     let new_content = "forced new content";
     let validated = validate_workspace_path(root, file_path).expect("valid");
-    let result = monocoque_agent_rc::diff::writer::write_full_file(&validated, new_content, root);
+    let result = agent_intercom::diff::writer::write_full_file(&validated, new_content, root);
     assert!(result.is_ok());
 
     let written = std::fs::read_to_string(&full).expect("read");

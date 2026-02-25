@@ -48,11 +48,21 @@
 			"/^cargo metadata --format-version 1 2>\\$null \\| python -c \"import json,sys; data=json\\.load\\(sys\\.stdin\\); pkgs=\\[p for p in data\\['packages'\\] if p\\['name'\\]=='rmcp'\\]; print\\(pkgs\\[0\\]\\['manifest_path'\\] if pkgs else 'not found'\\)\"$/": {
 				"approve": true,
 				"matchCommandLine": true
-			}
+			},
+			"cargo search": true,
+			"cargo info": true,
+			"cargo add": true,
+			"rustup": true,
+			".\\run-debug.ps1": true,
+			".\\target\\debug\\agent-intercom.exe": true,
+			"Get-NetTCPConnection": true,
+			"netstat": true
 		},
-		"powershell.cwd": "monocoque-agent-rc",
+		"powershell.cwd": "agent-intercom",
     "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,
-		"github.copilot.chat.copilotMemory.enabled": true
+		"github.copilot.chat.copilotMemory.enabled": true,
+		"xml.format.maxLineWidth": 500,
+		"chat.agent.maxRequests": 1000
 	},
     "chat.agentFilesLocations": {
         ".github/agents": true//,
@@ -68,9 +78,9 @@
     },
   "mcp": {
     "servers": {
-      "agent-rc": {
-        "type": "sse",
-        "url": "http://127.0.0.1:3000/sse?channel_id=C0AF15RHPF0"
+      "agent-intercom": {
+        "type": "http",
+        "url": "http://127.0.0.1:3000/mcp?channel_id=C0AF15RHPF0"
       },
       "context7": {
         "type": "stdio",

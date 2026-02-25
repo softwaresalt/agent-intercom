@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-use monocoque_agent_rc::diff::patcher::apply_patch;
-use monocoque_agent_rc::diff::writer::write_full_file;
+use agent_intercom::diff::patcher::apply_patch;
+use agent_intercom::diff::writer::write_full_file;
 
 /// Helper to create a temp workspace directory.
 fn workspace() -> TempDir {

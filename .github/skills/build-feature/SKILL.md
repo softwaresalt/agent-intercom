@@ -27,6 +27,52 @@ Implements a single phase from a feature specification's task plan. The workflow
 * The project compiles before starting (`cargo check` passes)
 * The `.github/copilot-instructions.md` constitution and coding standards are accessible
 
+## Remote Operator Integration (agent-intercom)
+
+When the agent-intercom MCP server is reachable, all file modifications and status updates route through it so the remote operator can follow progress and approve changes via Slack.
+
+### Availability Detection
+
+At the start of every phase, call `ping` with a brief status message. If the call succeeds, agent-intercom is active — follow all remote workflow rules below. If it fails or times out, fall back to direct file writes and local-only operation.
+
+### Status Broadcasting
+
+Use `broadcast` (non-blocking) and `ping` (progress snapshots) throughout the phase to keep the operator informed. These calls never block the agent.
+
+| When | Tool | Level | Message Pattern |
+|---|---|---|---|
+| Phase start | `broadcast` | `info` | `[BUILD] Starting phase {N}: {title} — {task_count} tasks` |
+| Before each task | `broadcast` | `info` | `[TASK] {task_id}: {task_description}` |
+| After each task passes | `broadcast` | `success` | `[TASK] {task_id}: complete` |
+| Task failure / retry | `broadcast` | `warning` | `[TASK] {task_id}: failed — {reason}, retrying` |
+| After test suite run | `ping` | — | Include `progress_snapshot` with per-task `done`/`in_progress`/`pending` |
+| Gate check result | `broadcast` | `success` or `error` | `[GATE] {gate_name}: PASS` or `FAIL — {details}` |
+| Architectural decision | `broadcast` | `info` | `[ADR] {title} — {one-line rationale}` |
+| Phase complete | `broadcast` | `success` | `[BUILD] Phase {N} complete — {tasks_done}/{tasks_total} tasks, commit {short_hash}` |
+
+Post the first `broadcast` of each phase as a new top-level message and capture the returned `ts` value. Use that `ts` as the `thread_ts` parameter for all subsequent messages in the same phase to keep them grouped in a single Slack thread.
+
+### File Change Approval Workflow
+
+When agent-intercom is active, **never write files directly**. Route every file creation or modification through the three-step approval workflow:
+
+1. **`auto_check`** — Call before every file write with `tool_name` set to the action (e.g., `"create_file"`, `"edit_file"`) and `context: { "file_path": "<relative_path>", "risk_level": "<low|high|critical>" }`. If `auto_approved: true`, write the file directly and skip steps 2–3.
+2. **`check_clearance`** — Submit the proposal with a `title`, `diff` (unified diff for modifications, full content for new files), `file_path`, `description`, and appropriate `risk_level`. This call **blocks** until the operator responds.
+3. **`check_diff`** — After receiving `status: "approved"`, call with the returned `request_id` to apply the change.
+
+Response handling:
+* `approved` → call `check_diff` to apply, then `broadcast` confirmation at `success` level.
+* `rejected` → `broadcast` the rejection reason at `warning` level, adapt the implementation based on the operator's `reason` field, and re-submit.
+* `timeout` → treat as rejection. `broadcast` at `warning` level and do not retry automatically.
+* `patch_conflict` from `check_diff` → re-read the file, regenerate the diff, and restart from step 2.
+
+Risk level conventions:
+* `low` — standard source files, tests, documentation
+* `high` — configuration files (`config.toml`, `Cargo.toml`), security modules (`diff/path_safety.rs`, `policy/`), Slack event handlers
+* `critical` — database schema (`persistence/schema.rs`), authentication/authorization code, CI/CD pipeline files
+
+**One file per approval.** Submit each file change as a separate `check_clearance` call.
+
 ## Quick Start
 
 Invoke the skill with both required parameters:
@@ -62,6 +108,7 @@ The skill runs autonomously through all required steps, halting only on unrecove
 * Build a task execution list respecting dependencies: sequential tasks run in order, tasks marked `[P]` can run in parallel.
 * Identify which tasks are tests and which are implementation; TDD order means test tasks execute before their corresponding implementation tasks.
 * Report a summary of the phase scope: task count, estimated files affected, and user story coverage.
+* **When agent-intercom is active**: call `broadcast` at `info` level with `[BUILD] Starting phase {N}: {title} — {task_count} tasks, {files_affected} estimated files`. Capture the returned `ts` and use it as `thread_ts` for all subsequent broadcasts in this phase.
 
 ### Step 2: Check Constitution Gate
 
@@ -94,11 +141,14 @@ Execute tasks in dependency order following TDD discipline:
      * Orchestrator tasks (touching `orchestrator/`): apply Async and Error Handling constraints.
      * Diff/Policy tasks (touching `diff/`, `policy/`): apply General Rust and Error Handling constraints.
      * IPC tasks (touching `ipc/`): apply General Rust and Error Handling constraints.
+   * `broadcast` the task being started: `[TASK] {task_id}: {description}` at `info` level.
    * Read any existing source files that the task modifies.
    * For test tasks: write the test first, then run it and **confirm the test fails** before implementing the production code (red-green TDD).
    * Implement the task following the coding standards from the rust-engineer agent, injecting only the task-type-specific constraints identified above.
+   * **When agent-intercom is active**: route every file creation or modification through the approval workflow described in the Remote Operator Integration section. Generate unified diffs for modifications to existing files. For new files, submit the full file content. Wait for approval before proceeding to the next file.
    * After implementing each task, run `cargo check` to verify compilation.
    * If compilation fails, diagnose the error, fix it, and re-run `cargo check` until it passes.
+   * `broadcast` task completion at `success` level, or failure with reason at `warning` level.
    * A task is complete only when `cargo check` passes **and** relevant tests pass. Mark the completed task as `[X]` in `specs/${input:spec-name}/tasks.md`.
 
 2. Follow these implementation rules:
@@ -124,6 +174,7 @@ Run the full test suite and iterate until all checks pass:
 2. If any test fails:
    * Diagnose the failure from the test output.
    * Fix the implementation (not the test, unless the test itself has a bug).
+   * **When agent-intercom is active**: route any fix through the approval workflow before re-running tests.
    * Re-run `cargo test` to verify the fix.
    * Repeat until all tests pass.
 3. Run `cargo clippy --all-targets -- -D warnings -D clippy::pedantic` to verify lint compliance.
@@ -131,7 +182,9 @@ Run the full test suite and iterate until all checks pass:
 5. Run `cargo fmt --all -- --check` to verify formatting.
 6. If formatting violations exist, run `cargo fmt --all` to auto-fix, then re-run `cargo fmt --all -- --check` to confirm the check passes.
 7. If fixes in steps 3–6 introduced new test failures, return to step 1 and repeat the full cycle.
-8. Report final results: test suite counts, pass rates, clippy exit code, fmt exit code, and any notable findings.
+8. Call `ping` with a `progress_snapshot` showing all tasks and their status (`done`/`in_progress`/`pending`).
+9. `broadcast` the gate result: `[GATE] Test phase: PASS` at `success` level, or `FAIL — {summary}` at `error` level.
+10. Report final results: test suite counts, pass rates, clippy exit code, fmt exit code, and any notable findings.
 
 All three checks (`cargo test`, `cargo clippy`, `cargo fmt --check`) must exit 0 before proceeding to Step 5. Return to Step 3 if test failures reveal missing implementation work. Continue iterating between Step 3 and Step 4 until build, test, lint, and format all pass cleanly.
 
@@ -147,7 +200,8 @@ Re-check the constitution after implementation is complete:
 * Verify all Slack message posting routes through the rate-limited message queue.
 * Verify all file path operations validate against the workspace root via `starts_with()`.
 * Verify test coverage aligns with the 80% target from the constitution.
-* If any remediation changes were made during this step, re-run the Step 4 gate checks (`cargo test`, `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`, `cargo fmt --all -- --check`) to confirm the fixes did not introduce new lint or format violations. All three must exit 0 before proceeding.
+* If any remediation changes were made during this step, route them through the approval workflow (when agent-intercom is active) and re-run the Step 4 gate checks (`cargo test`, `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`, `cargo fmt --all -- --check`) to confirm the fixes did not introduce new lint or format violations. All three must exit 0 before proceeding.
+* `broadcast` the constitution validation result: `[GATE] Constitution: PASS` at `success` level, or `FAIL — {violations}` at `error` level.
 
 ### Step 6: Record Architectural Decisions
 
@@ -162,6 +216,7 @@ For each significant decision made during the build phase:
   * Consequences (positive, negative, and risks)
   * Date and the phase/task that prompted the decision
 * Decisions worth recording include: dependency choices, MCP tool design trade-offs, data model changes, SurrealDB workarounds, Slack interaction patterns, rmcp SDK patterns, error handling strategies, and performance trade-offs.
+* **When agent-intercom is active**: call `broadcast` at `info` level for each ADR created: `[ADR] {NNNN}-{short-title} — {one-line rationale}`.
 * Skip this step if no significant architectural decisions were made during the phase.
 
 ### Step 7: Record Session Memory (Mandatory Gate)
@@ -178,6 +233,7 @@ Persist the full session details to `.copilot-tracking/memory/` following the pr
   * Context to Preserve: source file references, agent references, unresolved questions
 * Use the existing memory files in `.copilot-tracking/memory/` as format examples.
 * After writing the file, verify it exists by reading it back. If the file is missing or empty, halt and retry.
+* **When agent-intercom is active**: call `broadcast` at `info` level: `[MEMORY] Session recorded: {memory_file_path}`.
 
 ### Step 8: Pre-Commit Verification and Stage
 
@@ -198,6 +254,7 @@ Finalize all changes with a Git commit:
 2. Run `git add -A` to stage all modified, created, and deleted files.
 3. Compose a commit message following these conventions:
    * Format: `feat({spec-name}): complete phase {N} - {phase title}`
+   * `broadcast` the commit summary at `success` level: `[COMMIT] feat({spec-name}): complete phase {N} — {files_changed} files, {insertions}+/{deletions}-`
    * Body: list of completed task IDs and a brief summary of what was built
    * Footer: reference the spec path and any relevant ADR numbers
 4. Run `git commit` with the composed message.
@@ -293,12 +350,12 @@ These rules are injected into each task based on its type classification in Step
 | Transport (stdio) | stdio via `rmcp` for direct agent connections                                                |
 | Transport (HTTP)  | axum 0.8 with `StreamableHttpService` on `/mcp` for HTTP/SSE sessions                       |
 | Slack             | `slack-morphism` Socket Mode                                                                 |
-| Database          | SurrealDB embedded — `kv-rocksdb` production, `kv-mem` tests, `SCHEMAFULL` tables            |
+| Database          | SQLite via `sqlx` 0.8 — file-based production, in-memory (`":memory:"`) for tests           |
 | Configuration     | TOML (`config.toml`) → `GlobalConfig`, credentials via keyring with env fallback             |
-| Workspace policy  | JSON auto-approve rules (`.monocoque/settings.json`), hot-reloaded via `notify` file watcher |
+| Workspace policy  | JSON auto-approve rules (`.agentrc/settings.json`), hot-reloaded via `notify` file watcher  |
 | Diff safety       | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via tempfile |
 | Path security     | All paths canonicalized and validated via `starts_with(workspace_root)`                       |
-| IPC               | `interprocess` crate — named pipes (Windows) / Unix domain sockets for `monocoque-ctl`       |
+| IPC               | `interprocess` crate — named pipes (Windows) / Unix domain sockets for `agent-intercom-ctl` |
 | Shutdown          | `CancellationToken` — persist state, notify Slack, terminate children gracefully              |
 
 ---
