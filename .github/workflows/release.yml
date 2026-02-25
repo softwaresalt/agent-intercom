@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+*"
 
 # Ensures partial platform failures abort the entire release (S056).
 # A failed build job cancels all sibling jobs and prevents publish from running.
