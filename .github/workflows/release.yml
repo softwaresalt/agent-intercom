@@ -109,13 +109,14 @@ jobs:
             binary_suffix: ""
             use_cross: false
 
-          # macOS Intel — cross-compiled on ARM64 runner (macos-13 Intel runners
-          # were deprecated by GitHub Actions).
+          # macOS Intel — cross-compiled to x86_64 on ARM64 runner (macos-13
+          # Intel runners were deprecated by GitHub Actions). The Rust toolchain
+          # natively supports this target on Apple Silicon without Docker/cross.
           - os: macos-latest
             target: x86_64-apple-darwin
             archive: tar.gz
             binary_suffix: ""
-            use_cross: true
+            use_cross: false
 
     steps:
       - name: Checkout
