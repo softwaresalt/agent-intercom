@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use rmcp::handler::server::{
     tool::{ToolCallContext, ToolRoute, ToolRouter},
@@ -114,6 +114,13 @@ pub struct IntercomServer {
     channel_id_override: Option<String>,
     /// Pre-existing session ID supplied by the spawner via SSE query parameter.
     session_id_override: Option<String>,
+    /// DB session ID recorded by `on_initialized` (Case 2 — direct connections only).
+    ///
+    /// Set exactly once after the auto-created session is activated.  `Drop`
+    /// reads this to mark the session `Terminated` when the transport closes.
+    /// `Arc` allows the value to be cloned into the async future returned by
+    /// `on_initialized` without requiring `&mut self`.
+    session_db_id: Arc<OnceLock<String>>,
 }
 
 impl IntercomServer {
@@ -124,6 +131,7 @@ impl IntercomServer {
             state,
             channel_id_override: None,
             session_id_override: None,
+            session_db_id: Arc::new(OnceLock::new()),
         }
     }
 
@@ -134,6 +142,7 @@ impl IntercomServer {
             state,
             channel_id_override: channel_id,
             session_id_override: None,
+            session_db_id: Arc::new(OnceLock::new()),
         }
     }
 
@@ -151,7 +160,19 @@ impl IntercomServer {
             state,
             channel_id_override: channel_id,
             session_id_override: session_id,
+            session_db_id: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Store the DB session ID that was created by `on_initialized`.
+    ///
+    /// **For testing only.** Injects the session ID that `on_initialized` would
+    /// normally record after auto-creating a direct-connection session.  This
+    /// lets integration tests drive the `Drop`-based cleanup path without
+    /// needing a live MCP transport.
+    pub fn set_session_id_for_testing(&self, session_id: String) {
+        // Ignore the error if already set (idempotent for tests).
+        let _ = self.session_db_id.set(session_id);
     }
 
     /// Return the effective Slack channel ID for this session, if one is
@@ -484,6 +505,7 @@ impl ServerHandler for IntercomServer {
     /// 2. **Direct connection** (Copilot Chat, Cursor, stdio, etc.): no prior
     ///    session exists, so we auto-create and activate one using the configured
     ///    `default_workspace_root`.
+    #[allow(clippy::too_many_lines)]
     fn on_initialized(
         &self,
         _context: NotificationContext<RoleServer>,
@@ -491,6 +513,7 @@ impl ServerHandler for IntercomServer {
         let state = Arc::clone(&self.state);
         let session_id_override = self.session_id_override.clone();
         let is_remote = self.channel_id_override.is_some();
+        let session_db_id = Arc::clone(&self.session_db_id);
 
         async move {
             let session_repo = SessionRepo::new(Arc::clone(&state.db));
@@ -580,6 +603,14 @@ impl ServerHandler for IntercomServer {
                                 mode = ?mode,
                                 "auto-created session activated on direct connection"
                             );
+                            // Record the session ID so Drop can terminate it
+                            // when the transport closes (T045/T046).
+                            if session_db_id.set(created.id.clone()).is_err() {
+                                warn!(
+                                    session_id = %created.id,
+                                    "session_db_id was already set (unexpected)"
+                                );
+                            }
                         }
                         Err(err) => {
                             warn!(
@@ -692,6 +723,49 @@ impl ServerHandler for IntercomServer {
                 .map_err(|err| {
                     rmcp::ErrorData::internal_error(format!("resource read failed: {err}"), None)
                 })
+        }
+    }
+}
+
+impl Drop for IntercomServer {
+    /// Mark the associated DB session as `Terminated` when the MCP transport closes.
+    ///
+    /// This hook fires when rmcp disposes of the `IntercomServer` instance after
+    /// the SSE stream or stdio connection drops.  Because `Drop` is synchronous
+    /// and the DB write is async, the cleanup is submitted to the current Tokio
+    /// runtime via [`tokio::runtime::Handle::try_current`].  If no runtime is
+    /// available (e.g. during unit tests that do not use a runtime), the cleanup
+    /// is silently skipped — sessions will be reclaimed by the stale-session
+    /// sweep in the next `on_initialized` call.
+    ///
+    /// Only direct-connection sessions (Case 2 of `on_initialized`) store an ID
+    /// in `session_db_id`.  Spawned-agent servers leave it unset, so their Drop
+    /// is always a no-op.
+    fn drop(&mut self) {
+        if let Some(id) = self.session_db_id.get().cloned() {
+            let db = Arc::clone(&self.state.db);
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let session_repo = SessionRepo::new(db);
+                    match session_repo
+                        .set_terminated(&id, SessionStatus::Terminated)
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(session_id = %id, "session terminated on transport disconnect");
+                        }
+                        Err(err) => {
+                            warn!(
+                                %err,
+                                session_id = %id,
+                                "failed to terminate session on disconnect"
+                            );
+                        }
+                    }
+                });
+            }
+            // If no runtime is active, the stale-session sweep in the next
+            // `on_initialized` call will reclaim the session.
         }
     }
 }
