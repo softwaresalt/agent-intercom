@@ -13,6 +13,7 @@ use crate::mcp::handler::{AppState, IntercomServer};
 use crate::models::session::Session;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::checkpoint_repo::CheckpointRepo;
+use crate::persistence::inbox_repo::InboxRepo;
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
 
@@ -57,7 +58,12 @@ pub async fn handle(
 
         let Some(session) = session else {
             info!("no interrupted session found — clean state");
-            return json_result(serde_json::json!({ "status": "clean" }));
+            let mut clean_response = serde_json::json!({ "status": "clean" });
+            let pending_tasks = fetch_inbox_tasks(&state).await?;
+            if !pending_tasks.is_empty() {
+                clean_response["pending_tasks"] = serde_json::json!(pending_tasks);
+            }
+            return json_result(clean_response);
         };
 
         // ── Collect pending data and build response ──────────
@@ -184,7 +190,49 @@ async fn build_recovered_response(
         response["progress_snapshot"] = snap;
     }
 
+    // ── Pending inbox tasks ──────────────────────────────
+    let pending_tasks = fetch_inbox_tasks(state).await?;
+    if !pending_tasks.is_empty() {
+        response["pending_tasks"] = serde_json::json!(pending_tasks);
+    }
+
     Ok(response)
+}
+
+/// Fetch unconsumed inbox tasks for the configured Slack channel and mark
+/// them consumed. Returns a JSON-ready array of task objects.
+async fn fetch_inbox_tasks(state: &AppState) -> Result<Vec<serde_json::Value>, rmcp::ErrorData> {
+    let inbox_repo = InboxRepo::new(Arc::clone(&state.db));
+    let channel_id = if state.config.slack.channel_id.is_empty() {
+        None
+    } else {
+        Some(state.config.slack.channel_id.as_str())
+    };
+
+    let items = inbox_repo
+        .fetch_unconsumed_by_channel(channel_id)
+        .await
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(format!("failed to query inbox tasks: {err}"), None)
+        })?;
+
+    let mut tasks = Vec::new();
+    for item in &items {
+        inbox_repo.mark_consumed(&item.id).await.map_err(|err| {
+            rmcp::ErrorData::internal_error(
+                format!("failed to mark inbox task consumed: {err}"),
+                None,
+            )
+        })?;
+        tasks.push(serde_json::json!({
+            "task_id": item.id,
+            "message": item.message,
+            "source": item.source,
+            "created_at": item.created_at.to_rfc3339(),
+        }));
+    }
+
+    Ok(tasks)
 }
 
 /// Wrap a JSON value into a successful `CallToolResult`.

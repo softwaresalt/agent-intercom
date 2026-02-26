@@ -63,6 +63,12 @@ enum Command {
         /// Message text to send to the agent.
         instruction: String,
     },
+
+    /// Queue a task work item for delivery at the next agent cold-start.
+    Task {
+        /// Task description or instruction text.
+        instruction: String,
+    },
 }
 
 fn main() {
@@ -92,6 +98,9 @@ fn main() {
         }
         Command::Steer { instruction } => {
             serde_json::json!({ "command": "steer", "instruction": instruction })
+        }
+        Command::Task { instruction } => {
+            serde_json::json!({ "command": "task", "instruction": instruction })
         }
     };
 

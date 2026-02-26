@@ -34,6 +34,7 @@ use crate::models::session::SessionMode;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::handlers::steer as steer_handler;
+use crate::slack::handlers::task as task_handler;
 use crate::{AppError, Result};
 
 /// Inbound IPC request from `agent-intercom-ctl`.
@@ -209,6 +210,7 @@ async fn dispatch_command(request: &IpcRequest, state: &Arc<AppState>) -> IpcRes
         "resume" => handle_resume(request, state).await,
         "mode" => handle_mode(request, state).await,
         "steer" => handle_steer(request, state).await,
+        "task" => handle_task(request, state).await,
         other => IpcResponse::error(format!("unknown command: {other}")),
     }
 }
@@ -384,6 +386,19 @@ async fn handle_mode(request: &IpcRequest, state: &Arc<AppState>) -> IpcResponse
         "previous_mode": format!("{previous_mode:?}").to_lowercase(),
         "current_mode": mode_str,
     }))
+}
+
+/// Queue a task inbox item for delivery at the next agent cold-start via IPC.
+async fn handle_task(request: &IpcRequest, state: &Arc<AppState>) -> IpcResponse {
+    let Some(ref text) = request.instruction else {
+        return IpcResponse::error("missing required 'instruction' field (the task text)");
+    };
+
+    match task_handler::store_from_ipc(text, state).await {
+        Ok(data) => IpcResponse::success(data),
+        Err(AppError::Config(msg)) => IpcResponse::error(msg),
+        Err(err) => IpcResponse::error(format!("task inbox failed: {err}")),
+    }
 }
 
 /// Queue a steering message for the active agent session via IPC.

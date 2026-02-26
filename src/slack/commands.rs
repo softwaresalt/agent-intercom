@@ -24,6 +24,7 @@ use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::db::Database;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::handlers::steer as steer_handler;
+use crate::slack::handlers::task as task_handler;
 
 /// Handle incoming `/intercom` slash commands routed via Socket Mode.
 ///
@@ -144,6 +145,16 @@ async fn dispatch_command(
             };
             steer_handler::store_from_slack(&text, None, state).await
         }
+
+        "task" => {
+            let text = if args.is_empty() {
+                return Err(crate::AppError::Config("usage: task <message text>".into()));
+            } else {
+                args.join(" ")
+            };
+            task_handler::store_from_slack(&text, None, state).await
+        }
+
         other => {
             let result = validate_command_alias(other, &state.config.commands);
             match result {

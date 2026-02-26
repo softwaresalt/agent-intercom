@@ -2,29 +2,500 @@
 
 ## Feature Groups
 
-### Feature 004-intercom-advanced-features
+### Feature 005-intercom-acp-server
 
-- README documentation provides an example of the config.toml configuration file, but it doesn't cover all the available options or provide detailed explanations of each setting. The documentation should be expanded to include a comprehensive breakdown of the configuration file, detailing each option, its purpose, valid values, and examples of how to use it effectively. This will help users understand how to customize their setup and leverage all the features of the agent intercom solution.  For example, host_cli should default to "copilot" instead of "claude" and host_cli_args should default to ["--sse"] because the server is designed to run in SSE mode, not stdio.
-- When the HTTP bind fails (port 10048), the server doesn't exit. It fails the HTTP transport but the Slack Socket Mode connection succeeds independently, keeping the process alive as a zombie. The server should exit if the HTTP transport fails to bind, since it's a critical failure that prevents any MCP communication.  Also, the server should never allow more than one instance of itself to be spawnable at a time on the same machine, since that would cause conflicts and unpredictable behavior. **Fix:** In `src/main.rs`, if `transport::serve_http()` returns an error (e.g., due to bind failure), log the error and call `std::process::exit(1)` to terminate the process immediately. Additionally, implement a startup check that attempts to bind to the configured HTTP port before starting any services; if the bind fails, log a clear error message about another instance running and exit.
-- Ability to configure different detail levels of context sharing/messaging to Slack channel user context sharing.
-- Agent hang/failure should get reported to Slack with details and recommended next steps.
-- Add audit log feature to .intercom/logs/ with structured log entries for all agent interactions, including tool calls, approvals, and session lifecycle events.
-- Ability to log terminal command approvals and rejections with details of the command, timestamp, and operator identity to the audit log.
-- Ability to ask the user if they want to add the approved commands to the local workspace policy for auto-approval in the future in .intercom/settings.json and applying RegEx to the command(s) to ensure the list is efficient.
-- Enhance `transmit` command: Both "Resume with Instructions" and "Refine" currently use placeholder strings ("(instruction via Slack)"). Slack modal support for collecting actual typed instructions is noted as future work in the handlers.
-- Slack modal instruction capture for `standby` and `transmit` (confirmed failing via HITL Scenario 7 retry): Both tools return `"(instruction via Slack)"` placeholder instead of the operator's actual typed text. **Root cause:** `wait_resume_instruct` (and `prompt_refine`) button handlers immediately resolve the oneshot with a hardcoded string; no text input is ever collected. **Fix requires a 3-step Slack modal flow:** (1) When `wait_resume_instruct` or `prompt_refine` is pressed, extract the `trigger_id` from the `BlockActions` payload and call `SlackService::open_modal()` (already exists in `src/slack/client.rs`) with a plain-text input block; store `session_id` in the modal's `private_metadata`; do NOT resolve the oneshot yet. (2) Add a `ViewSubmission` match arm to `src/slack/events.rs` (currently falls through to `"unhandled interaction event type"`); extract typed text and `session_id` from `private_metadata`. (3) New modal submit handler resolves the pending oneshot with the real instruction text. **Files to change:** `src/slack/handlers/wait.rs`, `src/slack/handlers/prompt.rs`, `src/slack/events.rs`, `src/slack/blocks.rs` (add modal view builder), `src/slack/handlers/mod.rs`. The `trigger_id` must be threaded from the `BlockActions` event down into the action handlers (currently not passed). This is the canonical fix for the placeholder string issue noted in the existing backlog item above.
-- Additions to .intercom/settings.json should hot-reload to the server memory. `PolicyWatcher` already supports `register()` / `get_policy()` / `cache()` — the remaining work is wiring `PolicyCache` into `AppState` (cascades to ~11 struct constructions across 7 test files) and switching `auto_check` from `PolicyLoader::load()` to cache reads. This should be a dedicated feature spec.
-- SSE disconnect session cleanup: When an SSE connection drops (window reload, VS Code restart, network hiccup), the server should detect the stream closure and mark the corresponding session as `Terminated` or `Interrupted`. Currently, disconnected sessions remain `Active` indefinitely. Implementation likely involves hooking into the `SseServer` or axum stream lifecycle in `src/mcp/sse.rs` to trigger `session_repo.set_terminated()` on stream close.
-- **[Low priority] Slack queue drain race during graceful shutdown when no global channel is configured**: In `src/main.rs::shutdown_with_timeout`, the graceful shutdown sequence is: (1) call `graceful_shutdown()`, which includes a 500ms sleep to let the Slack message queue drain — but *only* when `config.slack.channel_id` is non-empty; (2) abort `SlackRuntime.queue_task`. When the global channel is empty (i.e., all channel routing is per-workspace via SSE `?channel_id=` parameters), the 500ms drain sleep in step 1 is skipped. If any code path enqueues a Slack message between the time the shutdown signal fires and `queue_task.abort()` is called, those messages will be dropped. In practice this is unlikely because: (a) an empty global channel means no server-level shutdown/recovery notifications are posted; (b) per-session messages require a live MCP connection, which stops accepting new work when `CancellationToken` is cancelled before the sleep would run. **If this ever needs fixing**: move the queue drain sleep and the abort into `shutdown_with_timeout` itself (after all task handles are awaited), unconditionally — or add a `drain()` method to `SlackService` that flushes the channel before aborting the worker task. (Deferred from PR `001-002-integration-test` RI-007.)
-- **Policy command regex pre-compilation via `regex::RegexSet`**: `src/policy/evaluator.rs::match_command_pattern` currently calls `Regex::new(pattern)` for every pattern on every `auto_check` tool invocation, compiling regexes from scratch each call. **Fix:** Replace the per-call compilation loop with `regex::RegexSet`. Two approach options — (A) *Eager compile in loader* (preferred): `PolicyLoader::load()` returns a `CompiledWorkspacePolicy { raw: WorkspacePolicy, command_set: RegexSet }` and `PolicyEvaluator::evaluate()` takes `&CompiledWorkspacePolicy`; (B) *Lazy compile*: add `compiled_commands: OnceLock<RegexSet>` to `WorkspacePolicy`. Option A is cleaner (pure data struct, no `OnceLock`). **`RegexSet` replacement for `match_command_pattern`:** `let set = RegexSet::new(patterns)?;` then `set.matches(command).into_iter().next().map(|i| format!("command:{}", patterns[i]))` — one pass through all patterns, returns first matching index. **Files to change:** `src/models/policy.rs` (add `CompiledWorkspacePolicy` if Option A), `src/policy/loader.rs` (`load()` returns compiled form), `src/policy/evaluator.rs` (signature + inner function), `src/mcp/tools/check_auto_approve.rs` (use compiled policy type), `src/policy/watcher.rs` (cache stores compiled form). **Tests to update:** `tests/unit/policy_evaluator_tests.rs`, `tests/unit/policy_tests.rs`. `regex` crate already in `Cargo.toml` — no new dependency needed. (Deferred from PR `001-002-integration-test` RI-001.)
-- Ping fallback to most-recent session: When `ping` finds multiple active sessions (e.g., a stale session that wasn't cleaned up plus a spawned session), instead of returning an ambiguity error, fall back to the session with the most recent `updated_at` timestamp. This would make `ping` more resilient to edge cases where stale cleanup didn't run or a race condition created multiple active sessions. Requires changing the `list_active` → match logic in `src/mcp/tools/heartbeat.rs` to sort by `updated_at DESC` and pick the first.
-- Operator steering queue: A shared-queue feature enabling proactive operator-to-agent communication without requiring the agent to block. **Core:** A `steering_message` DB table (columns: `id`, `session_id`, `message`, `source`, `created_at`, `consumed`) stores messages from any ingestion path. **Delivery:** The `ping` response includes an optional `pending_steering: Vec<String>` array of unconsumed messages for the session, then marks them consumed — zero additional agent tool calls needed. **Ingestion paths (two):** (1) *Slack* — free-text `AppMention` messages or a new `/intercom steer <text>` slash command write to the queue; (2) *IPC/local* — a new `steer` command added to the IPC protocol (`src/ipc/server.rs`) and a `Steer { message }` subcommand in `intercom-ctl` (`ctl/main.rs`) allows a local PowerShell script (`intercom-ctl steer "refocus on error handling"`) to push a message without the agent being blocked. Both paths write to the same queue; `ping` is the single delivery mechanism. This supersedes the existing first backlog item ("Ability to proactively engage an agent in active session") and is related to the `standby` placeholder string issue (see `transmit` item).
-- Task inbox (agent cold-start queue): A persistent `task_inbox` DB table (columns: `id`, `message`, `source`, `created_at`, `consumed`) that stores work items queued while no agent session is active. **Ingestion paths** mirror the steering queue: (1) *Slack* — a new `/intercom task <text>` slash command writes to the inbox; (2) *IPC/local* — a new `task` IPC command and `intercom-ctl task <text>` subcommand allow queuing work from a local script without the operator being present. **Delivery:** The agent reads and clears unconsumed inbox items at session startup — either surfaced in the `reboot` response or via a dedicated `check_inbox` MCP tool call triggered early in `on_initialized`. **Distinction from steering queue:** The steering queue targets an already-running agent session (delivery via `heartbeat`); the task inbox targets a not-yet-started agent (delivery at cold-start). Complements `/intercom spawn` (which launches a child process with a prompt inline) by providing a queue-based alternative that doesn't require the operator to be present at spawn time — items accumulate and are drained when the next agent session starts.
-- Agent heartbeat loop (keep-alive pattern): A documented agent-side pattern — not a server feature — that keeps a session alive and responsive without human interaction. The loop: call `ping` → process any `pending_steering` messages from the operator steering queue → call `standby` with a timeout (e.g. 60 seconds) → on timeout, loop again; on instruction, act then loop. This is the most robust way to make a running session self-sustaining, and pairs directly with the operator steering queue (which delivers messages on each `ping` wakeup). The pattern should be documented in the user guide and codified as a reusable agent prompt snippet (e.g. a `.github/prompts/ping-loop.prompt.md`) so operators can easily instruct agents to enter keep-alive mode. No server-side changes required; server prerequisite is the operator steering queue backlog item (for useful message delivery on wakeup). 
-- Currently, when check_diff or check_clearance are called, the file to be reviewed is not actually attached to the outbound message on the Slack channel.  This undermines the review and approval process, as the operator cannot see the content of the file in question directly within Slack. The fix is to modify the Slack message construction logic in the `check_diff` and `check_clearance` tool handlers to include the file as an attachment. This likely involves using the Slack API's file upload capabilities to attach the file content to the message sent to the channel, ensuring that operators have immediate access to the relevant information for informed decision-making during approvals. **Files to change:** `src/mcp/tools/check_diff.rs`, `src/mcp/tools/check_clearance.rs`, and potentially shared message construction utilities if they exist. Evaluate whether it would be better to upload the file as a Slack file attachment or include the content directly in the message body (considering file size limits and formatting) as a text-based Git diff output.
+Implement Agent Client Protocol (ACP) server mode for `agent-intercom` to actively send prompts to agents and receive responses, in addition to the existing Model Context Protocol (MCP) passive server mode.
 
-#### Test Cases
+Introducing a startup flag (like `--mcp` or `--acp`) is the standard way to handle this in Rust ecosystem tooling. It allows `agent-intercom` to act as a "Swiss Army knife" for agent control, depending on how the user wants to integrate it.
 
-- [ ] T001: Ensure that user can send message via Slack when unprompted by the agent and test that it is stored in the database queue for `ping` pickup by the agent.
-- [ ] T002: Test that the agent can enter a heartbeat loop pattern where it sends a ping, receives a message from the operator steering queue, processes it, then waits again — ensuring the keep-alive pattern works end-to-end with the new steering queue feature.
+Here is how you can architect this dual-mode system without turning your codebase into a tangled mess of `if/else` statements.
+
+### The "Shared Core" Architecture
+
+The beauty of keeping both modes is that about 70% of your application does exactly the same thing regardless of the protocol. You want to isolate the AI protocol logic to the edges of your application.
+
+Here is how the responsibilities break down:
+
+**1. The Shared Foundation (Always Runs)**
+
+* **Slack Socket Mode:** The `slack-morphism` event loop that listens for `/intercom` commands and interactive button clicks (Accept/Reject).
+* **Persistence Layer:** Your SQLite `sqlx` database tracking active sessions, checkpoints, and user policies.
+* **UI Layer:** The Slack Block Kit formatting logic.
+
+**2. The MCP Interface (`--mcp`)**
+
+* **Role:** Passive Server.
+* **Execution:** Spins up the Axum HTTP server (or stdio listener) and waits for the AI agent to initiate a connection.
+* **Flow:** The agent decides when to trigger the `check_clearance` tool. Your server intercepts, posts to Slack, holds the HTTP request open, and returns the Slack approval back to the agent.
+
+**3. The ACP Interface (`--acp`)**
+
+* **Role:** Active Controller / Client.
+* **Execution:** Initiates a TCP connection to `localhost:8080` (where GitHub Copilot CLI is running in headless mode).
+* **Flow:** Your Slack command (`/intercom session-start "build a web server"`) sends the initial JSON-RPC prompt *to* the agent. Your server then listens to the TCP stream for `window/showMessageRequest` payloads to trigger the Slack approval UI.
+
+### Structuring the CLI in Rust
+
+If you are using the `clap` crate for your CLI arguments, the cleanest way to represent this is using subcommands or an enum for the mode.
+
+```rust
+use clap::{Parser, ValueEnum};
+
+#[derive(Parser)]
+#[command(name = "agent-intercom")]
+struct Cli {
+    /// The protocol mode to run the server in
+    #[arg(long, value_enum, default_value_t = Mode::Mcp)]
+    mode: Mode,
+    
+    // ... other shared args like config path
+}
+
+#[derive(Clone, ValueEnum)]
+enum Mode {
+    /// Run as a passive Model Context Protocol (MCP) server
+    Mcp,
+    /// Run as an active Agent Client Protocol (ACP) bridge
+    Acp,
+}
+
+```
+
+### The State Machine Challenge
+
+The biggest architectural hurdle you will face when merging these two paradigms is **Session State Ownership**:
+
+| Feature | MCP Mode (`--mcp`) | ACP Mode (`--acp`) |
+| --- | --- | --- |
+| **Who starts the session?** | The IDE / Agent (e.g., user types in Cursor). | `agent-intercom` (via Slack command). |
+| **Who owns the context?** | The Agent. Your server only sees what the agent passes into the tool call. | Your server. You dictate the prompt and control the working directory. |
+| **Stall Detection** | Handled via your existing `ping` tool and timeouts. | Handled by monitoring the TCP stream for inactivity. |
+
+To handle this cleanly, you should define a Rust `Trait` (e.g., `AgentDriver`) that abstracts the protocol.
+
+Your Slack event loop shouldn't care if it's running in MCP or ACP mode. When a user clicks "Accept" in Slack, the Slack handler just calls `agent_driver.approve(request_id)`.
+
+* If running in MCP mode, that trait implementation fulfills the pending Axum HTTP future.
+* If running in ACP mode, that trait implementation serializes a JSON-RPC approval and writes it to the TCP stream.
+
+Abstracting the protocol behind a trait is the perfect way to keep your Slack event loop clean. It also gives you a massive bonus: **testability**. You can easily write a `MockDriver` to simulate an agent requesting file changes without having to actually spin up Copilot or Cursor.
+
+To make this work asynchronously in Rust, we need to handle two-way communication.
+
+1. **Inbound (Slack $\rightarrow$ Agent):** Handled by calling methods on the `AgentDriver` trait.
+2. **Outbound (Agent $\rightarrow$ Slack):** Handled by the driver pushing events into a `tokio::sync::mpsc` channel that your core application listens to.
+
+Here is a clean, decoupled design specification for that trait and its associated events.
+
+### 1. The Event Enum (Agent $\rightarrow$ Core)
+
+First, define the events your drivers will emit. Your core application (the Slack loop and SQLite state manager) will listen to a stream of these events and react accordingly.
+
+```rust
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AgentEvent {
+    /// Emitted when the agent needs permission to modify a file or run a command
+    ClearanceRequested {
+        request_id: String,
+        session_id: String,
+        action_type: ActionType, // e.g., FileWrite, TerminalCommand
+        description: String,
+        diff: Option<String>,
+    },
+    /// Emitted when the agent sends a status update or reasoning text
+    StatusUpdated {
+        session_id: String,
+        message: String,
+    },
+    /// Emitted when the agent finishes its task or crashes
+    SessionTerminated {
+        session_id: String,
+        exit_code: i32,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ActionType {
+    FileWrite(PathBuf),
+    FileDelete(PathBuf),
+    TerminalCommand(String),
+}
+
+```
+
+### 2. The Driver Trait (Core $\rightarrow$ Agent)
+
+Next, define the trait. Since this will be heavily asynchronous and shared across threads, using `async_trait` is usually the cleanest approach here.
+
+```rust
+use async_trait::async_trait;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum DriverError {
+    #[error("Network error: {0}")]
+    Network(String),
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
+    #[error("Protocol error: {0}")]
+    Protocol(String),
+}
+
+#[async_trait]
+pub trait AgentDriver: Send + Sync {
+    /// Responds to a pending `ClearanceRequested` event.
+    /// In MCP: Completes the pending HTTP tool call.
+    /// In ACP: Sends a window/showMessageRequest response over TCP.
+    async fn resolve_clearance(
+        &self, 
+        request_id: &str, 
+        approved: bool, 
+        feedback: Option<String>
+    ) -> Result<(), DriverError>;
+
+    /// Sends a new prompt to the agent.
+    /// In MCP: This might just broadcast a message or be a no-op if the IDE owns the prompt.
+    /// In ACP: Sends a session/prompt JSON-RPC payload.
+    async fn send_prompt(&self, session_id: &str, prompt: &str) -> Result<(), DriverError>;
+
+    /// Halts the current agent execution.
+    /// In MCP: Returns an error/abort signal to the tool call.
+    /// In ACP: Sends a cancellation request over TCP.
+    async fn interrupt(&self, session_id: &str) -> Result<(), DriverError>;
+}
+
+```
+
+### 3. Wiring It Together in Main
+
+When your application starts, it will check the command-line flag, initialize the appropriate driver, and hand the event receiver off to your Slack loop.
+
+```rust
+use tokio::sync::mpsc;
+use std::sync::Arc;
+
+// Assume we have McpDriver and AcpDriver structs that implement AgentDriver
+
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse(); // From our previous clap setup
+    
+    // Create the channel for the driver to send events back to the app
+    let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(100);
+
+    // Initialize the specific driver based on the CLI flag
+    let driver: Arc<dyn AgentDriver> = match cli.mode {
+        Mode::Mcp => {
+            Arc::new(McpDriver::start(event_tx.clone(), config).await.unwrap())
+        },
+        Mode::Acp => {
+            Arc::new(AcpDriver::start(event_tx.clone(), config).await.unwrap())
+        }
+    };
+
+    // Spawn the core event loop that listens to the driver
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                AgentEvent::ClearanceRequested { request_id, description, .. } => {
+                    // 1. Save pending request to SQLite
+                    // 2. Format a Block Kit message
+                    // 3. Post to Slack
+                    println!("Posting approval to Slack for: {}", description);
+                }
+                // ... handle other events
+            }
+        }
+    });
+
+    // ... Run your Slack Socket Mode client loop here
+    // When Slack gets an "Approve" button click, it calls:
+    // driver.resolve_clearance(&request_id, true, None).await;
+}
+
+```
+
+### The Beauty of this Setup
+
+By structuring `agent-intercom` this way, your complex Slack Block Kit code and SQLite checkpointing logic never have to parse a raw JSON-RPC payload or deal with HTTP headers. The `McpDriver` and `AcpDriver` act as simple translators, wrapping the messy wire protocols into clean `AgentEvent` structs.
+
+Look at how to implement the `tokio::sync::oneshot` channels inside the `McpDriver`? That is the standard pattern for holding a `check_clearance` HTTP request open while waiting for the Slack approval to come back asynchronously.
+
+Implementing `tokio::sync::oneshot` is the textbook way to bridge the gap between a synchronous-looking HTTP request and an unpredictable, asynchronous human action (like waiting for a Slack button click).
+
+By using oneshot channels, the MCP tool call cleanly suspends its execution without blocking your server's underlying threads. When the approval finally comes in, the channel wakes the exact HTTP task back up so it can return the response to the agent.
+
+Here is the blueprint for wiring this up inside your `McpDriver`.
+
+### 1. The Shared State Map
+
+Because the Slack approval will come in on a completely different HTTP/WebSocket request than the one the AI agent is holding open, your driver needs a thread-safe place to store the "waker" (the sender side of the oneshot channel).
+
+We will use a standard `HashMap` wrapped in an `Arc<Mutex<...>>` for this.
+
+```rust
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, oneshot};
+use async_trait::async_trait;
+use uuid::Uuid; // For generating request IDs
+
+// The payload sent back to the waiting MCP task
+#[derive(Debug)]
+pub struct ClearanceResponse {
+    pub approved: bool,
+    pub feedback: Option<String>,
+}
+
+// A thread-safe map holding the Sender half of the oneshot channels
+type PendingRequestsMap = Arc<Mutex<HashMap<String, oneshot::Sender<ClearanceResponse>>>>;
+
+pub struct McpDriver {
+    /// Holds pending requests waiting for a Slack response
+    pending_requests: PendingRequestsMap,
+    /// Channel to send events out to the core Slack loop
+    event_tx: mpsc::Sender<AgentEvent>,
+}
+
+```
+
+### 2. The MCP Tool Handler (The Suspending Task)
+
+When the AI agent (e.g., Claude or Cursor) makes an HTTP POST to your MCP server invoking the `check_clearance` tool, it triggers a handler function. This is where the oneshot channel is created and `.await`-ed.
+
+```rust
+impl McpDriver {
+    pub fn new(event_tx: mpsc::Sender<AgentEvent>) -> Self {
+        Self {
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            event_tx,
+        }
+    }
+
+    /// This simulates the Axum handler or `rmcp` tool execution logic.
+    pub async fn handle_check_clearance(&self, session_id: String, diff: String) -> String {
+        let request_id = Uuid::new_v4().to_string();
+        
+        // 1. Create the oneshot channel
+        let (tx, rx) = oneshot::channel::<ClearanceResponse>();
+
+        // 2. Store the transmitter (tx) in our shared map using the request_id
+        {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.insert(request_id.clone(), tx);
+        }
+
+        // 3. Fire the event out to the core loop (which will post the Slack message)
+        let event = AgentEvent::ClearanceRequested {
+            request_id: request_id.clone(),
+            session_id,
+            action_type: ActionType::FileWrite(PathBuf::from("unknown")), // Map accordingly
+            description: "Agent wants to apply a diff".to_string(),
+            diff: Some(diff),
+        };
+        
+        if self.event_tx.send(event).await.is_err() {
+            return "System error: Failed to route request to Slack.".to_string();
+        }
+
+        // 4. SUSPEND execution here until Slack replies. 
+        // This does not block the thread, just this specific Tokio task.
+        match rx.await {
+            Ok(response) => {
+                if response.approved {
+                    "Approval granted. You may proceed.".to_string()
+                } else {
+                    let reason = response.feedback.unwrap_or_else(|| "No reason provided".to_string());
+                    format!("Request rejected by operator. Reason: {}", reason)
+                }
+            }
+            Err(_) => {
+                // This happens if the sender (tx) is dropped before sending a message.
+                "Request was aborted or timed out.".to_string()
+            }
+        }
+    }
+}
+
+```
+
+### 3. The Driver Trait Implementation (The Waking Task)
+
+Now, we implement the `AgentDriver` trait we defined earlier. When you click "Accept" in Slack, your core app loop receives the Socket Mode event, parses the `request_id` from the button's payload, and calls `resolve_clearance`.
+
+This method simply pops the `oneshot::Sender` out of the map and fires the result down the tube.
+
+```rust
+#[async_trait]
+impl AgentDriver for McpDriver {
+    async fn resolve_clearance(
+        &self, 
+        request_id: &str, 
+        approved: bool, 
+        feedback: Option<String>
+    ) -> Result<(), DriverError> {
+        
+        // 1. Safely remove the sender from the map
+        let sender_opt = {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.remove(request_id)
+        };
+
+        // 2. If it exists, send the response
+        if let Some(tx) = sender_opt {
+            let response = ClearanceResponse { approved, feedback };
+            
+            // Send the response. If the receiver was already dropped 
+            // (e.g., the agent disconnected), ignore the error.
+            let _ = tx.send(response);
+            Ok(())
+        } else {
+            // The request ID wasn't in the map. It may have timed out or already been answered.
+            Err(DriverError::SessionNotFound(request_id.to_string()))
+        }
+    }
+
+    // ... other trait methods (send_prompt, interrupt)
+}
+
+```
+
+### Why This is Bulletproof
+
+* **No Deadlocks:** Using a standard `std::sync::Mutex` here is perfectly safe and fast because you are only holding the lock long enough to `insert` or `remove` a value from the `HashMap`. You are never holding the lock across an `.await` point.
+* **Memory Safe:** By using `.remove(request_id)` inside `resolve_clearance`, you guarantee that the channel is destroyed and memory is freed immediately after the response is handled.
+* **Crash Resilient:** If the Slack user never responds, the `rx.await` in the tool handler could wait forever. In a production environment, you would wrap `rx.await` in a `tokio::time::timeout` to automatically reject the request if no one responds within, say, 10 minutes.
+
+Look at how to map this incoming oneshot pattern over to the new ACP mode, where instead of holding an HTTP request open, you are responding to a `window/showMessageRequest` over a JSON-RPC TCP stream. The same `resolve_clearance` method can be implemented to serialize a JSON response and write it to the TCP stream instead of sending a message down a channel. This is the beauty of abstracting the protocol behind a trait. Your Slack event loop and core application logic remain blissfully unaware of the underlying communication mechanism.
+
+Mapping this pattern to ACP reveals a fundamental difference between HTTP frameworks and raw TCP sockets. It is actually a major "aha!" moment when building AI agent tooling.
+
+With MCP (via an HTTP framework like Axum), the framework expects your handler function to return a value before it closes the connection. That is why you **must** use a `oneshot` channel to suspend the function until the Slack approval arrives.
+
+With ACP (JSON-RPC over a raw TCP stream), the connection is **full-duplex and continuous**. You do not need to suspend a function at all! JSON-RPC handles request/response correlation natively using the `"id"` field.
+
+Here is how the architecture shifts and how you implement the `AgentDriver` for ACP.
+
+### 1. The Split Stream Architecture
+
+When your Rust server connects to Copilot CLI's TCP port, you will immediately split the stream into two independent Tokio tasks:
+
+* **The Read Task:** Continuously reads incoming bytes, parses JSON-RPC objects, and emits `AgentEvent`s to your core Slack loop.
+* **The Write Task:** Listens on an `mpsc` channel for outgoing JSON-RPC objects, serializes them, and writes them to the TCP socket.
+
+### 2. The ACP Driver State
+
+Because the Write Task handles all outbound TCP traffic, your `AcpDriver` struct doesn't need a complex `HashMap` of `oneshot` channels anymore. It just needs a transmitter to send messages to the Write Task.
+
+```rust
+use tokio::sync::mpsc;
+use serde_json::{json, Value};
+use async_trait::async_trait;
+
+pub struct AcpDriver {
+    /// Channel to send raw JSON-RPC responses to the TCP Write Task
+    tcp_tx: mpsc::Sender<Value>,
+    /// Channel to send parsed events to the core Slack loop
+    event_tx: mpsc::Sender<AgentEvent>,
+}
+
+impl AcpDriver {
+    pub fn new(tcp_tx: mpsc::Sender<Value>, event_tx: mpsc::Sender<AgentEvent>) -> Self {
+        Self { tcp_tx, event_tx }
+    }
+}
+
+```
+
+### 3. The Read Task (Generating the Event)
+
+When Copilot wants permission to modify a file, it sends a JSON-RPC request over TCP that looks like this:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "method": "window/showMessageRequest",
+  "params": { "message": "Execute npm install?", "actions": [{"title": "Accept"}, {"title": "Reject"}] }
+}
+
+```
+
+Your TCP Read Task parses this, grabs the ID (`42`), and fires it off to Slack. Notice that it **does not wait** for a response. It immediately goes back to listening for more TCP traffic (like status updates).
+
+```rust
+// Inside your TCP Read Loop Task:
+if method == "window/showMessageRequest" {
+    let request_id = request["id"].to_string(); // e.g., "42"
+    
+    let event = AgentEvent::ClearanceRequested {
+        request_id, // We pass the JSON-RPC ID straight through
+        session_id: current_session.clone(),
+        action_type: ActionType::TerminalCommand("npm install".into()),
+        description: request["params"]["message"].as_str().unwrap_or("").to_string(),
+        diff: None,
+    };
+    
+    // Fire it to the Slack loop and immediately move on
+    let _ = event_tx.send(event).await; 
+}
+
+```
+
+### 4. The Driver Trait Implementation (Sending the Approval)
+
+When you click "Accept" in Slack, your core app loop calls `driver.resolve_clearance("42", true, None)`.
+
+The `AcpDriver` simply constructs a JSON-RPC response matching that exact ID and shoves it into the `tcp_tx` channel. Copilot CLI receives the ID, matches it to its own internal pending request, and resumes its execution.
+
+```rust
+#[async_trait]
+impl AgentDriver for AcpDriver {
+    async fn resolve_clearance(
+        &self, 
+        request_id: &str, 
+        approved: bool, 
+        _feedback: Option<String>
+    ) -> Result<(), DriverError> {
+        
+        // 1. Determine the action based on the Slack button click
+        let action_title = if approved { "Accept" } else { "Reject" };
+
+        // 2. Format the exact JSON-RPC response Copilot is waiting for
+        let response = json!({
+            "jsonrpc": "2.0",
+            // We use the exact ID that came from the Read Task
+            "id": serde_json::from_str::<Value>(request_id).unwrap_or(json!(request_id)), 
+            "result": {
+                "title": action_title
+            }
+        });
+
+        // 3. Send it to the TCP Write Task to be pushed over the wire
+        self.tcp_tx
+            .send(response)
+            .await
+            .map_err(|_| DriverError::Network("TCP Write task has died".to_string()))?;
+
+        Ok(())
+    }
+
+    // ... send_prompt and interrupt methods work the exact same way, 
+    // just formatting different JSON-RPC payloads!
+}
+
+```
+
+### Why this is a massive upgrade
+
+By moving to this event-driven, full-duplex model, your server becomes incredibly resilient.
+
+* If you take 10 minutes to click "Accept" on your phone, the TCP connection remains perfectly healthy and continues streaming background logs or pings.
+* You don't have to worry about HTTP timeouts.
+* You completely eliminate the `HashMap` and `Mutex` overhead used in the MCP oneshot workaround.
+
+Look at how to cleanly frame and parse the incoming JSON stream in your TCP Read Task using `tokio_util::codec::LinesCodec` so you don't have to deal with fragmented byte chunks manually. This is the standard way to handle line-delimited JSON streams in Rust and will save you from a world of pain trying to buffer and parse incomplete messages.
 
