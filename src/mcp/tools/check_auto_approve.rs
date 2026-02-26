@@ -1,8 +1,14 @@
-//! `check_auto_approve` MCP tool handler (T064, T066).
+//! `check_auto_approve` MCP tool handler (T064, T066, T052).
 //!
 //! Queries the workspace auto-approve policy to determine whether an
 //! operation can bypass the remote approval gate. Returns immediately
 //! without blocking the agent.
+//!
+//! Policy resolution order (T052):
+//! 1. Try the shared [`PolicyCache`] in `AppState` (populated by the
+//!    [`PolicyWatcher`] on hot-reload events — O(1) read, no disk I/O).
+//! 2. On cache miss, load and compile the policy from disk via
+//!    [`PolicyLoader`], then back-fill the cache for the next call.
 
 use std::sync::Arc;
 
@@ -62,10 +68,28 @@ pub async fn handle(
 
         let workspace_root = std::path::PathBuf::from(&session.workspace_root);
 
-        // ── Load workspace policy from disk ──────────────────
-        let policy = PolicyLoader::load(&workspace_root).map_err(|err| {
-            rmcp::ErrorData::internal_error(format!("failed to load workspace policy: {err}"), None)
-        })?;
+        // ── Resolve workspace policy (cache-first, T052) ────
+        // 1. Try the shared PolicyCache for an O(1) hit.
+        let policy = {
+            let cache_guard = state.policy_cache.read().await;
+            cache_guard.get(&workspace_root).cloned()
+        };
+
+        let policy = if let Some(cached) = policy {
+            info!("policy cache hit — using pre-compiled policy");
+            cached
+        } else {
+            // 2. Cache miss: load from disk and back-fill the cache.
+            let loaded = PolicyLoader::load(&workspace_root).map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to load workspace policy: {err}"),
+                    None,
+                )
+            })?;
+            let mut cache_guard = state.policy_cache.write().await;
+            cache_guard.insert(workspace_root.clone(), loaded.clone());
+            loaded
+        };
 
         // ── Evaluate policy ──────────────────────────────────
         let result = PolicyEvaluator::check(&input.tool_name, &input.context, &policy);

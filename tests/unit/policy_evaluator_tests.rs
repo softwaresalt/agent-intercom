@@ -1,7 +1,7 @@
-//! Unit tests for policy evaluator (T117).
+//! Unit tests for policy evaluator (T117, T048).
 //!
 //! Validates command matching, tool matching, file pattern glob matching,
-//! and `risk_level_threshold` enforcement.
+//! `risk_level_threshold` enforcement, and use of the pre-compiled `RegexSet`.
 
 use agent_intercom::models::approval::RiskLevel;
 use agent_intercom::models::policy::{CompiledWorkspacePolicy, FilePatterns, WorkspacePolicy};
@@ -304,4 +304,52 @@ fn no_context_still_matches_commands_and_tools() {
 
     let tool_result = PolicyEvaluator::check("remote_log", &None, &wp);
     assert!(tool_result.auto_approved);
+}
+
+// ─── Pre-compiled RegexSet usage (T048 — S075) ───────────────────────
+
+/// S075 — `PolicyEvaluator::check` uses the pre-compiled `command_set` from
+/// `CompiledWorkspacePolicy` to match command patterns in O(N) time over
+/// all patterns simultaneously, rather than compiling a new `Regex` per call.
+///
+/// Verified by confirming the correct matched rule is returned for a policy
+/// with multiple patterns, where only one pattern matches.
+#[test]
+fn evaluator_uses_precompiled_regex_set_for_command_matching() {
+    let wp = policy(
+        true,
+        &[
+            r"^cargo test$",
+            r"^git push$",
+            r"^cargo (build|clippy)(\s.*)?$",
+        ],
+        &[],
+    );
+
+    // Confirm the RegexSet is pre-compiled and contains the right patterns.
+    assert_eq!(
+        wp.command_patterns.len(),
+        3,
+        "all 3 patterns must be compiled"
+    );
+    assert!(
+        wp.command_set.is_match("cargo test"),
+        "pre-compiled set must match 'cargo test'"
+    );
+
+    // Evaluate via the PolicyEvaluator (which should use the pre-compiled set).
+    let result = PolicyEvaluator::check("cargo build --release", &None, &wp);
+    assert!(
+        result.auto_approved,
+        "cargo build must be auto-approved via regex pattern"
+    );
+    assert_eq!(
+        result.matched_rule.as_deref(),
+        Some(r"command:^cargo (build|clippy)(\s.*)?$"),
+        "matched rule must reference the correct pre-compiled pattern"
+    );
+
+    // Non-matching command must be denied.
+    let denied = PolicyEvaluator::check("rm -rf /", &None, &wp);
+    assert!(!denied.auto_approved, "unmatched command must be denied");
 }
