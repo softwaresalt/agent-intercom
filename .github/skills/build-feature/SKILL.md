@@ -43,6 +43,8 @@ Use `broadcast` (non-blocking) and `ping` (progress snapshots) throughout the ph
 |---|---|---|---|
 | Phase start | `broadcast` | `info` | `[BUILD] Starting phase {N}: {title} — {task_count} tasks` |
 | Before each task | `broadcast` | `info` | `[TASK] {task_id}: {task_description}` |
+| File created | `broadcast` | `info` | `[FILE] created: {file_path}` — include full file content in body |
+| File modified | `broadcast` | `info` | `[FILE] modified: {file_path}` — include unified diff in body |
 | After each task passes | `broadcast` | `success` | `[TASK] {task_id}: complete` |
 | Task failure / retry | `broadcast` | `warning` | `[TASK] {task_id}: failed — {reason}, retrying` |
 | After test suite run | `ping` | — | Include `progress_snapshot` with per-task `done`/`in_progress`/`pending` |
@@ -78,7 +80,11 @@ Risk level conventions:
 
 #### Non-Destructive Operations (no approval needed)
 
-File creation, modification, and all other non-destructive filesystem writes proceed directly without calling `check_clearance`. Use `broadcast` at `info` level to keep the operator informed of significant file changes.
+File creation, modification, and all other non-destructive filesystem writes proceed directly without calling `check_clearance`. After each file write, call `broadcast` at `info` level with:
+* `[FILE] {action}: {file_path}` as the message prefix, where `action` is `created` or `modified`.
+* Include the unified diff for modifications or the full file content for new files in the broadcast message body so the operator can follow changes in real time.
+
+These broadcasts are non-blocking and do not require operator response.
 
 ## Quick Start
 
@@ -152,7 +158,7 @@ Execute tasks in dependency order following TDD discipline:
    * Read any existing source files that the task modifies.
    * For test tasks: write the test first, then run it and **confirm the test fails** before implementing the production code (red-green TDD).
    * Implement the task following the coding standards from the rust-engineer agent, injecting only the task-type-specific constraints identified above.
-   * **When agent-intercom is active**: write files directly for creation and modification. For destructive operations (file deletion, directory removal), route through the approval workflow described in the Remote Operator Integration section. Use `broadcast` at `info` level to keep the operator informed of significant file changes.
+   * **When agent-intercom is active**: write files directly for creation and modification. After each file write, call `broadcast` at `info` level with `[FILE] {action}: {file_path}` and include the unified diff (for modifications) or full content (for new files) in the message body. For destructive operations (file deletion, directory removal), route through the approval workflow described in the Remote Operator Integration section.
    * After implementing each task, run `cargo check` to verify compilation.
    * If compilation fails, diagnose the error, fix it, and re-run `cargo check` until it passes.
    * `broadcast` task completion at `success` level, or failure with reason at `warning` level.
@@ -181,7 +187,7 @@ Run the full test suite and iterate until all checks pass:
 2. If any test fails:
    * Diagnose the failure from the test output.
    * Fix the implementation (not the test, unless the test itself has a bug).
-   * **When agent-intercom is active**: write fixes directly. If fixes involve deleting files, route through the approval workflow before re-running tests.
+   * **When agent-intercom is active**: write fixes directly and `broadcast` the diff at `info` level. If fixes involve deleting files, route through the approval workflow before re-running tests.
    * Re-run `cargo test` to verify the fix.
    * Repeat until all tests pass.
 3. Run `cargo clippy --all-targets -- -D warnings -D clippy::pedantic` to verify lint compliance.

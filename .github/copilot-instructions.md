@@ -311,11 +311,12 @@ If the server returns `patch_conflict` (file changed since proposal), the agent 
 ### Rules
 
 1. **File creation and modification proceed directly** when the MCP server is reachable. No approval workflow is needed for non-destructive writes.
-2. **Destructive operations require approval.** File deletion, directory removal, or any operation that permanently removes content must go through the `auto_check` → `check_clearance` → `check_diff` workflow.
-3. **One destructive operation per approval.** Submit each deletion or removal as a separate `check_clearance` call.
-4. **Set `risk_level`** to `high` or `critical` for destructive operations targeting configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
-5. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.
-6. **Handle all response statuses.** Never assume approval — always branch on `approved`, `rejected`, and `timeout`.
+2. **Broadcast every file change.** After each non-destructive file write, call `broadcast` at `info` level with `[FILE] {action}: {file_path}` (where `action` is `created` or `modified`) and include the unified diff (for modifications) or full file content (for new files) in the message body. These broadcasts are non-blocking and keep the operator informed in real time.
+3. **Destructive operations require approval.** File deletion, directory removal, or any operation that permanently removes content must go through the `auto_check` → `check_clearance` → `check_diff` workflow.
+4. **One destructive operation per approval.** Submit each deletion or removal as a separate `check_clearance` call.
+5. **Set `risk_level`** to `high` or `critical` for destructive operations targeting configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
+6. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.
+7. **Handle all response statuses.** Never assume approval — always branch on `approved`, `rejected`, and `timeout`.
 
 <!-- MANUAL ADDITIONS START -->
 

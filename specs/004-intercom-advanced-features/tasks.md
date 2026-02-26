@@ -234,13 +234,13 @@
 
 ### Tests for US14/US15
 
-- [ ] T069 [P] [US14] Unit test for ping fallback in `tests/unit/heartbeat_tests.rs` (scenarios S080-S082)
-- [ ] T070 [P] [US15] Integration test for unconditional drain in `tests/integration/shutdown_tests.rs` (scenarios S083-S086)
+- [x] T069 [P] [US14] Unit test for ping fallback in `tests/unit/heartbeat_tests.rs` (scenarios S080-S082)
+- [x] T070 [P] [US15] Integration test for unconditional drain in `tests/integration/shutdown_tests.rs` (scenarios S083-S086)
 
 ### Implementation for US14/US15
 
-- [ ] T071 [US14] Update `src/mcp/tools/heartbeat.rs` — sort active sessions by `updated_at DESC`, pick first
-- [ ] T072 [US15] Update `src/main.rs` — move queue drain to `shutdown_with_timeout`, run unconditionally
+- [x] T071 [US14] Update `src/mcp/tools/heartbeat.rs` — sort active sessions by `updated_at DESC`, pick first
+- [x] T072 [US15] Update `src/main.rs` — move queue drain to `shutdown_with_timeout`, run unconditionally
 
 **Checkpoint**: Ping handles stale sessions gracefully; shutdown drains all messages
 

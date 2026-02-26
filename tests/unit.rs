@@ -10,6 +10,7 @@ mod unit {
     mod config_tests;
     mod credential_loading_tests;
     mod diff_tests;
+    mod heartbeat_tests;
     mod inbox_repo_tests;
     mod mode_routing_tests;
     mod model_tests;

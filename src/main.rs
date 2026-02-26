@@ -278,6 +278,13 @@ async fn run(args: Cli) -> Result<()> {
 /// Maximum time to wait for graceful shutdown before force-exiting.
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Brief delay to let the Slack outgoing queue drain before aborting the task (T072).
+///
+/// This ensures any messages enqueued during `graceful_shutdown` (such as the
+/// shutdown notification) have time to be posted, regardless of whether a Slack
+/// channel is configured.
+const QUEUE_DRAIN_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Run the graceful shutdown sequence with a timeout.
 ///
 /// Persists interrupted state, aborts Slack runtime tasks, and waits for
@@ -296,7 +303,12 @@ async fn shutdown_with_timeout(
             error!(%err, "error during graceful shutdown persistence");
         }
 
-        // 2. Abort Slack runtime tasks (they have no cancellation token).
+        // 2. Unconditional queue drain (T072): let the outgoing Slack message
+        //    queue flush any enqueued messages (e.g. shutdown notification)
+        //    before the background worker task is aborted.
+        tokio::time::sleep(QUEUE_DRAIN_DELAY).await;
+
+        // 3. Abort Slack runtime tasks (they have no cancellation token).
         if let Some(ref rt) = slack_runtime {
             if let Some(ref socket) = rt.socket_task {
                 socket.abort();
@@ -409,8 +421,6 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
             if let Err(err) = slack.enqueue(msg).await {
                 error!(%err, "failed to post shutdown notification to slack");
             }
-            // Brief sleep to let the queue drain.
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     }
 
