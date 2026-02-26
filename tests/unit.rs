@@ -5,6 +5,7 @@ mod unit {
     mod audit_writer_tests;
     mod blocks_tests;
     mod checkpoint_tests;
+    mod command_approve_tests;
     mod command_exec_tests;
     mod config_tests;
     mod credential_loading_tests;

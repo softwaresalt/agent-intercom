@@ -148,7 +148,37 @@ pub fn stall_alert_blocks(session_id: &str, idle_seconds: u64) -> Vec<SlackBlock
     ]
 }
 
-/// T063 — Build a success section for a `check_diff` apply notification.
+/// T063 — Build an "Add to auto-approve?" action button for manual approval suggestions.
+///
+/// Intended for posting after an operator manually approves a command, giving
+/// them a one-click shortcut to persist the pattern to the workspace policy.
+#[must_use]
+pub fn auto_approve_suggestion_button(command: &str) -> SlackBlock {
+    action_buttons(
+        &format!("auto_approve_{}", command.len()),
+        &[("auto_approve_add", "Add to auto-approve?", command)],
+    )
+}
+
+/// Determine whether a Slack message at `severity` should be posted at `detail_level`.
+///
+/// | `detail_level` | visible severities |
+/// |---|---|
+/// | `"minimal"` | `"warning"`, `"error"` only |
+/// | `"standard"` (default) | all standard severities |
+/// | `"verbose"` | all messages |
+/// | unknown | treated as `"standard"` |
+#[must_use]
+pub fn message_visible_at_level(detail_level: &str, severity: &str) -> bool {
+    if detail_level == "minimal" {
+        matches!(severity, "warning" | "error")
+    } else {
+        // "standard", "verbose", and unknown values all show every severity.
+        true
+    }
+}
+
+/// T063 — Build a `check_diff` apply notification.
 ///
 /// Used by `accept_diff` after a successful patch application.
 #[must_use]

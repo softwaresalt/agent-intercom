@@ -213,16 +213,16 @@
 
 ### Tests for US10/US11
 
-- [ ] T062 [P] [US10] Unit test for detail level message filtering in `tests/unit/blocks_tests.rs` (scenarios S062-S067)
-- [ ] T063 [P] [US11] Unit test for auto-approve suggestion generation in `tests/unit/command_approve_tests.rs` (scenarios S068-S073)
+- [x] T062 [P] [US10] Unit test for detail level message filtering in `tests/unit/blocks_tests.rs` (scenarios S062-S067)
+- [x] T063 [P] [US11] Unit test for auto-approve suggestion generation in `tests/unit/command_approve_tests.rs` (scenarios S068-S073)
 
 ### Implementation for US10/US11
 
-- [ ] T064 [US10] Update `src/slack/blocks.rs` — message builders check detail level; approvals/errors always full
-- [ ] T065 [US10] Pass `slack_detail_level` from config through `SlackService` to message builders
-- [ ] T066 [US11] Create `src/slack/handlers/command_approve.rs` — auto-approve suggestion flow after manual approval
-- [ ] T067 [US11] Add "Add to auto-approve?" button in `src/slack/blocks.rs`
-- [ ] T068 [US11] Implement regex pattern generation and write to `.intercom/settings.json`
+- [x] T064 [US10] Update `src/slack/blocks.rs` — message builders check detail level; approvals/errors always full
+- [x] T065 [US10] Pass `slack_detail_level` from config through `SlackService` to message builders
+- [x] T066 [US11] Create `src/slack/handlers/command_approve.rs` — auto-approve suggestion flow after manual approval
+- [x] T067 [US11] Add "Add to auto-approve?" button in `src/slack/blocks.rs`
+- [x] T068 [US11] Implement regex pattern generation and write to `.intercom/settings.json`
 
 **Checkpoint**: Slack messages respect detail level; commands can self-learn auto-approve patterns
 

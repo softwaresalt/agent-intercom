@@ -82,3 +82,61 @@ fn instruction_modal_has_submit_button() {
         "modal must include a 'Submit' button"
     );
 }
+
+// ── Detail level visibility (T062 — S062-S067) ────────────────────────────────
+
+/// S062 — At "minimal" detail level, "info" messages are suppressed.
+#[test]
+fn minimal_detail_hides_info() {
+    assert!(
+        !blocks::message_visible_at_level("minimal", "info"),
+        "info should not be visible at minimal detail level"
+    );
+}
+
+/// S063 — At "minimal" detail level, "error" messages remain visible.
+#[test]
+fn minimal_detail_shows_error() {
+    assert!(
+        blocks::message_visible_at_level("minimal", "error"),
+        "error must always be visible"
+    );
+}
+
+/// S064 — At "standard" detail level, "info" messages are visible.
+#[test]
+fn standard_detail_shows_info() {
+    assert!(
+        blocks::message_visible_at_level("standard", "info"),
+        "info should be visible at standard detail level"
+    );
+}
+
+/// S065 — At "standard" detail level, "error" messages are visible.
+#[test]
+fn standard_detail_shows_error() {
+    assert!(
+        blocks::message_visible_at_level("standard", "error"),
+        "error must always be visible"
+    );
+}
+
+/// S066 — At "verbose" detail level, all message types are visible.
+#[test]
+fn verbose_detail_shows_all_levels() {
+    for sev in &["info", "success", "warning", "error"] {
+        assert!(
+            blocks::message_visible_at_level("verbose", sev),
+            "verbose must show {sev}"
+        );
+    }
+}
+
+/// S067 — An unknown detail level is treated as standard (shows info and above).
+#[test]
+fn unknown_detail_level_defaults_to_standard() {
+    assert!(
+        blocks::message_visible_at_level("unknown", "info"),
+        "unknown level should fall back to standard visibility"
+    );
+}
