@@ -60,6 +60,8 @@ async fn test_state() -> Arc<AppState> {
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
+        policy_cache: Arc::default(),
+        audit_logger: None,
     })
 }
 
@@ -148,6 +150,8 @@ default_nudge_message = "continue"
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
+        policy_cache: Arc::default(),
+        audit_logger: None,
     });
 
     // No override, no config channel → None.

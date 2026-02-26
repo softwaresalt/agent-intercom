@@ -15,7 +15,7 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, info_span, warn};
 
-use crate::models::policy::WorkspacePolicy;
+use crate::models::policy::CompiledWorkspacePolicy;
 use crate::policy::loader::PolicyLoader;
 
 /// Relative path within a workspace root to the policy file.
@@ -23,7 +23,7 @@ const POLICY_FILENAME: &str = "settings.json";
 const POLICY_DIR: &str = ".intercom";
 
 /// Thread-safe in-memory policy cache keyed by workspace root.
-pub type PolicyCache = Arc<RwLock<HashMap<PathBuf, WorkspacePolicy>>>;
+pub type PolicyCache = Arc<RwLock<HashMap<PathBuf, CompiledWorkspacePolicy>>>;
 
 /// Manages file watchers for workspace policy hot-reload.
 pub struct PolicyWatcher {
@@ -163,13 +163,16 @@ impl PolicyWatcher {
     }
 
     /// Get the current policy for a workspace root, or deny-all if not cached.
-    pub async fn get_policy(&self, workspace_root: &Path) -> WorkspacePolicy {
+    pub async fn get_policy(&self, workspace_root: &Path) -> CompiledWorkspacePolicy {
         let canonical = workspace_root
             .canonicalize()
             .unwrap_or_else(|_| workspace_root.to_owned());
 
         let cache = self.cache.read().await;
-        cache.get(&canonical).cloned().unwrap_or_default()
+        cache
+            .get(&canonical)
+            .cloned()
+            .unwrap_or_else(CompiledWorkspacePolicy::deny_all)
     }
 }
 

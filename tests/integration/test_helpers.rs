@@ -89,6 +89,8 @@ pub async fn test_app_state(config: GlobalConfig) -> Arc<AppState> {
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
+        policy_cache: Arc::default(),
+        audit_logger: None,
     })
 }
 
@@ -105,6 +107,8 @@ pub fn test_app_state_with_db(config: GlobalConfig, db: Arc<SqlitePool>) -> Arc<
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
+        policy_cache: Arc::default(),
+        audit_logger: None,
     })
 }
 

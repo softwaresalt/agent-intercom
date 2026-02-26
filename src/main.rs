@@ -10,9 +10,11 @@ use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
+use agent_intercom::audit::writer::JsonlAuditWriter;
+use agent_intercom::audit::AuditLogger;
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
@@ -149,6 +151,16 @@ async fn run(args: Cli) -> Result<()> {
     // Generate a random IPC auth token for this server instance.
     let ipc_auth_token = Some(uuid::Uuid::new_v4().to_string());
 
+    // ── Initialize audit logger ─────────────────────────
+    let audit_log_dir = config.default_workspace_root.join(".intercom/logs");
+    let audit_logger: Option<Arc<dyn AuditLogger>> = match JsonlAuditWriter::new(audit_log_dir) {
+        Ok(writer) => Some(Arc::new(writer)),
+        Err(err) => {
+            warn!(%err, "failed to initialize audit logger, continuing without audit logging");
+            None
+        }
+    };
+
     let state = Arc::new(AppState {
         config: Arc::clone(&config),
         db,
@@ -159,6 +171,8 @@ async fn run(args: Cli) -> Result<()> {
         pending_modal_contexts: Arc::default(),
         stall_detectors: Some(StallDetectors::default()),
         ipc_auth_token,
+        policy_cache: Arc::default(),
+        audit_logger,
     });
 
     // ── Check for interrupted sessions from prior crash (T082) ──

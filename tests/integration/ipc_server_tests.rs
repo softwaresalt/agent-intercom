@@ -88,6 +88,8 @@ fn ipc_app_state(
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: auth_token,
+        policy_cache: Arc::default(),
+        audit_logger: None,
     })
 }
 

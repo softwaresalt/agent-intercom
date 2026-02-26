@@ -31,13 +31,13 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 [P] Create `src/persistence/steering_repo.rs` — insert, fetch_unconsumed, mark_consumed, purge
-- [ ] T008 [P] Create `src/persistence/inbox_repo.rs` — insert, fetch_unconsumed_by_channel, mark_consumed, purge
-- [ ] T009 [P] Add `CompiledWorkspacePolicy` struct to `src/models/policy.rs` (wraps `WorkspacePolicy` + `RegexSet`)
-- [ ] T010 Update `src/policy/loader.rs` — `load()` returns `CompiledWorkspacePolicy` with pre-compiled `RegexSet`
-- [ ] T011 Add `slack_detail_level` field to `GlobalConfig` in `src/config.rs` (minimal/standard/verbose, default standard)
-- [ ] T012 Wire `PolicyCache` and `AuditLogger` into `AppState` in `src/mcp/handler.rs`
-- [ ] T013 Register new repos in `src/persistence/mod.rs`
+- [X] T007 [P] Create `src/persistence/steering_repo.rs` — insert, fetch_unconsumed, mark_consumed, purge
+- [X] T008 [P] Create `src/persistence/inbox_repo.rs` — insert, fetch_unconsumed_by_channel, mark_consumed, purge
+- [X] T009 [P] Add `CompiledWorkspacePolicy` struct to `src/models/policy.rs` (wraps `WorkspacePolicy` + `RegexSet`)
+- [X] T010 Update `src/policy/loader.rs` — `load()` returns `CompiledWorkspacePolicy` with pre-compiled `RegexSet`
+- [X] T011 Add `slack_detail_level` field to `GlobalConfig` in `src/config.rs` (minimal/standard/verbose, default standard)
+- [X] T012 Wire `PolicyCache` and `AuditLogger` into `AppState` in `src/mcp/handler.rs`
+- [X] T013 Register new repos in `src/persistence/mod.rs`
 
 **Checkpoint**: Foundation ready — user story implementation can begin
 

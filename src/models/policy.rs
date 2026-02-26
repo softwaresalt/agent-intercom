@@ -1,5 +1,6 @@
 //! Workspace auto-approve policy model.
 
+use regex::RegexSet;
 use serde::Deserialize;
 
 use crate::models::approval::RiskLevel;
@@ -74,6 +75,63 @@ impl Default for WorkspacePolicy {
             risk_level_threshold: default_risk_threshold(),
             log_auto_approved: false,
             summary_interval_seconds: default_summary_interval(),
+        }
+    }
+}
+
+/// Pre-compiled form of [`WorkspacePolicy`] with command regex patterns compiled
+/// into a [`RegexSet`] for efficient matching.
+///
+/// Created by [`crate::policy::loader::PolicyLoader::load`] and cached in the
+/// shared `PolicyCache` for reuse across requests.
+#[derive(Debug, Clone)]
+pub struct CompiledWorkspacePolicy {
+    /// Original policy data (used for non-command evaluations).
+    pub raw: WorkspacePolicy,
+    /// Pre-compiled command pattern set.
+    ///
+    /// Each index in the set corresponds to the same index in
+    /// [`Self::command_patterns`], enabling matched-rule reporting.
+    pub command_set: RegexSet,
+    /// Original pattern strings, parallel to [`Self::command_set`].
+    pub command_patterns: Vec<String>,
+}
+
+impl CompiledWorkspacePolicy {
+    /// Construct from a [`WorkspacePolicy`], compiling command patterns.
+    ///
+    /// Invalid patterns are silently skipped with a tracing warning.
+    #[must_use]
+    pub fn from_policy(raw: WorkspacePolicy) -> Self {
+        let valid_patterns: Vec<String> = raw
+            .auto_approve_commands
+            .iter()
+            .filter(|p| {
+                let ok = regex::Regex::new(p).is_ok();
+                if !ok {
+                    tracing::warn!(pattern = %p, "invalid regex in policy commands, skipping");
+                }
+                ok
+            })
+            .cloned()
+            .collect();
+
+        let command_set = RegexSet::new(&valid_patterns).unwrap_or_else(|_| RegexSet::empty());
+
+        Self {
+            raw,
+            command_set,
+            command_patterns: valid_patterns,
+        }
+    }
+
+    /// Return a deny-all compiled policy with no patterns.
+    #[must_use]
+    pub fn deny_all() -> Self {
+        Self {
+            raw: WorkspacePolicy::default(),
+            command_set: RegexSet::empty(),
+            command_patterns: Vec::new(),
         }
     }
 }

@@ -50,6 +50,8 @@ async fn spawn_server() -> (String, CancellationToken) {
             pending_modal_contexts: Arc::default(),
             stall_detectors: None,
             ipc_auth_token: None,
+            policy_cache: Arc::default(),
+            audit_logger: None,
         };
         Arc::new(new_state)
     };

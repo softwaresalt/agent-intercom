@@ -150,6 +150,23 @@ fn default_db_path() -> PathBuf {
     PathBuf::from("data/agent-rc.db")
 }
 
+/// Verbosity level for Slack status messages.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SlackDetailLevel {
+    /// Minimal output — errors and key events only.
+    Minimal,
+    /// Standard output — normal operational messages (default).
+    #[default]
+    Standard,
+    /// Verbose output — all events including auto-approved actions.
+    Verbose,
+}
+
+fn default_slack_detail_level() -> SlackDetailLevel {
+    SlackDetailLevel::Standard
+}
+
 /// Global configuration parsed from `config.toml`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -195,6 +212,11 @@ pub struct GlobalConfig {
     /// Database configuration.
     #[serde(default)]
     pub database: DatabaseConfig,
+    /// Verbosity level for Slack status messages.
+    ///
+    /// Controls how much detail is posted to Slack during agent sessions.
+    #[serde(default = "default_slack_detail_level")]
+    pub slack_detail_level: SlackDetailLevel,
 }
 
 impl GlobalConfig {

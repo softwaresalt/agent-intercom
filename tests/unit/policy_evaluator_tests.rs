@@ -4,12 +4,12 @@
 //! and `risk_level_threshold` enforcement.
 
 use agent_intercom::models::approval::RiskLevel;
-use agent_intercom::models::policy::{FilePatterns, WorkspacePolicy};
+use agent_intercom::models::policy::{CompiledWorkspacePolicy, FilePatterns, WorkspacePolicy};
 use agent_intercom::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
 
 /// Helper to build a policy with the given overrides applied to defaults.
-fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> WorkspacePolicy {
-    WorkspacePolicy {
+fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> CompiledWorkspacePolicy {
+    CompiledWorkspacePolicy::from_policy(WorkspacePolicy {
         enabled,
         auto_approve_commands: commands.iter().map(|s| (*s).to_owned()).collect(),
         tools: tools.iter().map(|s| (*s).to_owned()).collect(),
@@ -17,7 +17,7 @@ fn policy(enabled: bool, commands: &[&str], tools: &[&str]) -> WorkspacePolicy {
         risk_level_threshold: RiskLevel::Low,
         log_auto_approved: false,
         summary_interval_seconds: 300,
-    }
+    })
 }
 
 // ─── Command matching ─────────────────────────────────────────────────
@@ -158,14 +158,14 @@ fn tool_not_in_policy_is_denied() {
 
 #[test]
 fn write_file_pattern_matches() {
-    let wp = WorkspacePolicy {
+    let wp = CompiledWorkspacePolicy::from_policy(WorkspacePolicy {
         enabled: true,
         file_patterns: FilePatterns {
             write: vec!["src/**/*.rs".to_owned()],
             read: vec![],
         },
         ..WorkspacePolicy::default()
-    };
+    });
     let ctx = Some(AutoApproveContext {
         file_path: Some("src/main.rs".to_owned()),
         risk_level: None,
@@ -185,14 +185,14 @@ fn write_file_pattern_matches() {
 
 #[test]
 fn write_file_pattern_no_match() {
-    let wp = WorkspacePolicy {
+    let wp = CompiledWorkspacePolicy::from_policy(WorkspacePolicy {
         enabled: true,
         file_patterns: FilePatterns {
             write: vec!["tests/**/*.rs".to_owned()],
             read: vec![],
         },
         ..WorkspacePolicy::default()
-    };
+    });
     let ctx = Some(AutoApproveContext {
         file_path: Some("src/main.rs".to_owned()),
         risk_level: None,
@@ -204,14 +204,14 @@ fn write_file_pattern_no_match() {
 
 #[test]
 fn read_file_pattern_matches() {
-    let wp = WorkspacePolicy {
+    let wp = CompiledWorkspacePolicy::from_policy(WorkspacePolicy {
         enabled: true,
         file_patterns: FilePatterns {
             write: vec![],
             read: vec!["**/*".to_owned()],
         },
         ..WorkspacePolicy::default()
-    };
+    });
     let ctx = Some(AutoApproveContext {
         file_path: Some("any/file.txt".to_owned()),
         risk_level: None,
@@ -225,12 +225,12 @@ fn read_file_pattern_matches() {
 
 #[test]
 fn risk_exceeding_threshold_denied() {
-    let wp = WorkspacePolicy {
+    let wp = CompiledWorkspacePolicy::from_policy(WorkspacePolicy {
         enabled: true,
         tools: vec!["ask_approval".to_owned()],
         risk_level_threshold: RiskLevel::Low,
         ..WorkspacePolicy::default()
-    };
+    });
     let ctx = Some(AutoApproveContext {
         file_path: None,
         risk_level: Some("high".to_owned()),
@@ -245,12 +245,12 @@ fn risk_exceeding_threshold_denied() {
 
 #[test]
 fn risk_within_threshold_approved() {
-    let wp = WorkspacePolicy {
+    let wp = CompiledWorkspacePolicy::from_policy(WorkspacePolicy {
         enabled: true,
         tools: vec!["ask_approval".to_owned()],
         risk_level_threshold: RiskLevel::High,
         ..WorkspacePolicy::default()
-    };
+    });
     let ctx = Some(AutoApproveContext {
         file_path: None,
         risk_level: Some("low".to_owned()),
@@ -262,12 +262,12 @@ fn risk_within_threshold_approved() {
 
 #[test]
 fn critical_risk_always_denied() {
-    let wp = WorkspacePolicy {
+    let wp = CompiledWorkspacePolicy::from_policy(WorkspacePolicy {
         enabled: true,
         tools: vec!["ask_approval".to_owned()],
         risk_level_threshold: RiskLevel::High,
         ..WorkspacePolicy::default()
-    };
+    });
     let ctx = Some(AutoApproveContext {
         file_path: None,
         risk_level: Some("critical".to_owned()),

@@ -18,10 +18,12 @@ use sqlx::SqlitePool;
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, info_span, warn};
 
+use crate::audit::AuditLogger;
 use crate::config::GlobalConfig;
 use crate::models::session::{Session, SessionMode, SessionStatus};
 use crate::orchestrator::stall_detector::StallDetectorHandle;
 use crate::persistence::session_repo::SessionRepo;
+use crate::policy::watcher::PolicyCache;
 use crate::slack::client::SlackService;
 
 /// Response payload delivered through a pending approval oneshot channel.
@@ -92,6 +94,10 @@ pub struct AppState {
     pub stall_detectors: Option<StallDetectors>,
     /// Shared secret for IPC authentication (`None` disables auth).
     pub ipc_auth_token: Option<String>,
+    /// Shared workspace policy cache for hot-reload.
+    pub policy_cache: PolicyCache,
+    /// Audit log writer (absent if audit logging is disabled).
+    pub audit_logger: Option<Arc<dyn AuditLogger>>,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.
