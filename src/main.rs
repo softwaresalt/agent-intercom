@@ -173,6 +173,7 @@ async fn run(args: Cli) -> Result<()> {
         ipc_auth_token,
         policy_cache: Arc::default(),
         audit_logger,
+        active_children: Arc::default(),
     });
 
     // ── Check for interrupted sessions from prior crash (T082) ──

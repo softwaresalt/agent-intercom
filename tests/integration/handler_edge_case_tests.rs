@@ -65,6 +65,7 @@ async fn stall_detector_reset_works() {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     let session = create_active_session(&state.db, root).await;
@@ -339,6 +340,7 @@ async fn ipc_auth_some_means_enabled() {
         ipc_auth_token: Some("test-secret-token".into()),
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     assert_eq!(state.ipc_auth_token.as_deref(), Some("test-secret-token"));

@@ -59,6 +59,7 @@ async fn spawn_test_server() -> (String, CancellationToken) {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     let server_ct = ct.clone();

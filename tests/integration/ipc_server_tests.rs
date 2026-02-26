@@ -90,6 +90,7 @@ fn ipc_app_state(
         ipc_auth_token: auth_token,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     })
 }
 

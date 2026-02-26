@@ -1,29 +1,6 @@
-<!--
-Sync Impact Report
-==================
-Version change: 2.0.0 → 2.1.0
-Bump rationale: MINOR — new Principle VII (CLI Workspace Containment)
-  added to enforce cwd-only filesystem access for Copilot CLI mode
-
-New principles:
-  - VII. CLI Workspace Containment (NON-NEGOTIABLE) — forbids file
-    writes/deletes outside the current working directory in CLI mode
-
-Modified sections: (none)
-Removed sections: (none)
-
-Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ no changes required
-  - .specify/templates/spec-template.md ✅ no changes required
-  - .specify/templates/tasks-template.md ✅ no changes required
-  - .specify/templates/checklist-template.md ✅ no changes required
-  - .specify/templates/agent-file-template.md ✅ no changes required
-
-Amendment: v2.1.0 ratified on 004-intercom-advanced-features branch
-
-Previous amendment: v2.0.0 ratified post-merge of 003-agent-intercom-release
-(branch: 003-agent-intercom-release, commit: b6f5898)
--->
+---
+applyTo: "**"
+---
 
 # agent-intercom Constitution
 

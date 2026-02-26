@@ -479,7 +479,7 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 2. Creates a `Session` record.
 3. Spawns the host CLI process with environment variables:
    - `INTERCOM_WORKSPACE_ROOT` — resolved workspace path
-   - `INTERCOM_SSE_URL` — HTTP endpoint for the spawned agent
+   - `INTERCOM_MCP_URL` — `/mcp?session_id=<id>` URL for the spawned agent
    - `INTERCOM_SESSION_ID` — session UUID
 4. Activates the session upon successful process start.
 5. Posts confirmation to Slack with session ID and workspace.
@@ -1274,7 +1274,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
    - Arguments: `host_cli_args` + `prompt`
    - Environment variables:
      - `INTERCOM_WORKSPACE_ROOT` — resolved workspace path
-     - `INTERCOM_SSE_URL` — SSE endpoint URL
+     - `INTERCOM_MCP_URL` — `/mcp?session_id=<id>` URL for the spawned agent
      - `INTERCOM_SESSION_ID` — session UUID
    - Working directory: workspace path
    - stdin: null, stdout: piped, stderr: piped

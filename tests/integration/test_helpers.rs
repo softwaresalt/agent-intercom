@@ -91,6 +91,7 @@ pub async fn test_app_state(config: GlobalConfig) -> Arc<AppState> {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     })
 }
 
@@ -109,6 +110,7 @@ pub fn test_app_state_with_db(config: GlobalConfig, db: Arc<SqlitePool>) -> Arc<
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     })
 }
 

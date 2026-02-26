@@ -62,6 +62,7 @@ async fn test_state() -> Arc<AppState> {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     })
 }
 
@@ -152,6 +153,7 @@ default_nudge_message = "continue"
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     // No override, no config channel → None.

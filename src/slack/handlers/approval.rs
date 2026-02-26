@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use slack_morphism::prelude::{
-    SlackBasicChannelInfo, SlackHistoryMessage, SlackInteractionActionInfo,
+    SlackBasicChannelInfo, SlackHistoryMessage, SlackInteractionActionInfo, SlackTriggerId,
 };
 use tracing::{info, warn};
 
@@ -26,6 +26,7 @@ use crate::slack::blocks;
 /// * `action` — the `SlackInteractionActionInfo` containing `action_id` and
 ///   `value` (the `request_id`).
 /// * `user_id` — Slack user ID of the person who clicked.
+/// * `trigger_id` — Slack trigger ID for opening a modal on rejection.
 /// * `channel` — channel where the message lives (for `chat.update`).
 /// * `message` — the original Slack message (for retrieving `ts`).
 /// * `state` — shared application state.
@@ -37,6 +38,7 @@ use crate::slack::blocks;
 pub async fn handle_approval_action(
     action: &SlackInteractionActionInfo,
     user_id: &str,
+    trigger_id: &SlackTriggerId,
     channel: Option<&SlackBasicChannelInfo>,
     message: Option<&SlackHistoryMessage>,
     state: &Arc<AppState>,
@@ -62,12 +64,40 @@ pub async fn handle_approval_action(
 
     // ── Determine status from action_id ──────────────────
     let (status, reason) = if action_id == "approve_accept" {
-        (ApprovalStatus::Approved, None)
+        (ApprovalStatus::Approved, None::<String>)
     } else if action_id == "approve_reject" {
-        (
-            ApprovalStatus::Rejected,
-            Some("rejected by operator".to_owned()),
-        )
+        // Open a modal to collect the rejection reason from the operator.
+        // The oneshot is resolved when the modal is submitted
+        // (handled by modal::handle_view_submission with source "approval_reject").
+        if let Some(ref slack) = state.slack {
+            let callback_id = format!("approval_reject:{request_id}");
+
+            // Cache the original message coordinates so the ViewSubmission
+            // handler can update the message from "⏳ Processing…" to a
+            // final status line (FR-022).
+            let msg_ts = message.map(|m| m.origin.ts.to_string());
+            let chan_id = channel.map(|c| c.id.to_string());
+            if let (Some(ts), Some(ch)) = (msg_ts, chan_id) {
+                let mut ctx = state.pending_modal_contexts.lock().await;
+                ctx.insert(callback_id.clone(), (ch, ts));
+            }
+
+            let modal = blocks::instruction_modal(
+                &callback_id,
+                "Rejection Reason",
+                "Describe why this change is being rejected\u{2026}",
+            );
+            if let Err(err) = slack.open_modal(trigger_id.clone(), modal).await {
+                warn!(%err, request_id, "failed to open rejection reason modal");
+                // Clean up cached context on failure.
+                let mut ctx = state.pending_modal_contexts.lock().await;
+                ctx.remove(&callback_id);
+                return Err(format!("failed to open rejection reason modal: {err}"));
+            }
+        }
+        // Return early — the rejection is NOT finalised here; it will be
+        // completed when the ViewSubmission event arrives from the modal.
+        return Ok(());
     } else {
         return Err(format!("unknown approval action_id: {action_id}"));
     };

@@ -67,6 +67,7 @@ async fn spawn_http_server() -> (String, CancellationToken) {
             ipc_auth_token: None,
             policy_cache: Arc::default(),
             audit_logger: None,
+            active_children: Arc::default(),
         };
         Arc::new(new_state)
     };

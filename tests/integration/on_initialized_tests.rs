@@ -53,6 +53,7 @@ async fn on_initialized_direct_connection_creates_session() {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     // Direct connection: no session_id_override, no channel_id_override.
@@ -225,6 +226,7 @@ async fn server_constructors_correct_overrides() {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     // new() — no overrides.

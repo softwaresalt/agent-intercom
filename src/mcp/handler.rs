@@ -15,6 +15,7 @@ use rmcp::model::{
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use sqlx::SqlitePool;
+use tokio::process::Child;
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, info_span, warn};
 
@@ -74,6 +75,11 @@ pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 /// line (FR-022).
 pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
 
+/// Live child processes spawned by the `/intercom session-start` slash command,
+/// keyed by `session_id`. Keeping them here prevents `kill_on_drop` from
+/// terminating the process the moment `spawn_session` returns.
+pub type ActiveChildren = Arc<Mutex<HashMap<String, Child>>>;
+
 /// Shared application state accessible by all MCP tool handlers.
 pub struct AppState {
     /// Global configuration.
@@ -98,6 +104,8 @@ pub struct AppState {
     pub policy_cache: PolicyCache,
     /// Audit log writer (absent if audit logging is disabled).
     pub audit_logger: Option<Arc<dyn AuditLogger>>,
+    /// Live child processes spawned by session-start, keyed by `session_id`.
+    pub active_children: ActiveChildren,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.

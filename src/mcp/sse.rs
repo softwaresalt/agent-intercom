@@ -42,6 +42,31 @@ async fn health() -> &'static str {
     "ok"
 }
 
+/// Pending URL parameters extracted by the middleware for the rmcp session factory.
+///
+/// - `channel_id` routes Slack messages to the correct workspace channel.
+/// - `session_id` associates a spawned agent with a pre-created DB session.
+type PendingParams = Arc<Mutex<(Option<String>, Option<String>)>>;
+
+/// Update the shared pending-params slot from URL query parameters.
+///
+/// Called by `ensure_accept_header` before the slot is read by the rmcp
+/// session factory closure.
+fn update_pending_from_uri(uri: &axum::http::Uri, pending: &PendingParams) {
+    let ch = extract_query_param(uri, "channel_id");
+    let sid = extract_query_param(uri, "session_id");
+    if ch.is_some() || sid.is_some() {
+        if let Ok(mut guard) = pending.lock() {
+            if let Some(v) = ch {
+                guard.0 = Some(v);
+            }
+            if let Some(v) = sid {
+                guard.1 = Some(v);
+            }
+        }
+    }
+}
+
 /// Middleware that normalizes inbound MCP requests for rmcp 0.13
 /// compatibility.
 ///
@@ -59,17 +84,13 @@ async fn health() -> &'static str {
 ///    (the latest version rmcp 0.13 supports), allowing rmcp to
 ///    accept the request.
 async fn ensure_accept_header(
-    axum::extract::State(pending_channel): axum::extract::State<Arc<Mutex<Option<String>>>>,
+    axum::extract::State(pending): axum::extract::State<PendingParams>,
     request: Request,
     next: Next,
 ) -> Response {
-    // Store the channel_id from the URL so the factory can pick it up
-    // when rmcp creates a new session.
-    if let Some(ch) = extract_channel_id(request.uri()) {
-        if let Ok(mut guard) = pending_channel.lock() {
-            *guard = Some(ch);
-        }
-    }
+    // Store channel_id and session_id from the URL so the factory can pick
+    // them up when rmcp creates a new session.
+    update_pending_from_uri(request.uri(), &pending);
     let method = request.method().clone();
     let uri = request.uri().clone();
     let accept_before = request
@@ -253,14 +274,14 @@ async fn sse_gone() -> StatusCode {
     StatusCode::GONE
 }
 
-/// Extract `channel_id` from a URI query string.
+/// Extract a named parameter from a URI query string.
 ///
 /// Returns `None` when the parameter is absent or empty.
-fn extract_channel_id(uri: &axum::http::Uri) -> Option<String> {
+fn extract_query_param(uri: &axum::http::Uri, key: &str) -> Option<String> {
     uri.query().and_then(|q| {
         q.split('&')
             .filter_map(|pair| pair.split_once('='))
-            .find(|(k, _)| *k == "channel_id")
+            .find(|(k, _)| *k == key)
             .map(|(_, v)| v.to_owned())
             .filter(|v| !v.is_empty())
     })
@@ -360,28 +381,32 @@ pub async fn serve_with_listener(
 
     let session_manager = Arc::new(LocalSessionManager::default());
 
-    // Shared slot for passing channel_id from the middleware into the
-    // rmcp factory closure.  The middleware writes the channel_id
-    // extracted from the URL query string; the factory `.take()`s it
-    // when rmcp creates a new session (Initialize without session ID).
-    let pending_channel: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    // Shared slot for passing query parameters from the middleware into the
+    // rmcp factory closure.  Tuple: (channel_id, session_id).  The middleware
+    // writes values extracted from the URL query string; the factory `.take()`s
+    // them when rmcp creates a new session (Initialize without session ID).
+    let pending_params: PendingParams = Arc::new(Mutex::new((None, None)));
 
     // Each inbound MCP connection gets its own IntercomServer instance.
     let state_for_factory = Arc::clone(&state);
-    let pending_for_factory = Arc::clone(&pending_channel);
+    let pending_for_factory = Arc::clone(&pending_params);
     let service = StreamableHttpService::new(
         move || {
-            let channel = pending_for_factory
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
+            let (channel, session) = {
+                let mut guard = pending_for_factory
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                (guard.0.take(), guard.1.take())
+            };
             debug!(
                 channel_id = channel.as_deref().unwrap_or("<none>"),
+                session_id = session.as_deref().unwrap_or("<none>"),
                 "creating IntercomServer for new MCP session"
             );
-            Ok(IntercomServer::with_channel_override(
+            Ok(IntercomServer::with_overrides(
                 Arc::clone(&state_for_factory),
                 channel,
+                session,
             ))
         },
         session_manager,
@@ -395,7 +420,7 @@ pub async fn serve_with_listener(
         axum::Router::new()
             .fallback_service(service)
             .layer(middleware::from_fn_with_state(
-                pending_channel,
+                pending_params,
                 ensure_accept_header,
             ));
 
@@ -460,37 +485,46 @@ mod tests {
     #[test]
     fn channel_id_present_returns_value() {
         let uri = parse_uri("/sse?channel_id=C_WORKSPACE");
-        assert_eq!(extract_channel_id(&uri), Some("C_WORKSPACE".to_owned()));
+        assert_eq!(
+            extract_query_param(&uri, "channel_id"),
+            Some("C_WORKSPACE".to_owned())
+        );
     }
 
     #[test]
     fn missing_channel_id_returns_none() {
         let uri = parse_uri("/sse");
-        assert_eq!(extract_channel_id(&uri), None);
+        assert_eq!(extract_query_param(&uri, "channel_id"), None);
     }
 
     #[test]
     fn empty_channel_id_returns_none() {
         let uri = parse_uri("/sse?channel_id=");
-        assert_eq!(extract_channel_id(&uri), None);
+        assert_eq!(extract_query_param(&uri, "channel_id"), None);
     }
 
     #[test]
     fn multiple_channel_id_params_first_wins() {
         let uri = parse_uri("/sse?channel_id=C_FIRST&channel_id=C_SECOND");
-        assert_eq!(extract_channel_id(&uri), Some("C_FIRST".to_owned()));
+        assert_eq!(
+            extract_query_param(&uri, "channel_id"),
+            Some("C_FIRST".to_owned())
+        );
     }
 
     #[test]
     fn channel_id_with_no_equals_returns_none() {
         let uri = parse_uri("/sse?channel_id");
-        assert_eq!(extract_channel_id(&uri), None);
+        assert_eq!(extract_query_param(&uri, "channel_id"), None);
     }
 
     #[test]
     fn channel_id_among_other_params() {
         let uri = parse_uri("/sse?foo=bar&channel_id=C_TARGET&baz=qux");
-        assert_eq!(extract_channel_id(&uri), Some("C_TARGET".to_owned()));
+        assert_eq!(
+            extract_query_param(&uri, "channel_id"),
+            Some("C_TARGET".to_owned())
+        );
     }
 
     #[test]
@@ -499,7 +533,33 @@ mod tests {
         // is not a practical concern. The function intentionally does NOT
         // URL-decode values, keeping the implementation simple.
         let uri = parse_uri("/sse?channel_id=C_TEST%20SPACE");
-        assert_eq!(extract_channel_id(&uri), Some("C_TEST%20SPACE".to_owned()));
+        assert_eq!(
+            extract_query_param(&uri, "channel_id"),
+            Some("C_TEST%20SPACE".to_owned())
+        );
+    }
+
+    #[test]
+    fn session_id_extracted_independently() {
+        let uri = parse_uri("/mcp?channel_id=C_WORKSPACE&session_id=sess-001");
+        assert_eq!(
+            extract_query_param(&uri, "session_id"),
+            Some("sess-001".to_owned())
+        );
+        assert_eq!(
+            extract_query_param(&uri, "channel_id"),
+            Some("C_WORKSPACE".to_owned())
+        );
+    }
+
+    #[test]
+    fn session_id_only_channel_absent() {
+        let uri = parse_uri("/mcp?session_id=sess-abc");
+        assert_eq!(
+            extract_query_param(&uri, "session_id"),
+            Some("sess-abc".to_owned())
+        );
+        assert_eq!(extract_query_param(&uri, "channel_id"), None);
     }
 
     // ── sanitize_initialize_body tests ───────────────────

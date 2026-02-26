@@ -111,7 +111,7 @@ async fn dispatch_command(
 
         "session-clear" => {
             let session_id = args.first().copied();
-            handle_session_clear(session_id, user_id, db).await
+            handle_session_clear(session_id, user_id, state).await
         }
 
         "session-checkpoint" => {
@@ -177,12 +177,17 @@ fn handle_help(category: Option<&str>) -> String {
         Some("session" | "sessions") => SESSION_HELP.to_owned(),
         Some("checkpoint" | "checkpoints") => CHECKPOINT_HELP.to_owned(),
         Some("file" | "files") => FILES_HELP.to_owned(),
+        Some("steering" | "steer" | "task" | "tasks") => STEERING_HELP.to_owned(),
         _ => FULL_HELP.to_owned(),
     }
 }
 
 const FULL_HELP: &str = "\
 *Available `/intercom` commands:*
+
+*Agent Steering*
+• `steer <message>` — Send a steering message to the agent (delivered on next ping)
+• `task <message>` — Queue a task for the agent (delivered on next session recovery)
 
 *Session Management*
 • `session-start <prompt>` — Start a new agent session
@@ -204,7 +209,7 @@ const FULL_HELP: &str = "\
 • Any registered command alias — Run a pre-approved command from config
 
 *General*
-• `help [category]` — Show this help (categories: session, checkpoint, files)";
+• `help [category]` — Show this help (categories: session, checkpoint, files, steering)";
 
 const SESSION_HELP: &str = "\
 *Session commands:*
@@ -225,6 +230,15 @@ const FILES_HELP: &str = "\
 • `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)
 • `show-file <path> [--lines START:END]` — Display file contents with syntax highlighting
 • Any registered command alias — Run a pre-approved command from config";
+
+const STEERING_HELP: &str = "\
+*Agent steering commands:*
+• `steer <message>` — Send a steering message to the active agent session. The message is \
+queued and delivered on the agent's next `ping` call. Use this to redirect focus or provide \
+guidance without interrupting the current operation.
+• `task <message>` — Queue a task item for the agent. Tasks are delivered in bulk on the \
+agent's next session recovery (`reboot` call), making them ideal for asynchronous to-do \
+items that the agent should pick up at the start of its next session.";
 
 // ── Session commands (T067, T072) ────────────────────────────────────
 
@@ -261,7 +275,7 @@ async fn handle_session_start(
         .to_string_lossy()
         .to_string();
 
-    let (session, _child) = spawner::spawn_session(
+    let (session, child) = spawner::spawn_session(
         prompt,
         &workspace_root,
         user_id,
@@ -270,6 +284,13 @@ async fn handle_session_start(
         state.config.http_port,
     )
     .await?;
+
+    // Store the child so kill_on_drop doesn't terminate the process immediately.
+    state
+        .active_children
+        .lock()
+        .await
+        .insert(session.id.clone(), child);
 
     Ok(format!(
         "Session `{}` started with prompt: _{}_",
@@ -308,16 +329,17 @@ async fn handle_session_resume(
 async fn handle_session_clear(
     session_id: Option<&str>,
     user_id: &str,
-    db: &Arc<Database>,
+    state: &Arc<AppState>,
 ) -> crate::Result<String> {
-    let repo = SessionRepo::new(Arc::clone(db));
+    let repo = SessionRepo::new(Arc::clone(&state.db));
 
     let session = session_manager::resolve_session(session_id, user_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
-    // No child handle available from slash commands — the child is managed by
-    // the orchestrator. Pass None to just update the DB status.
-    let terminated = session_manager::terminate_session(&session.id, &repo, None).await?;
+    // Remove the child from the registry before awaiting terminate_session
+    // to avoid holding the lock guard across an await point.
+    let mut child = state.active_children.lock().await.remove(&session.id);
+    let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
     Ok(format!("Session `{}` terminated.", terminated.id))
 }
 

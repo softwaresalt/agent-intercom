@@ -53,6 +53,7 @@ async fn drop_marks_direct_session_terminated() {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     // Create and activate a local session.
@@ -117,6 +118,7 @@ async fn drop_spawned_server_does_not_terminate_session() {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     // Create and activate a remote (spawned) session.
@@ -177,6 +179,7 @@ async fn drop_fresh_server_with_no_session_is_noop() {
         ipc_auth_token: None,
         policy_cache: Arc::default(),
         audit_logger: None,
+        active_children: Arc::default(),
     });
 
     // Drop an uninitialized server — no session ID set.
