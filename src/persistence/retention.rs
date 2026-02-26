@@ -49,7 +49,8 @@ pub fn spawn_retention_task(
 /// records.
 ///
 /// Deletion order (children before parent): `stall_alert` → `checkpoint` →
-/// `continuation_prompt` → `approval_request` → `session`.
+/// `continuation_prompt` → `approval_request` → `steering_message` →
+/// `task_inbox` (by age) → `session`.
 ///
 /// # Errors
 ///
@@ -90,6 +91,21 @@ pub async fn purge(db: &Database, retention_days: u32) -> Result<()> {
     .bind(&cutoff_str)
     .execute(db)
     .await?;
+
+    // Steering messages are tied to a session_id (T077).
+    sqlx::query(
+        "DELETE FROM steering_message WHERE session_id IN \
+         (SELECT id FROM session WHERE terminated_at IS NOT NULL AND terminated_at < ?1)",
+    )
+    .bind(&cutoff_str)
+    .execute(db)
+    .await?;
+
+    // Task inbox items are not session-scoped, so purge by created_at (T077).
+    sqlx::query("DELETE FROM task_inbox WHERE consumed = 1 AND created_at < ?1")
+        .bind(&cutoff_str)
+        .execute(db)
+        .await?;
 
     // Parent last.
     let result =

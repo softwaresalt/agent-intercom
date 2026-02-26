@@ -274,14 +274,14 @@
 
 **Purpose**: Documentation, prompts, and final integration
 
-- [ ] T073 [P] [US9] Create `docs/configuration.md` with comprehensive config.toml breakdown
-- [ ] T074 [P] [US9] Update `README.md` with config documentation reference and updated defaults
-- [ ] T075 [P] [US9] Update `config.toml.example` with correct defaults (host_cli="copilot", host_cli_args=["--sse"])
-- [ ] T076 [P] [US12] Create `.github/prompts/ping-loop.prompt.md` — heartbeat loop pattern template
-- [ ] T077 Add retention purge for `steering_message` and `task_inbox` in `src/persistence/retention.rs`
-- [ ] T078 Run full test suite (`cargo test`) — verify all scenarios pass
-- [ ] T079 Run `cargo clippy -- -D warnings` — zero warnings
-- [ ] T080 Run `cargo fmt --all -- --check` — formatting compliant
+- [x] T073 [P] [US9] Create `docs/configuration.md` with comprehensive config.toml breakdown
+- [x] T074 [P] [US9] Update `README.md` with config documentation reference and updated defaults
+- [x] T075 [P] [US9] Update `config.toml.example` with correct defaults (host_cli="copilot", host_cli_args=["--sse"])
+- [x] T076 [P] [US12] Create `.github/prompts/ping-loop.prompt.md` — heartbeat loop pattern template
+- [x] T077 Add retention purge for `steering_message` and `task_inbox` in `src/persistence/retention.rs`
+- [x] T078 Run full test suite (`cargo test`) — verify all scenarios pass
+- [x] T079 Run `cargo clippy -- -D warnings` — zero warnings
+- [x] T080 Run `cargo fmt --all -- --check` — formatting compliant
 
 ---
 
