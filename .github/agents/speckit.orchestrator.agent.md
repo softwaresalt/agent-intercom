@@ -7,6 +7,7 @@ handoffs:
     agent: build-orchestrator
     prompt: "feature: {specName}; phase: 1; mode: full"
     send: false
+model: Claude Opus 4.6 (copilot)
 ---
 
 # Spec-Kit Orchestrator

@@ -16,12 +16,12 @@
 
 **Purpose**: Project initialization — new modules and schema
 
-- [ ] T001 Add `steering_message` and `task_inbox` DDL to `src/persistence/schema.rs`
-- [ ] T002 [P] Create `src/models/steering.rs` with `SteeringMessage` struct
-- [ ] T003 [P] Create `src/models/inbox.rs` with `TaskInboxItem` struct
-- [ ] T004 [P] Create `src/audit/mod.rs` with `AuditLogger` trait and `AuditEntry` struct
-- [ ] T005 [P] Create `src/audit/writer.rs` with `JsonlAuditWriter` (daily rotation)
-- [ ] T006 Register new modules in `src/models/mod.rs` and create `src/audit/` module
+- [X] T001 Add `steering_message` and `task_inbox` DDL to `src/persistence/schema.rs`
+- [X] T002 [P] Create `src/models/steering.rs` with `SteeringMessage` struct
+- [X] T003 [P] Create `src/models/inbox.rs` with `TaskInboxItem` struct
+- [X] T004 [P] Create `src/audit/mod.rs` with `AuditLogger` trait and `AuditEntry` struct
+- [X] T005 [P] Create `src/audit/writer.rs` with `JsonlAuditWriter` (daily rotation)
+- [X] T006 Register new modules in `src/models/mod.rs` and create `src/audit/` module
 
 ---
 

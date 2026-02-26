@@ -85,10 +85,31 @@ CREATE TABLE IF NOT EXISTS stall_alert (
     created_at      TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS steering_message (
+    id              TEXT PRIMARY KEY NOT NULL,
+    session_id      TEXT NOT NULL,
+    channel_id      TEXT,
+    message         TEXT NOT NULL,
+    source          TEXT NOT NULL CHECK(source IN ('slack','ipc')),
+    created_at      TEXT NOT NULL,
+    consumed        INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS task_inbox (
+    id              TEXT PRIMARY KEY NOT NULL,
+    channel_id      TEXT,
+    message         TEXT NOT NULL,
+    source          TEXT NOT NULL CHECK(source IN ('slack','ipc')),
+    created_at      TEXT NOT NULL,
+    consumed        INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_approval_session ON approval_request(session_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_session ON checkpoint(session_id);
 CREATE INDEX IF NOT EXISTS idx_prompt_session ON continuation_prompt(session_id);
 CREATE INDEX IF NOT EXISTS idx_stall_session ON stall_alert(session_id);
+CREATE INDEX IF NOT EXISTS idx_steering_session_consumed ON steering_message(session_id, consumed);
+CREATE INDEX IF NOT EXISTS idx_inbox_channel_consumed ON task_inbox(channel_id, consumed);
 ";
 
     sqlx::raw_sql(ddl).execute(pool).await?;
