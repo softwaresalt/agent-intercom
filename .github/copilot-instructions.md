@@ -1,6 +1,5 @@
 ---
 description: Shared agent-intercom development guidelines for custom agents.
-maturity: stable
 ---
 # agent-intercom Development Guidelines
 
@@ -256,7 +255,7 @@ When the agent-intercom MCP server is running, agents **must** route all file mo
 
 Additionally, **do not write multiple files in a single proposal.** Each file change must be proposed, reviewed, and approved separately to ensure clear audit trails and granular control.  Further, when modifying existing files, always generate a unified diff rather than sending the full file content. This provides better context for reviewers and reduces the risk of unintended changes.
 
-For terminal commands, **never chain multiple commands together**. Each command must be submitted separately to the `evaluate_command` tool for proper policy evaluation and approval. If the terminal command is **not** already auto-approved for the current workspace or current working directory**, it may be executed directly without approval, but still must not be chained with other commands unless those commands are effectively piping output.
+For terminal commands, **never chain multiple commands together**. Each command must be submitted separately to the `evaluate_command` tool for proper policy evaluation and approval. If the terminal command is **not** already auto-approved for the current workspace or current working directory, it may be executed directly without approval, but still must not be chained with other commands unless those commands are effectively piping output.
 
 ### Required Call Sequence
 
@@ -383,8 +382,10 @@ cargo fmt && cargo clippy && cargo test
 # Bad: pipe to something other than Out-File/Set-Content/Out-String
 cargo test | Select-String "FAILED" | Remove-Item foo.txt
 ```
+
 ### Full List of Auto-Approve Commands with RegEx
 
+```json
 "chat.tools.terminal.autoApprove": {
     ".specify/scripts/bash/": true,
     ".specify/scripts/powershell/": true,
@@ -433,4 +434,5 @@ cargo test | Select-String "FAILED" | Remove-Item foo.txt
     "git add": true,
     "git push": true
 }
+```
 <!-- MANUAL ADDITIONS END -->
