@@ -2,6 +2,7 @@
 
 mod unit {
     mod approval_repo_tests;
+    mod ask_approval_tests;
     mod audit_writer_tests;
     mod blocks_tests;
     mod checkpoint_tests;

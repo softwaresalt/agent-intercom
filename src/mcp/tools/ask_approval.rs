@@ -128,6 +128,13 @@ pub async fn handle(
                 )
             })?;
 
+        // ── Read original file content for Slack attachment ──
+        // T084: Upload the existing file alongside the diff so operators
+        // can review full context. Handles new-file and read-error cases
+        // gracefully (T085, T086).
+        let original_content =
+            read_original_file_for_attachment(&validated_path, &original_hash).await;
+
         // ── Create ApprovalRequest record ────────────────────
         let approval = ApprovalRequest::new(
             session.id.clone(),
@@ -179,6 +186,24 @@ pub async fn handle(
                     }
                 }
                 .instrument(upload_span)
+                .await;
+            }
+
+            // Upload original file content so the operator can review full
+            // context alongside the diff (T084). Skipped for new files (T085)
+            // or when the file became unreadable after the hash (T086).
+            if let Some(ref original) = original_content {
+                let orig_span = info_span!("slack_upload_original", request_id = %request_id);
+                async {
+                    let filename = format!("{}.original", input.file_path.replace('/', "_"));
+                    if let Err(err) = slack
+                        .upload_file(channel.clone(), &filename, original, None)
+                        .await
+                    {
+                        warn!(%err, "failed to upload original file to slack");
+                    }
+                }
+                .instrument(orig_span)
                 .await;
             }
 
@@ -330,4 +355,35 @@ fn build_approval_blocks(
     }
 
     result
+}
+
+/// Read the original file content for uploading as a Slack attachment (T084-T086).
+///
+/// Returns `Some(content)` when the file exists and is readable.
+/// Returns `None` when:
+/// - `original_hash` is `"new_file"` (the proposal is for a brand-new file) — T085
+/// - the file cannot be read for any reason (deleted, permissions, etc.) — T086
+///   In the error case a `warn!` is emitted but the approval flow continues.
+pub async fn read_original_file_for_attachment(
+    path: &std::path::Path,
+    original_hash: &str,
+) -> Option<String> {
+    // T085: New files have no original content to attach.
+    if original_hash == "new_file" {
+        return None;
+    }
+
+    // T084/T086: Attempt to read the file, falling back gracefully on error.
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) => Some(content),
+        Err(err) => {
+            tracing::warn!(
+                %err,
+                path = %path.display(),
+                "failed to read original file for slack attachment; \
+                 approval will proceed without original content"
+            );
+            None
+        }
+    }
 }

@@ -622,3 +622,4 @@ LSP Framing looks like an HTTP header prepended to the JSON:
 
 If you point `LinesCodec` at Copilot CLI and see it panicking because it is reading `Content-Length: ...` instead of raw JSON, you will simply swap `LinesCodec` for a custom or community-provided `LanguageServerCodec` (found in crates like `tower-lsp` or easily written manually). The `FramedRead` architecture remains exactly the same!
 
+- Also need the ability configure dynamically the level of detail being returned in Slack messages (T011) so that we can avoid hitting Slack's message size limits with large diffs or verbose agent reasoning. This will be a simple enum (e.g., `DetailLevel::None`, `DetailLevel::Low`, `Medium`, `High`) that the user can set in the config file or via a slash command. The `AgentDriver` implementations will check this setting before sending events to Slack and truncate or summarize the content accordingly.

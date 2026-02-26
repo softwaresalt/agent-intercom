@@ -99,17 +99,17 @@
 
 ### Tests for US3
 
-- [ ] T028 [P] [US3] Unit test for inbox_repo CRUD in `tests/unit/inbox_repo_tests.rs` (scenarios S013-S014, S019-S020)
-- [ ] T029 [P] [US3] Unit test for channel-scoped delivery in `tests/unit/inbox_repo_tests.rs` (scenario S017)
-- [ ] T030 [P] [US3] Contract test for extended `reboot` response with `pending_tasks` in `tests/contract/reboot_contract_tests.rs` (scenarios S015-S016)
-- [ ] T031 [P] [US3] Integration test for inbox flow in `tests/integration/inbox_flow_tests.rs` (scenarios S013-S022)
+- [x] T028 [P] [US3] Unit test for inbox_repo CRUD in `tests/unit/inbox_repo_tests.rs` (scenarios S013-S014, S019-S020)
+- [x] T029 [P] [US3] Unit test for channel-scoped delivery in `tests/unit/inbox_repo_tests.rs` (scenario S017)
+- [x] T030 [P] [US3] Contract test for extended `reboot` response with `pending_tasks` in `tests/contract/reboot_contract_tests.rs` (scenarios S015-S016)
+- [x] T031 [P] [US3] Integration test for inbox flow in `tests/integration/inbox_flow_tests.rs` (scenarios S013-S022)
 
 ### Implementation for US3
 
-- [ ] T032 [US3] Update `src/mcp/tools/recover_state.rs` — fetch unconsumed inbox items by channel, include `pending_tasks`, mark consumed
-- [ ] T033 [US3] Add `/intercom task <text>` slash command handler in `src/slack/commands.rs`
-- [ ] T034 [US3] Add `task` IPC command in `src/ipc/server.rs`
-- [ ] T035 [US3] Add `task` subcommand to `ctl/main.rs`
+- [x] T032 [US3] Update `src/mcp/tools/recover_state.rs` — fetch unconsumed inbox items by channel, include `pending_tasks`, mark consumed
+- [x] T033 [US3] Add `/intercom task <text>` slash command handler in `src/slack/commands.rs`
+- [x] T034 [US3] Add `task` IPC command in `src/ipc/server.rs`
+- [x] T035 [US3] Add `task` subcommand to `ctl/main.rs`
 
 **Checkpoint**: Task inbox operational — cold-start work queuing works
 
@@ -123,17 +123,17 @@
 
 ### Tests for US4
 
-- [ ] T036 [P] [US4] Unit test for modal view builder in `tests/unit/blocks_tests.rs` (scenario S029)
-- [ ] T037 [P] [US4] Contract test for `standby` with real instruction text in `tests/contract/wait_contract_tests.rs` (scenario S030)
-- [ ] T038 [P] [US4] Contract test for `transmit` refine with real text in `tests/contract/prompt_contract_tests.rs` (scenario S032)
+- [x] T036 [P] [US4] Unit test for modal view builder in `tests/unit/blocks_tests.rs` (scenario S029)
+- [x] T037 [P] [US4] Contract test for `standby` with real instruction text in `tests/contract/wait_contract_tests.rs` (scenario S030)
+- [x] T038 [P] [US4] Contract test for `transmit` refine with real text in `tests/contract/prompt_contract_tests.rs` (scenario S032)
 
 ### Implementation for US4
 
-- [ ] T039 [US4] Add modal view builder (text input block) in `src/slack/blocks.rs`
-- [ ] T040 [US4] Update `src/slack/handlers/wait.rs` — extract `trigger_id`, call `views.open`, store session in `private_metadata`
-- [ ] T041 [US4] Update `src/slack/handlers/prompt.rs` — same `trigger_id` → modal flow for "Refine"
-- [ ] T042 [US4] Add `ViewSubmission` match arm in `src/slack/events.rs` — extract text, resolve oneshot
-- [ ] T043 [US4] Thread `trigger_id` from `BlockActions` payload into handler functions
+- [x] T039 [US4] Add modal view builder (text input block) in `src/slack/blocks.rs`
+- [x] T040 [US4] Update `src/slack/handlers/wait.rs` — extract `trigger_id`, call `views.open`, store session in `private_metadata`
+- [x] T041 [US4] Update `src/slack/handlers/prompt.rs` — same `trigger_id` → modal flow for "Refine"
+- [x] T042 [US4] Add `ViewSubmission` match arm in `src/slack/events.rs` — extract text, resolve oneshot
+- [x] T043 [US4] Thread `trigger_id` from `BlockActions` payload into handler functions
 
 **Checkpoint**: No more placeholder strings — real operator instructions flow through
 
@@ -147,12 +147,12 @@
 
 ### Tests for US5
 
-- [ ] T044 [P] [US5] Integration test for disconnect detection in `tests/integration/disconnect_tests.rs` (scenarios S037-S039)
+- [x] T044 [P] [US5] Integration test for disconnect detection in `tests/integration/disconnect_tests.rs` (scenarios S037-S039)
 
 ### Implementation for US5
 
-- [ ] T045 [US5] Hook stream close event in `src/mcp/sse.rs` — trigger `session_repo.set_terminated()` on connection drop
-- [ ] T046 [US5] Ensure session lookup by transport session ID is available for cleanup
+- [x] T045 [US5] Hook stream close event in `src/mcp/sse.rs` — trigger `session_repo.set_terminated()` on connection drop
+- [x] T046 [US5] Ensure session lookup by transport session ID is available for cleanup
 
 **Checkpoint**: Stale sessions cleaned up promptly on disconnect
 
@@ -166,16 +166,16 @@
 
 ### Tests for US6/US13
 
-- [ ] T047 [P] [US6] Unit test for `CompiledWorkspacePolicy` creation in `tests/unit/policy_tests.rs` (scenarios S074-S079)
-- [ ] T048 [P] [US6] Unit test for `PolicyEvaluator::check()` with `CompiledWorkspacePolicy` in `tests/unit/policy_evaluator_tests.rs` (scenario S075)
-- [ ] T049 [P] [US6] Contract test for `auto_check` reading from cache in `tests/contract/auto_check_contract_tests.rs` (scenarios S043-S044)
-- [ ] T050 [P] [US6] Unit test for invalid regex handling in `tests/unit/policy_tests.rs` (scenario S076)
+- [x] T047 [P] [US6] Unit test for `CompiledWorkspacePolicy` creation in `tests/unit/policy_tests.rs` (scenarios S074-S079)
+- [x] T048 [P] [US6] Unit test for `PolicyEvaluator::check()` with `CompiledWorkspacePolicy` in `tests/unit/policy_evaluator_tests.rs` (scenario S075)
+- [x] T049 [P] [US6] Contract test for `auto_check` reading from cache in `tests/contract/auto_check_contract_tests.rs` (scenarios S043-S044)
+- [x] T050 [P] [US6] Unit test for invalid regex handling in `tests/unit/policy_tests.rs` (scenario S076)
 
 ### Implementation for US6/US13
 
-- [ ] T051 [US6] Update `src/policy/evaluator.rs` — replace `match_command_pattern` with `RegexSet::matches()` on `CompiledWorkspacePolicy`
-- [ ] T052 [US6] Wire `PolicyCache` into `AppState` reads in `src/mcp/tools/check_auto_approve.rs`
-- [ ] T053 [US6] Update `src/policy/watcher.rs` — ensure cache stores `CompiledWorkspacePolicy`
+- [x] T051 [US6] Update `src/policy/evaluator.rs` — replace `match_command_pattern` with `RegexSet::matches()` on `CompiledWorkspacePolicy`
+- [x] T052 [US6] Wire `PolicyCache` into `AppState` reads in `src/mcp/tools/check_auto_approve.rs`
+- [x] T053 [US6] Update `src/policy/watcher.rs` — ensure cache stores `CompiledWorkspacePolicy`
 
 **Checkpoint**: Policy hot-reload end-to-end, regex pre-compiled
 
@@ -256,15 +256,15 @@
 
 > **Write these tests FIRST, verify they FAIL before implementation**
 
-- [ ] T081 [P] [US16] Unit test for original file attachment logic in `tests/unit/ask_approval_tests.rs` (scenarios S087-S090)
-- [ ] T082 [P] [US16] Unit test for graceful handling of missing/unreadable file in `tests/unit/ask_approval_tests.rs` (scenarios S091, S093)
-- [ ] T083 [P] [US16] Contract test for `check_clearance` response with file attachment in `tests/contract/ask_approval_contract_tests.rs` (scenarios S087-S088)
+- [x] T081 [P] [US16] Unit test for original file attachment logic in `tests/unit/ask_approval_tests.rs` (scenarios S087-S090)
+- [x] T082 [P] [US16] Unit test for graceful handling of missing/unreadable file in `tests/unit/ask_approval_tests.rs` (scenarios S091, S093)
+- [x] T083 [P] [US16] Contract test for `check_clearance` response with file attachment in `tests/contract/ask_approval_contract_tests.rs` (scenarios S087-S088)
 
 ### Implementation for US16
 
-- [ ] T084 [US16] Update `src/mcp/tools/ask_approval.rs` — after computing `original_hash`, read original file content and upload as Slack file attachment alongside the diff
-- [ ] T085 [US16] Handle new file case: skip original file upload when file does not exist (no `original_hash`)
-- [ ] T086 [US16] Handle file read errors gracefully — log warning, post approval message without original attachment
+- [x] T084 [US16] Update `src/mcp/tools/ask_approval.rs` — after computing `original_hash`, read original file content and upload as Slack file attachment alongside the diff
+- [x] T085 [US16] Handle new file case: skip original file upload when file does not exist (no `original_hash`)
+- [x] T086 [US16] Handle file read errors gracefully — log warning, post approval message without original attachment
 
 **Checkpoint**: Operators see full file context alongside diffs in approval requests
 
