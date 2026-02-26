@@ -56,7 +56,8 @@
 			".\\run-debug.ps1": true,
 			".\\target\\debug\\agent-intercom.exe": true,
 			"Get-NetTCPConnection": true,
-			"netstat": true
+			"netstat": true,
+			"cargo home": true
 		},
 		"powershell.cwd": "agent-intercom",
     "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,

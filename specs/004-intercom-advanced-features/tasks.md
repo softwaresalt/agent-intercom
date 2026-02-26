@@ -53,19 +53,19 @@
 
 > **Write these tests FIRST, verify they FAIL before implementation**
 
-- [ ] T014 [P] [US1] Unit test for steering_repo CRUD in `tests/unit/steering_repo_tests.rs` (scenarios S001-S005, S010-S011)
-- [ ] T015 [P] [US1] Unit test for steering message routing by channel in `tests/unit/steering_repo_tests.rs` (scenario S007)
-- [ ] T016 [P] [US1] Contract test for extended `ping` response with `pending_steering` in `tests/contract/ping_contract_tests.rs` (scenarios S002-S003)
-- [ ] T017 [P] [US1] Integration test for end-to-end steering flow in `tests/integration/steering_flow_tests.rs` (scenarios S001-S009)
+- [X] T014 [P] [US1] Unit test for steering_repo CRUD in `tests/unit/steering_repo_tests.rs` (scenarios S001-S005, S010-S011)
+- [X] T015 [P] [US1] Unit test for steering message routing by channel in `tests/unit/steering_repo_tests.rs` (scenario S007)
+- [X] T016 [P] [US1] Contract test for extended `ping` response with `pending_steering` in `tests/contract/ping_contract_tests.rs` (scenarios S002-S003)
+- [X] T017 [P] [US1] Integration test for end-to-end steering flow in `tests/integration/steering_flow_tests.rs` (scenarios S001-S009)
 
 ### Implementation for US1
 
-- [ ] T018 [US1] Update `src/mcp/tools/heartbeat.rs` — fetch unconsumed steering messages, include `pending_steering` in response, mark consumed
-- [ ] T019 [US1] Add `/intercom steer <text>` slash command handler in `src/slack/commands.rs`
-- [ ] T020 [US1] Create `src/slack/handlers/steer.rs` — steering message ingestion from Slack (app mentions)
-- [ ] T021 [US1] Add `steer` IPC command in `src/ipc/server.rs`
-- [ ] T022 [US1] Add `steer` subcommand to `ctl/main.rs`
-- [ ] T023 [US1] Wire steering handlers into `src/slack/events.rs` (app mention → steer handler)
+- [X] T018 [US1] Update `src/mcp/tools/heartbeat.rs` — fetch unconsumed steering messages, include `pending_steering` in response, mark consumed
+- [X] T019 [US1] Add `/intercom steer <text>` slash command handler in `src/slack/commands.rs`
+- [X] T020 [US1] Create `src/slack/handlers/steer.rs` — steering message ingestion from Slack (app mentions)
+- [X] T021 [US1] Add `steer` IPC command in `src/ipc/server.rs`
+- [X] T022 [US1] Add `steer` subcommand to `ctl/main.rs`
+- [X] T023 [US1] Wire steering handlers into `src/slack/events.rs` (app mention → steer handler)
 
 **Checkpoint**: Steering queue fully functional — ping delivers operator messages
 

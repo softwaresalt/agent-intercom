@@ -16,5 +16,6 @@ mod unit {
     mod session_repo_tests;
     mod stall_detector_tests;
     mod stall_repo_tests;
+    mod steering_repo_tests;
     mod version_tests;
 }

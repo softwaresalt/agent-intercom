@@ -23,6 +23,7 @@ use crate::orchestrator::{checkpoint_manager, session_manager, spawner};
 use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::db::Database;
 use crate::persistence::session_repo::SessionRepo;
+use crate::slack::handlers::steer as steer_handler;
 
 /// Handle incoming `/intercom` slash commands routed via Socket Mode.
 ///
@@ -133,7 +134,16 @@ async fn dispatch_command(
 
         "show-file" => handle_show_file(args, user_id, state).await,
 
-        // Custom registered command (FR-014).
+        "steer" => {
+            let text = if args.is_empty() {
+                return Err(crate::AppError::Config(
+                    "usage: steer <message text>".into(),
+                ));
+            } else {
+                args.join(" ")
+            };
+            steer_handler::store_from_slack(&text, None, state).await
+        }
         other => {
             let result = validate_command_alias(other, &state.config.commands);
             match result {
