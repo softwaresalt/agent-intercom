@@ -114,6 +114,40 @@ pub fn diff_section(diff: &str) -> SlackBlock {
     )
 }
 
+/// Format a stall alert notification message (T060 / T061 — S058, S060).
+///
+/// Returns a plain-text Markdown string suitable for posting to Slack when an
+/// agent session has been idle past the inactivity threshold.  The message
+/// includes the session ID, idle duration, and actionable recovery steps.
+#[must_use]
+pub fn stall_alert_message(session_id: &str, idle_seconds: u64) -> String {
+    let idle_display = if idle_seconds >= 60 {
+        format!("{} min", idle_seconds / 60)
+    } else {
+        format!("{idle_seconds}s")
+    };
+    format!(
+        "⚠️ *Agent stalled* — session `{session_id}` has been idle for {idle_display}.\n\
+         \n\
+         *Recovery options:*\n\
+         • Nudge agent via the buttons below\n\
+         • Resume manually: `agent-intercom-ctl resume {session_id}`\n\
+         • Check status: `agent-intercom-ctl status`\n\
+         • Spawn a new agent: `agent-intercom-ctl spawn`"
+    )
+}
+
+/// Build a stall alert message block list with recovery action buttons (T060 / T061).
+///
+/// Intended for posting directly to Slack when `StallEvent::Stalled` fires.
+#[must_use]
+pub fn stall_alert_blocks(session_id: &str, idle_seconds: u64) -> Vec<SlackBlock> {
+    vec![
+        severity_section("warning", &stall_alert_message(session_id, idle_seconds)),
+        nudge_buttons(session_id),
+    ]
+}
+
 /// T063 — Build a success section for a `check_diff` apply notification.
 ///
 /// Used by `accept_diff` after a successful patch application.

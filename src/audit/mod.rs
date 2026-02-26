@@ -94,6 +94,34 @@ impl AuditEntry {
         self.result_summary = Some(summary);
         self
     }
+
+    /// Set the operator Slack user ID for this entry.
+    #[must_use]
+    pub fn with_operator(mut self, operator_id: String) -> Self {
+        self.operator_id = Some(operator_id);
+        self
+    }
+
+    /// Set the approval request identifier for this entry.
+    #[must_use]
+    pub fn with_request_id(mut self, request_id: String) -> Self {
+        self.request_id = Some(request_id);
+        self
+    }
+
+    /// Set the rejection (or cancellation) reason for this entry.
+    #[must_use]
+    pub fn with_reason(mut self, reason: String) -> Self {
+        self.reason = Some(reason);
+        self
+    }
+
+    /// Set the terminal command for this entry.
+    #[must_use]
+    pub fn with_command(mut self, command: String) -> Self {
+        self.command = Some(command);
+        self
+    }
 }
 
 /// Writes structured audit entries to a persistent store.

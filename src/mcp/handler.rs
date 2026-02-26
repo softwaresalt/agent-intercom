@@ -18,7 +18,7 @@ use sqlx::SqlitePool;
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, info_span, warn};
 
-use crate::audit::AuditLogger;
+use crate::audit::{AuditEntry, AuditEventType, AuditLogger};
 use crate::config::GlobalConfig;
 use crate::models::session::{Session, SessionMode, SessionStatus};
 use crate::orchestrator::stall_detector::StallDetectorHandle;
@@ -611,6 +611,14 @@ impl ServerHandler for IntercomServer {
                                     "session_db_id was already set (unexpected)"
                                 );
                             }
+                            // Audit-log session start (T061).
+                            if let Some(ref logger) = state.audit_logger {
+                                let entry = AuditEntry::new(AuditEventType::SessionStart)
+                                    .with_session(created.id.clone());
+                                if let Err(err) = logger.log_entry(entry) {
+                                    warn!(%err, "audit log write failed (session start)");
+                                }
+                            }
                         }
                         Err(err) => {
                             warn!(
@@ -639,6 +647,8 @@ impl ServerHandler for IntercomServer {
 
         // Reset stall timer on every tool call (T053).
         let state = Arc::clone(&self.state);
+        let audit_logger = self.state.audit_logger.clone();
+        let session_id = self.session_db_id.get().cloned();
 
         async move {
             // Reset stall detector for all active sessions on any tool call.
@@ -658,6 +668,20 @@ impl ServerHandler for IntercomServer {
                 let guards = detectors.lock().await;
                 for handle in guards.values() {
                     handle.reset();
+                }
+            }
+
+            // Audit-log every tool call (T058).
+            if let Some(ref logger) = audit_logger {
+                let summary = if result.is_ok() { "ok" } else { "error" };
+                let mut entry = AuditEntry::new(AuditEventType::ToolCall)
+                    .with_tool(tool_name.clone())
+                    .with_result(summary.to_owned());
+                if let Some(ref sid) = session_id {
+                    entry = entry.with_session(sid.clone());
+                }
+                if let Err(err) = logger.log_entry(entry) {
+                    warn!(%err, "audit log write failed (tool call)");
                 }
             }
 
@@ -744,6 +768,7 @@ impl Drop for IntercomServer {
     fn drop(&mut self) {
         if let Some(id) = self.session_db_id.get().cloned() {
             let db = Arc::clone(&self.state.db);
+            let audit_logger = self.state.audit_logger.clone();
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
                     let session_repo = SessionRepo::new(db);
@@ -760,6 +785,14 @@ impl Drop for IntercomServer {
                                 session_id = %id,
                                 "failed to terminate session on disconnect"
                             );
+                        }
+                    }
+                    // Audit-log session termination (T061).
+                    if let Some(ref logger) = audit_logger {
+                        let entry = AuditEntry::new(AuditEventType::SessionTerminate)
+                            .with_session(id.clone());
+                        if let Err(err) = logger.log_entry(entry) {
+                            warn!(%err, "audit log write failed (session terminate)");
                         }
                     }
                 });

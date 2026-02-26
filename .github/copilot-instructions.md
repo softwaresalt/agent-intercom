@@ -249,29 +249,29 @@ Never write production code before the corresponding test exists and has been ob
 | Shutdown | `CancellationToken` — persist state, notify Slack, terminate children gracefully |
 | ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0011) |
 
-## Remote Approval Workflow for File Changes
+## Remote Approval Workflow for Destructive File Operations
 
-When the agent-intercom MCP server is running, agents **must** route all file modifications through the remote approval workflow instead of writing files directly. This allows the operator to review and approve every change via Slack before it touches the filesystem.
+When the agent-intercom MCP server is running, agents may write files directly for creation and modification. The remote approval workflow is reserved for **destructive operations only** — file deletion, directory removal, or any operation that permanently removes content from the filesystem. This allows the operator to review and approve destructive changes via Slack before they execute.
 
-Additionally, **do not write multiple files in a single proposal.** Each file change must be proposed, reviewed, and approved separately to ensure clear audit trails and granular control.  Further, when modifying existing files, always generate a unified diff rather than sending the full file content. This provides better context for reviewers and reduces the risk of unintended changes.
+Additionally, **do not write multiple files in a single proposal.** Each destructive operation must be proposed, reviewed, and approved separately to ensure clear audit trails and granular control.
 
 For terminal commands, **never chain multiple commands together**. Each command must be submitted separately to the `evaluate_command` tool for proper policy evaluation and approval. If the terminal command is **not** already auto-approved for the current workspace or current working directory, it may be executed directly without approval, but still must not be chained with other commands unless those commands are effectively piping output.
 
-### Required Call Sequence
+### Required Call Sequence (Destructive Operations Only)
 
 ```text
-1. auto_check       →  Can this change bypass approval?
+1. auto_check       →  Can this destructive operation bypass approval?
 2. check_clearance   →  Submit the proposal (blocks until operator responds)
-3. check_diff        →  Apply the approved change to the filesystem
+3. check_diff        →  Execute the approved destructive operation
 ```
 
 ### Step 1 — `auto_check`
 
-Call **before** every file write to check if the workspace policy allows the operation without human review.
+Call **before** every destructive file operation (deletion, directory removal) to check if the workspace policy allows the operation without human review.
 
 | Parameter   | Type     | Required | Description |
 |-------------|----------|----------|-------------|
-| `tool_name` | `string` | yes      | Name of the tool or command being executed |
+| `tool_name` | `string` | yes      | Name of the destructive operation being executed |
 | `context`   | `object` | no       | `{ "file_path": "...", "risk_level": "..." }` |
 
 - If `auto_approved: true` → the agent may write the file directly (skip steps 2–3).
@@ -279,7 +279,7 @@ Call **before** every file write to check if the workspace policy allows the ope
 
 ### Step 2 — `check_clearance`
 
-Submit the proposed change for operator review. This call **blocks** until the operator taps Accept/Reject in Slack or the timeout elapses.
+Submit the proposed destructive operation for operator review. This call **blocks** until the operator taps Accept/Reject in Slack or the timeout elapses.
 
 | Parameter     | Type     | Required | Description |
 |---------------|----------|----------|-------------|
@@ -297,7 +297,7 @@ Submit the proposed change for operator review. This call **blocks** until the o
 
 ### Step 3 — `check_diff`
 
-Apply the approved change to the filesystem. Only call this after receiving `status: "approved"`.
+Execute the approved destructive operation. Only call this after receiving `status: "approved"`.
 
 | Parameter    | Type      | Required | Description |
 |--------------|-----------|----------|-------------|
@@ -310,10 +310,10 @@ If the server returns `patch_conflict` (file changed since proposal), the agent 
 
 ### Rules
 
-1. **Never write files directly** when the MCP server is reachable. Always use the approval workflow.
-2. **One file per approval.** Submit each file change as a separate `check_clearance` call.
-3. **Use unified diffs** when modifying existing files. Use raw file content only for new files.
-4. **Set `risk_level`** to `high` or `critical` for changes to configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
+1. **File creation and modification proceed directly** when the MCP server is reachable. No approval workflow is needed for non-destructive writes.
+2. **Destructive operations require approval.** File deletion, directory removal, or any operation that permanently removes content must go through the `auto_check` → `check_clearance` → `check_diff` workflow.
+3. **One destructive operation per approval.** Submit each deletion or removal as a separate `check_clearance` call.
+4. **Set `risk_level`** to `high` or `critical` for destructive operations targeting configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
 5. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.
 6. **Handle all response statuses.** Never assume approval — always branch on `approved`, `rejected`, and `timeout`.
 

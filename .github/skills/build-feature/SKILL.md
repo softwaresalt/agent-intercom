@@ -54,24 +54,31 @@ Post the first `broadcast` of each phase as a new top-level message and capture 
 
 ### File Change Approval Workflow
 
-When agent-intercom is active, **never write files directly**. Route every file creation or modification through the three-step approval workflow:
+When agent-intercom is active, file creation and modification may proceed with direct writes. The three-step approval workflow is reserved for **destructive operations only** — file deletion, directory removal, or any operation that permanently removes content from the filesystem.
 
-1. **`auto_check`** — Call before every file write with `tool_name` set to the action (e.g., `"create_file"`, `"edit_file"`) and `context: { "file_path": "<relative_path>", "risk_level": "<low|high|critical>" }`. If `auto_approved: true`, write the file directly and skip steps 2–3.
-2. **`check_clearance`** — Submit the proposal with a `title`, `diff` (unified diff for modifications, full content for new files), `file_path`, `description`, and appropriate `risk_level`. This call **blocks** until the operator responds.
-3. **`check_diff`** — After receiving `status: "approved"`, call with the returned `request_id` to apply the change.
+#### Destructive Operations (approval required)
+
+Before deleting a file, removing a directory, or performing any other destructive filesystem operation, route the change through the approval workflow:
+
+1. **`auto_check`** — Call with `tool_name` set to the destructive action (e.g., `"delete_file"`, `"remove_directory"`) and `context: { "file_path": "<relative_path>", "risk_level": "<low|high|critical>" }`. If `auto_approved: true`, execute the operation directly and skip steps 2–3.
+2. **`check_clearance`** — Submit the proposal with a `title` describing the deletion, `diff` listing the files or directories to be removed, `file_path`, `description`, and appropriate `risk_level`. This call **blocks** until the operator responds.
+3. **`check_diff`** — After receiving `status: "approved"`, call with the returned `request_id` to execute the deletion.
 
 Response handling:
-* `approved` → call `check_diff` to apply, then `broadcast` confirmation at `success` level.
-* `rejected` → `broadcast` the rejection reason at `warning` level, adapt the implementation based on the operator's `reason` field, and re-submit.
+* `approved` → call `check_diff` to execute, then `broadcast` confirmation at `success` level.
+* `rejected` → `broadcast` the rejection reason at `warning` level, adapt the approach based on the operator's `reason` field.
 * `timeout` → treat as rejection. `broadcast` at `warning` level and do not retry automatically.
-* `patch_conflict` from `check_diff` → re-read the file, regenerate the diff, and restart from step 2.
 
 Risk level conventions:
-* `low` — standard source files, tests, documentation
-* `high` — configuration files (`config.toml`, `Cargo.toml`), security modules (`diff/path_safety.rs`, `policy/`), Slack event handlers
-* `critical` — database schema (`persistence/schema.rs`), authentication/authorization code, CI/CD pipeline files
+* `low` — removing generated files, test fixtures, temporary artifacts
+* `high` — removing configuration files, security modules (`diff/path_safety.rs`, `policy/`), Slack event handlers
+* `critical` — removing database schema files (`persistence/schema.rs`), authentication/authorization code, CI/CD pipeline files
 
-**One file per approval.** Submit each file change as a separate `check_clearance` call.
+**One deletion per approval.** Submit each destructive operation as a separate `check_clearance` call.
+
+#### Non-Destructive Operations (no approval needed)
+
+File creation, modification, and all other non-destructive filesystem writes proceed directly without calling `check_clearance`. Use `broadcast` at `info` level to keep the operator informed of significant file changes.
 
 ## Quick Start
 
@@ -145,7 +152,7 @@ Execute tasks in dependency order following TDD discipline:
    * Read any existing source files that the task modifies.
    * For test tasks: write the test first, then run it and **confirm the test fails** before implementing the production code (red-green TDD).
    * Implement the task following the coding standards from the rust-engineer agent, injecting only the task-type-specific constraints identified above.
-   * **When agent-intercom is active**: route every file creation or modification through the approval workflow described in the Remote Operator Integration section. Generate unified diffs for modifications to existing files. For new files, submit the full file content. Wait for approval before proceeding to the next file.
+   * **When agent-intercom is active**: write files directly for creation and modification. For destructive operations (file deletion, directory removal), route through the approval workflow described in the Remote Operator Integration section. Use `broadcast` at `info` level to keep the operator informed of significant file changes.
    * After implementing each task, run `cargo check` to verify compilation.
    * If compilation fails, diagnose the error, fix it, and re-run `cargo check` until it passes.
    * `broadcast` task completion at `success` level, or failure with reason at `warning` level.
@@ -174,7 +181,7 @@ Run the full test suite and iterate until all checks pass:
 2. If any test fails:
    * Diagnose the failure from the test output.
    * Fix the implementation (not the test, unless the test itself has a bug).
-   * **When agent-intercom is active**: route any fix through the approval workflow before re-running tests.
+   * **When agent-intercom is active**: write fixes directly. If fixes involve deleting files, route through the approval workflow before re-running tests.
    * Re-run `cargo test` to verify the fix.
    * Repeat until all tests pass.
 3. Run `cargo clippy --all-targets -- -D warnings -D clippy::pedantic` to verify lint compliance.
@@ -200,7 +207,7 @@ Re-check the constitution after implementation is complete:
 * Verify all Slack message posting routes through the rate-limited message queue.
 * Verify all file path operations validate against the workspace root via `starts_with()`.
 * Verify test coverage aligns with the 80% target from the constitution.
-* If any remediation changes were made during this step, route them through the approval workflow (when agent-intercom is active) and re-run the Step 4 gate checks (`cargo test`, `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`, `cargo fmt --all -- --check`) to confirm the fixes did not introduce new lint or format violations. All three must exit 0 before proceeding.
+* If any remediation changes were made during this step, write them directly (when agent-intercom is active, route only destructive operations through the approval workflow) and re-run the Step 4 gate checks (`cargo test`, `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`, `cargo fmt --all -- --check`) to confirm the fixes did not introduce new lint or format violations. All three must exit 0 before proceeding.
 * `broadcast` the constitution validation result: `[GATE] Constitution: PASS` at `success` level, or `FAIL — {violations}` at `error` level.
 
 ### Step 6: Record Architectural Decisions

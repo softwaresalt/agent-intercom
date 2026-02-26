@@ -27,7 +27,7 @@ Read and follow the complete workflow defined in the skill file at `.github/skil
 5. **Wait for operator responses.** Do not timeout or skip. The operator is actively monitoring Slack.
 6. If a scenario expects rejection, include the instruction in the `description` field: "HITL TEST: Please REJECT this proposal."
 7. If a scenario expects approval, include the instruction in the `description` field: "HITL TEST: Please APPROVE this proposal."
-8. Never write files directly. Always use the approval workflow (`auto_check` → `check_clearance` → `check_diff`).
+8. Write files directly for creation and modification. Use the approval workflow (`auto_check` → `check_clearance` → `check_diff`) only for destructive operations (file deletion, directory removal).
 9. One file per approval. One command per terminal call.
 10. After all scenarios complete, produce a summary table with pass/fail status for each.
 11. Use actual parameter names from the MCP tool contracts:

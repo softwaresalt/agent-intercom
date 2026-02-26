@@ -13,6 +13,7 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
+use crate::audit::{AuditEntry, AuditEventType};
 use crate::mcp::handler::{AppState, ApprovalResponse};
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
@@ -32,6 +33,7 @@ use crate::slack::blocks;
 /// # Errors
 ///
 /// Returns an error string if processing fails.
+#[allow(clippy::too_many_lines)] // Audit logging + FR-022 button replacement cannot be shortened further.
 pub async fn handle_approval_action(
     action: &SlackInteractionActionInfo,
     user_id: &str,
@@ -83,6 +85,23 @@ pub async fn handle_approval_action(
         user_id,
         "approval request status updated"
     );
+
+    // Audit-log the approval/rejection decision (T059).
+    if let Some(ref logger) = state.audit_logger {
+        let event_type = match status {
+            ApprovalStatus::Approved => AuditEventType::Approval,
+            _ => AuditEventType::Rejection,
+        };
+        let mut entry = AuditEntry::new(event_type)
+            .with_request_id(request_id.to_owned())
+            .with_operator(user_id.to_owned());
+        if let Some(ref r) = reason {
+            entry = entry.with_reason(r.clone());
+        }
+        if let Err(err) = logger.log_entry(entry) {
+            warn!(%err, "audit log write failed (approval action)");
+        }
+    }
 
     // ── Resolve oneshot channel ──────────────────────────
     {

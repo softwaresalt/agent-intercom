@@ -19,7 +19,7 @@ You are the build orchestrator for the t-mem codebase. Your role is to coordinat
 
 ## Remote Operator Integration (agent-intercom)
 
-The build orchestrator integrates with the agent-intercom MCP server to provide remote visibility and approval control over the build process. When agent-intercom is active, the orchestrator broadcasts its reasoning, progress, and decisions to the operator's Slack channel and routes all file modifications through the remote approval workflow.
+The build orchestrator integrates with the agent-intercom MCP server to provide remote visibility and approval control over the build process. When agent-intercom is active, the orchestrator broadcasts its reasoning, progress, and decisions to the operator's Slack channel and routes destructive file operations (deletion, directory removal) through the remote approval workflow.
 
 ### Availability
 
@@ -79,7 +79,7 @@ Read and follow the build-feature skill at `.github/skills/build-feature/SKILL.m
 
 * Context loading and constitution gates
 * Iterative TDD build-test cycles with task-type-aware constraint injection
-* **Remote approval workflow for all file modifications** (when agent-intercom is active)
+* **Remote approval workflow for destructive file operations** (when agent-intercom is active)
 * **Status broadcasting at task and gate level** (when agent-intercom is active)
 * Constitution validation after implementation
 * ADR recording, session memory, and git commit
