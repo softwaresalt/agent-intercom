@@ -499,3 +499,126 @@ By moving to this event-driven, full-duplex model, your server becomes incredibl
 
 Look at how to cleanly frame and parse the incoming JSON stream in your TCP Read Task using `tokio_util::codec::LinesCodec` so you don't have to deal with fragmented byte chunks manually. This is the standard way to handle line-delimited JSON streams in Rust and will save you from a world of pain trying to buffer and parse incomplete messages.
 
+Working with raw TCP sockets is where many developers get tripped up because TCP is a continuous stream of bytes, not a stream of discrete messages.
+
+If you just run `socket.read(&mut buffer)`, you might get half of a JSON-RPC payload, or you might get one and a half payloads glued together. If you try to pass that fragment into `serde_json`, it will panic and crash your Read Task.
+
+To solve this, we use **framing**. Assuming the ACP implementation uses newline-delimited JSON (NDJSON) over the socket, `tokio_util` provides a brilliant abstraction called `FramedRead` paired with `LinesCodec`. It buffers the incoming bytes automatically and only yields a string when it detects a clean `\n` or `\r\n`.
+
+Here is how you wire up that bulletproof TCP Read Task.
+
+### 1. Add the Dependencies
+
+You will need to add `tokio-util` and `futures` to your `Cargo.toml`. The `futures` crate provides the `StreamExt` trait, which allows you to use `.next().await` on the framed stream.
+
+```toml
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+serde_json = "1.0"
+
+```
+
+### 2. Splitting and Framing the Stream
+
+When you connect to Copilot's TCP port, you first split the socket into independent read and write halves. Then, you wrap the read half in the `LinesCodec`.
+
+```rust
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio_util::codec::{FramedRead, LinesCodec};
+use futures::stream::StreamExt;
+use serde_json::Value;
+
+pub async fn start_tcp_read_task(
+    mut socket: TcpStream, 
+    event_tx: mpsc::Sender<AgentEvent>
+) {
+    // 1. Split the TCP stream into read and write halves
+    let (read_half, _write_half) = socket.into_split();
+    
+    // Note: The write_half would be passed to a separate task
+    // wrapped in FramedWrite for your outbound JSON.
+
+    // 2. Wrap the raw byte stream in a FramedRead with LinesCodec
+    let mut framed_reader = FramedRead::new(read_half, LinesCodec::new());
+
+    // 3. Asynchronously iterate over fully-formed lines
+    while let Some(line_result) = framed_reader.next().await {
+        match line_result {
+            Ok(line) => {
+                // We have a guaranteed complete line of text. Time to parse!
+                handle_incoming_json(&line, &event_tx).await;
+            }
+            Err(e) => {
+                eprintln!("Error reading from TCP stream: {}", e);
+                break; // Exit the task if the socket closes or errors
+            }
+        }
+    }
+    
+    println!("Agent disconnected. TCP Read Task shutting down.");
+}
+
+```
+
+### 3. Parsing and Dispatching the JSON-RPC
+
+Now that `LinesCodec` is doing the heavy lifting of buffering and splitting the bytes, your parsing logic becomes incredibly clean. You just deserialize the string into a `serde_json::Value` and route it.
+
+```rust
+async fn handle_incoming_json(line: &str, event_tx: &mpsc::Sender<AgentEvent>) {
+    // Attempt to parse the line as JSON
+    let payload: Value = match serde_json::from_str(line) {
+        Ok(val) => val,
+        Err(e) => {
+            eprintln!("Received malformed JSON: {} | Payload: {}", e, line);
+            return;
+        }
+    };
+
+    // Extract the JSON-RPC method (if it exists)
+    if let Some(method) = payload.get("method").and_then(|m| m.as_str()) {
+        match method {
+            "window/showMessageRequest" => {
+                let request_id = payload["id"].to_string();
+                let message = payload["params"]["message"].as_str().unwrap_or("Action requested");
+                
+                // Fire the event to the Slack loop
+                let event = AgentEvent::ClearanceRequested {
+                    request_id,
+                    session_id: "active_session".to_string(), // In reality, fetch from state
+                    action_type: ActionType::TerminalCommand("Pending...".into()),
+                    description: message.to_string(),
+                    diff: None,
+                };
+                
+                let _ = event_tx.send(event).await;
+            }
+            "$/progress" | "window/logMessage" => {
+                // Route streaming text updates to Slack
+                let message = payload["params"]["message"].as_str().unwrap_or("");
+                let _ = event_tx.send(AgentEvent::StatusUpdated {
+                    session_id: "active_session".to_string(),
+                    message: message.to_string(),
+                }).await;
+            }
+            _ => {
+                // Ignore other JSON-RPC methods we don't care about
+            }
+        }
+    }
+}
+
+```
+
+### A Crucial Caveat: LSP Framing
+
+*Pro-Tip:* While many raw ACP implementations use simple newline-delimited JSON (where `LinesCodec` works perfectly), because ACP evolved from the Language Server Protocol (LSP), some agents require **LSP Framing**.
+
+LSP Framing looks like an HTTP header prepended to the JSON:
+`Content-Length: 123\r\n\r\n{"jsonrpc":"2.0"...}`
+
+If you point `LinesCodec` at Copilot CLI and see it panicking because it is reading `Content-Length: ...` instead of raw JSON, you will simply swap `LinesCodec` for a custom or community-provided `LanguageServerCodec` (found in crates like `tower-lsp` or easily written manually). The `FramedRead` architecture remains exactly the same!
+

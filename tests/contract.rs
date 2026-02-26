@@ -8,10 +8,12 @@ mod contract {
     mod heartbeat_tests;
     mod mode_tests;
     mod ping_contract_tests;
+    mod prompt_contract_tests;
     mod reboot_contract_tests;
     mod recover_state_tests;
     mod remote_log_tests;
     mod resource_tests;
     mod schema_tests;
     mod tool_names_tests;
+    mod wait_contract_tests;
 }
