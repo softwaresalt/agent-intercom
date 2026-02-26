@@ -30,6 +30,7 @@ mod integration {
     mod ipc_server_tests;
     mod mcp_dispatch_tests;
     mod policy_watcher_tests;
+    mod startup_tests;
     mod stdio_transport_tests;
     mod steering_flow_tests;
     mod streamable_http_tests;

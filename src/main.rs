@@ -216,12 +216,31 @@ async fn run(args: Cli) -> Result<()> {
         let sse_ct = ct.clone();
         let sse_state = Arc::clone(&state);
         let sse_shutdown_ct = ct.clone();
-        Some(tokio::spawn(async move {
-            if let Err(err) = sse::serve_http(sse_state, sse_ct).await {
-                error!(%err, "http transport failed — initiating shutdown");
-                sse_shutdown_ct.cancel();
+        // Attempt to bind BEFORE spawning. A bind failure means the port is
+        // already in use (e.g., second instance). Exit cleanly rather than
+        // leaving Slack and stdio running with no HTTP front-end.
+        match sse::bind_http(&state).await {
+            Ok(listener) => Some(tokio::spawn(async move {
+                if let Err(err) = sse::serve_with_listener(listener, sse_state, sse_ct).await {
+                    error!(%err, "http transport failed — initiating shutdown");
+                    sse_shutdown_ct.cancel();
+                }
+            })),
+            Err(err) => {
+                error!(
+                    %err,
+                    "failed to bind HTTP transport — shutting down and exiting"
+                );
+                // Abort Slack runtime so the process can exit cleanly.
+                if let Some(ref rt) = slack_runtime {
+                    if let Some(ref socket) = rt.socket_task {
+                        socket.abort();
+                    }
+                    rt.queue_task.abort();
+                }
+                std::process::exit(1);
             }
-        }))
+        }
     } else {
         info!("SSE transport disabled (--transport stdio)");
         None

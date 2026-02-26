@@ -12,7 +12,11 @@
     "^cmd /c \"cargo (test|check|clippy|fmt|build|doc|bench)(\\s[^;|&`]*)?\"(\\s*[;&|]+\\s*echo\\s.*)?$",
     "^pwsh -File \"lib/hve-core/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$",
     "^pwsh -File \"\\.specify/scripts/powershell/check-prerequisites\\.ps1\" -Json -RequireTasks -IncludeTasks$",
-    "^Out-Null$"
+    "^Out-Null$",
+    "create_file",
+    "edit_file",
+    "append_to_file",
+    "replace_string_in_file"
   ],
 
   "tools": [

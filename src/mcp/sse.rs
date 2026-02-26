@@ -320,9 +320,32 @@ async fn log_all_requests(request: Request, next: Next) -> Response {
 /// # Errors
 ///
 /// Returns `AppError::Config` if the server fails to bind.
-pub async fn serve_http(state: Arc<AppState>, ct: CancellationToken) -> Result<()> {
+pub async fn bind_http(state: &AppState) -> Result<tokio::net::TcpListener> {
     let port = state.config.http_port;
     let bind = SocketAddr::from(([127, 0, 0, 1], port));
+    tokio::net::TcpListener::bind(bind)
+        .await
+        .map_err(|err| AppError::Config(format!("failed to bind HTTP on {bind}: {err}")))
+}
+
+/// Serve the HTTP/Streamable-HTTP MCP transport on a pre-bound listener.
+///
+/// Call [`bind_http`] first to obtain the listener.  This split allows
+/// `main` to detect port conflicts eagerly — before spawning the
+/// long-lived serve task — so it can shut down already-started services
+/// and exit cleanly.
+///
+/// # Errors
+///
+/// Returns `AppError::Config` if the HTTP server encounters a serve error.
+pub async fn serve_with_listener(
+    listener: tokio::net::TcpListener,
+    state: Arc<AppState>,
+    ct: CancellationToken,
+) -> Result<()> {
+    let bind = listener
+        .local_addr()
+        .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 0)));
 
     let config = StreamableHttpServerConfig {
         cancellation_token: ct.child_token(),
@@ -383,12 +406,6 @@ pub async fn serve_http(state: Arc<AppState>, ct: CancellationToken) -> Result<(
         .layer(middleware::from_fn(log_all_requests));
 
     info!("registered routes: /mcp, /health, /sse");
-
-    // Serve HTTP via axum.
-    let listener = tokio::net::TcpListener::bind(bind)
-        .await
-        .map_err(|err| AppError::Config(format!("failed to bind HTTP on {bind}: {err}")))?;
-
     info!(%bind, "starting HTTP/Streamable-HTTP MCP transport");
 
     axum::serve(listener, router)
@@ -400,6 +417,22 @@ pub async fn serve_http(state: Arc<AppState>, ct: CancellationToken) -> Result<(
 
     info!("HTTP/Streamable-HTTP MCP transport shut down");
     Ok(())
+}
+
+/// Bind and serve the HTTP/Streamable-HTTP MCP transport.
+///
+/// Convenience wrapper that calls [`bind_http`] then [`serve_with_listener`].
+/// When you need to detect bind failure before starting other services, call
+/// those two functions separately and handle the bind error before spawning
+/// the serve task.
+///
+/// # Errors
+///
+/// Returns `AppError::Config` if the server fails to bind or encounters a
+/// serve error.
+pub async fn serve_http(state: Arc<AppState>, ct: CancellationToken) -> Result<()> {
+    let listener = bind_http(&state).await?;
+    serve_with_listener(listener, state, ct).await
 }
 
 /// Deprecated alias for [`serve_http`].

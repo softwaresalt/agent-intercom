@@ -79,13 +79,13 @@
 
 ### Tests for US2
 
-- [ ] T024 [P] [US2] Integration test for bind failure in `tests/integration/startup_tests.rs` (scenarios S024-S026)
-- [ ] T025 [P] [US2] Integration test for normal startup in `tests/integration/startup_tests.rs` (scenario S023)
+- [X] T024 [P] [US2] Integration test for bind failure in `tests/integration/startup_tests.rs` (scenarios S024-S026)
+- [X] T025 [P] [US2] Integration test for normal startup in `tests/integration/startup_tests.rs` (scenario S023)
 
 ### Implementation for US2
 
-- [ ] T026 [US2] Update `src/main.rs` — if HTTP transport bind fails, log error and `std::process::exit(1)`
-- [ ] T027 [US2] Update `src/main.rs` — shut down already-started services (Slack) before exit on bind failure
+- [X] T026 [US2] Update `src/main.rs` — if HTTP transport bind fails, log error and `std::process::exit(1)`
+- [X] T027 [US2] Update `src/main.rs` — shut down already-started services (Slack) before exit on bind failure
 
 **Checkpoint**: No more zombie processes on port conflict
 
