@@ -7,20 +7,22 @@
 
 use serde_json::{json, Value};
 
-// ─── S015: clean state — no pending_tasks field ───────────────────────
+// ─── S015: clean state — pending_tasks always present as empty array ───
 
 /// When no inbox tasks exist the response carries `status: "clean"` and
-/// no `pending_tasks` key.
+/// an empty `pending_tasks` array. The field must always be present so that
+/// clients can rely on a stable schema without nil-checking.
 #[test]
-fn clean_response_has_no_pending_tasks() {
-    let response = json!({ "status": "clean" });
+fn clean_response_always_has_pending_tasks_field() {
+    let response = json!({ "status": "clean", "pending_tasks": [] });
 
     let status = response.get("status").and_then(Value::as_str).unwrap_or("");
     assert_eq!(status, "clean");
-    assert!(
-        response.get("pending_tasks").is_none(),
-        "pending_tasks must be absent on clean response"
-    );
+    let tasks = response
+        .get("pending_tasks")
+        .and_then(Value::as_array)
+        .expect("pending_tasks must always be present, even when empty");
+    assert!(tasks.is_empty(), "pending_tasks must be empty when no inbox items exist");
 }
 
 // ─── S016: recovered with tasks — pending_tasks array present ────────

@@ -99,7 +99,7 @@
           },
           "error_code": {
             "type": "string",
-            "enum": ["request_not_found", "not_approved", "already_consumed", "path_violation", "patch_conflict"],
+            "enum": ["request_not_found", "not_approved", "already_consumed", "path_violation", "patch_conflict", "invalid_diff"],
             "description": "Present only when status=error"
           },
           "error_message": {

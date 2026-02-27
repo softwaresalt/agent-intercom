@@ -60,9 +60,7 @@ pub async fn handle(
             info!("no interrupted session found — clean state");
             let mut clean_response = serde_json::json!({ "status": "clean" });
             let pending_tasks = fetch_inbox_tasks(&state).await?;
-            if !pending_tasks.is_empty() {
-                clean_response["pending_tasks"] = serde_json::json!(pending_tasks);
-            }
+            clean_response["pending_tasks"] = serde_json::json!(pending_tasks);
             return json_result(clean_response);
         };
 
@@ -192,9 +190,7 @@ async fn build_recovered_response(
 
     // ── Pending inbox tasks ──────────────────────────────
     let pending_tasks = fetch_inbox_tasks(state).await?;
-    if !pending_tasks.is_empty() {
-        response["pending_tasks"] = serde_json::json!(pending_tasks);
-    }
+    response["pending_tasks"] = serde_json::json!(pending_tasks);
 
     Ok(response)
 }

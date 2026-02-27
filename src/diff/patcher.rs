@@ -50,6 +50,22 @@ pub fn apply_patch(
         ))
     })?;
 
+    // When the patch removes all content, delete the file from disk rather
+    // than leaving an empty placeholder. An empty result is the canonical
+    // indicator that every line was removed by the diff.
+    if patched.is_empty() {
+        std::fs::remove_file(&validated).map_err(|err| {
+            AppError::Diff(format!(
+                "failed to delete file after all content removed {}: {err}",
+                validated.display()
+            ))
+        })?;
+        return Ok(WriteSummary {
+            path: validated,
+            bytes_written: 0,
+        });
+    }
+
     // Write the patched content atomically using the validated path.
     write_full_file(&validated, &patched, workspace_root)
 }

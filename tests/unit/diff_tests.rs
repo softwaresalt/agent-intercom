@@ -189,3 +189,26 @@ fn apply_patch_rejects_path_traversal() {
         "path traversal in patch should be rejected"
     );
 }
+
+#[test]
+fn apply_patch_deletes_file_when_all_content_removed() {
+    // A unified diff that removes every line should delete the file from disk
+    // rather than leaving an empty placeholder (Finding 3 from HITL test).
+    let ws = workspace();
+    let target = ws.path().join("to_delete.txt");
+    fs::write(&target, "line1\nline2\n").expect("seed");
+
+    let patch = "\
+--- a/to_delete.txt
++++ b/to_delete.txt
+@@ -1,2 +0,0 @@
+-line1
+-line2
+";
+
+    let summary =
+        apply_patch(&PathBuf::from("to_delete.txt"), patch, ws.path()).expect("apply should succeed");
+
+    assert_eq!(summary.bytes_written, 0, "bytes_written should be 0 for deletion");
+    assert!(!target.exists(), "file should be deleted from disk when all content is removed");
+}

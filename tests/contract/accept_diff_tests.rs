@@ -19,6 +19,7 @@ const VALID_ERROR_CODES: &[&str] = &[
     "already_consumed",
     "path_violation",
     "patch_conflict",
+    "invalid_diff",
 ];
 
 // ─── Input schema validation ──────────────────────────────────────────
@@ -196,6 +197,26 @@ fn error_request_not_found_structure() {
         "error_message": "no approval request found with the given id"
     });
     assert_eq!(output["error_code"], "request_not_found");
+}
+
+#[test]
+fn error_invalid_diff_structure() {
+    // Returned when diff content lacks unified-diff headers (--- / +++) and
+    // the target file already exists and is non-empty. This prevents
+    // accidental full-file overwrites of existing source files.
+    let output = json!({
+        "status": "error",
+        "error_code": "invalid_diff",
+        "error_message": "diff content does not appear to be a unified diff (missing '--- ' header); submit a properly-formatted unified diff for existing files"
+    });
+    assert_eq!(output["error_code"], "invalid_diff");
+    assert!(
+        output["error_message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unified diff"),
+        "error_message should mention unified diff requirement"
+    );
 }
 
 // ─── Phase 5 — Slack notification scenario contract shapes ────────────
