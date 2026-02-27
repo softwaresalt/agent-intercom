@@ -120,3 +120,63 @@ fn write_pattern_does_not_duplicate_auto_approve_commands() {
     let count = cmds.iter().filter(|v| v.as_str() == Some(&pattern)).count();
     assert_eq!(count, 1, "pattern should appear exactly once, got {count}; entries: {cmds:?}");
 }
+
+/// S076 — `write_pattern_to_workspace_file` returns `Ok(false)` when no *.code-workspace exists.
+#[test]
+fn write_pattern_to_workspace_file_returns_false_when_no_workspace_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let result = command_approve::write_pattern_to_workspace_file(dir.path(), "cargo test")
+        .expect("should not error");
+    assert!(!result, "should return false when no .code-workspace file is present");
+}
+
+/// S077 — `write_pattern_to_workspace_file` writes the pattern into
+/// `settings.chat.tools.terminal.autoApprove` when a workspace file exists.
+#[test]
+fn write_pattern_to_workspace_file_writes_to_auto_approve_map() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // Create a minimal workspace file.
+    let ws_path = dir.path().join("test.code-workspace");
+    std::fs::write(&ws_path, r#"{"folders": [{"path": "."}], "settings": {}}"#)
+        .expect("create workspace file");
+
+    let found = command_approve::write_pattern_to_workspace_file(dir.path(), "DEL /F /Q test.txt")
+        .expect("write should succeed");
+    assert!(found, "should return true when workspace file exists");
+
+    let raw = std::fs::read_to_string(&ws_path).expect("read workspace file");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("parse workspace file");
+    let pattern = command_approve::generate_pattern("DEL /F /Q test.txt");
+    let map = json
+        .pointer("/settings/chat.tools.terminal.autoApprove")
+        .and_then(|v| v.as_object())
+        .expect("settings.chat.tools.terminal.autoApprove must be an object");
+    assert!(
+        map.contains_key(&pattern),
+        "autoApprove map must contain the pattern `{pattern}`; got keys: {map:?}"
+    );
+}
+
+/// S078 — `write_pattern_to_workspace_file` does not duplicate patterns in the autoApprove map.
+#[test]
+fn write_pattern_to_workspace_file_does_not_duplicate() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws_path = dir.path().join("test.code-workspace");
+    std::fs::write(&ws_path, r#"{"folders": [{"path": "."}], "settings": {}}"#)
+        .expect("create workspace file");
+
+    command_approve::write_pattern_to_workspace_file(dir.path(), "cargo test")
+        .expect("first write");
+    command_approve::write_pattern_to_workspace_file(dir.path(), "cargo test")
+        .expect("second write");
+
+    let raw = std::fs::read_to_string(&ws_path).expect("read workspace file");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("parse workspace file");
+    let pattern = command_approve::generate_pattern("cargo test");
+    let map = json
+        .pointer("/settings/chat.tools.terminal.autoApprove")
+        .and_then(|v| v.as_object())
+        .expect("autoApprove must be an object");
+    let count = map.keys().filter(|k| k.as_str() == pattern).count();
+    assert_eq!(count, 1, "pattern key should appear exactly once");
+}
