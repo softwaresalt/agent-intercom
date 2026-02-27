@@ -74,8 +74,9 @@ fn write_pattern_appends_to_existing_settings() {
     );
 }
 
-/// S074 — `write_pattern_to_settings` writes the pattern to `auto_approve_commands`
-/// (the array read by the MCP `auto_check` policy evaluator).
+/// S074 — `write_pattern_to_settings` writes the pattern to
+/// `chat.tools.terminal.autoApprove` (the unified key read by both the MCP
+/// policy evaluator and VS Code Copilot Chat).
 #[test]
 fn write_pattern_populates_auto_approve_commands_array() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -87,21 +88,21 @@ fn write_pattern_populates_auto_approve_commands_array() {
     let json: serde_json::Value = serde_json::from_str(&raw).expect("parse json");
 
     let cmds = json
-        .get("auto_approve_commands")
+        .get("chat.tools.terminal.autoApprove")
         .and_then(|v| v.as_array())
-        .expect("auto_approve_commands must be an array");
+        .expect("chat.tools.terminal.autoApprove must be an array");
     assert!(
         !cmds.is_empty(),
-        "auto_approve_commands must contain at least one entry"
+        "chat.tools.terminal.autoApprove must contain at least one entry"
     );
     let pattern = command_approve::generate_pattern("DEL /F /Q test.txt");
     assert!(
         cmds.iter().any(|v| v.as_str() == Some(&pattern)),
-        "auto_approve_commands must contain the generated pattern `{pattern}`; got: {cmds:?}"
+        "chat.tools.terminal.autoApprove must contain the generated pattern `{pattern}`; got: {cmds:?}"
     );
 }
 
-/// S075 — `write_pattern_to_settings` does not add duplicate entries to `auto_approve_commands`.
+/// S075 — `write_pattern_to_settings` does not add duplicate entries to `chat.tools.terminal.autoApprove`.
 #[test]
 fn write_pattern_does_not_duplicate_auto_approve_commands() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -113,9 +114,9 @@ fn write_pattern_does_not_duplicate_auto_approve_commands() {
     let json: serde_json::Value = serde_json::from_str(&raw).expect("parse json");
 
     let cmds = json
-        .get("auto_approve_commands")
+        .get("chat.tools.terminal.autoApprove")
         .and_then(|v| v.as_array())
-        .expect("auto_approve_commands must be an array");
+        .expect("chat.tools.terminal.autoApprove must be an array");
     let pattern = command_approve::generate_pattern("cargo test");
     let count = cmds.iter().filter(|v| v.as_str() == Some(&pattern)).count();
     assert_eq!(count, 1, "pattern should appear exactly once, got {count}; entries: {cmds:?}");

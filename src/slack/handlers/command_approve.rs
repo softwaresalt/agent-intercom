@@ -45,11 +45,10 @@ pub fn generate_pattern(command: &str) -> String {
 
 /// Write `command`'s auto-approve pattern to `settings_path`.
 ///
-/// Appends the generated regex to the `auto_approve_commands` array in
-/// `.intercom/settings.json`.  This is the array the MCP `auto_check`
-/// policy evaluator reads — it is distinct from the VS Code
-/// `chat.tools.terminal.autoApprove` map, which lives in `.vscode/settings.json`
-/// (or the workspace file) and is not part of `.intercom/settings.json`.
+/// Appends the generated regex to the `chat.tools.terminal.autoApprove` array
+/// in `.intercom/settings.json`.  This is the same key used in the VS Code
+/// `*.code-workspace` file, so both agent-intercom and Copilot Chat share a
+/// single canonical list without maintaining separate sections.
 ///
 /// If `settings_path` does not exist it is created with a minimal JSON
 /// skeleton.  Duplicate patterns are silently ignored.
@@ -69,17 +68,17 @@ pub fn write_pattern_to_settings(settings_path: &Path, command: &str) -> crate::
 
     let pattern = generate_pattern(command);
 
-    // Write to `auto_approve_commands` — the single shared list consumed by
-    // both the MCP policy evaluator and VS Code GitHub Copilot Chat.
+    // Write to `chat.tools.terminal.autoApprove` — the unified key shared by
+    // both .intercom/settings.json (MCP evaluator) and *.code-workspace (VS Code).
     let obj = root
         .as_object_mut()
         .ok_or_else(|| crate::AppError::Config("settings root is not an object".into()))?;
     let commands_val = obj
-        .entry("auto_approve_commands")
+        .entry("chat.tools.terminal.autoApprove")
         .or_insert_with(|| serde_json::json!([]));
     let arr = commands_val
         .as_array_mut()
-        .ok_or_else(|| crate::AppError::Config("auto_approve_commands is not an array".into()))?;
+        .ok_or_else(|| crate::AppError::Config("chat.tools.terminal.autoApprove is not an array".into()))?;
     // Avoid duplicates.
     let pattern_val = serde_json::Value::String(pattern);
     if !arr.contains(&pattern_val) {

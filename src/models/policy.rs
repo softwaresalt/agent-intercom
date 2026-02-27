@@ -34,11 +34,17 @@ pub struct WorkspacePolicy {
     /// alternation to cover families of commands:
     ///
     /// ```json
-    /// "auto_approve_commands": [
+    /// "chat.tools.terminal.autoApprove": [
     ///   "^cargo (build|test|check|clippy|fmt)(\\s.*)?$"
     /// ]
     /// ```
-    #[serde(default, alias = "commands")]
+    ///
+    /// Accepted JSON keys (in order of preference):
+    /// - `chat.tools.terminal.autoApprove` — shared key with VS Code workspace
+    /// - `auto_approve_commands` — legacy key (still accepted)
+    /// - `commands` — short alias
+    #[serde(default, alias = "auto_approve_commands", alias = "commands")]
+    #[serde(rename = "chat.tools.terminal.autoApprove")]
     pub auto_approve_commands: Vec<String>,
     /// MCP tool names that bypass approval.
     #[serde(default)]
