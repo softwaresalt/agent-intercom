@@ -31,7 +31,7 @@ Read and follow the complete workflow defined in the skill file at `.github/skil
 9. One file per approval. One command per terminal call.
 10. After all scenarios complete, produce a summary table with pass/fail status for each.
 11. Use actual parameter names from the MCP tool contracts:
-    - `auto_check`: `tool_name` (string, required), `context` (object, optional)
+    - `auto_check`: `tool_name` (string, required), `context` (object, optional), `kind` (string: `terminal_command`|`file_operation`, optional — when `terminal_command` and the command is not policy-approved, blocks until the operator approves or rejects via Slack)
     - `check_clearance`: `title` (string, required), `diff` (string, required), `file_path` (string, required), `description` (string, optional), `risk_level` (string: low|high|critical, default: low)
     - `check_diff`: `request_id` (string, required), `force` (boolean, optional, default: false)
     - `transmit`: `prompt_text` (string, required), `prompt_type` (string: continuation|clarification|error_recovery|resource_warning, default: continuation), `elapsed_seconds` (integer, optional), `actions_taken` (integer, optional)
