@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use rmcp::handler::server::{
     tool::{ToolCallContext, ToolRoute, ToolRouter},
@@ -17,12 +18,13 @@ use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use sqlx::SqlitePool;
 use tokio::process::Child;
 use tokio::sync::{oneshot, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{info, info_span, warn};
 
 use crate::audit::{AuditEntry, AuditEventType, AuditLogger};
 use crate::config::GlobalConfig;
 use crate::models::session::{Session, SessionMode, SessionStatus};
-use crate::orchestrator::stall_detector::{StallDetectorHandle, StallEvent};
+use crate::orchestrator::stall_detector::{StallDetector, StallDetectorHandle, StallEvent};
 use crate::persistence::session_repo::SessionRepo;
 use crate::policy::watcher::PolicyCache;
 use crate::slack::client::SlackService;
@@ -538,6 +540,29 @@ impl ServerHandler for IntercomServer {
                             status = ?session.status,
                             "spawned agent connected to pre-created session"
                         );
+                        // Spawn a per-session stall detector for the spawned agent (FR-028).
+                        if state.config.stall.enabled {
+                            if let (Some(ref detectors), Some(ref tx)) =
+                                (&state.stall_detectors, &state.stall_event_tx)
+                            {
+                                let session_cancel = CancellationToken::new();
+                                let detector = StallDetector::new(
+                                    session.id.clone(),
+                                    Duration::from_secs(
+                                        state.config.stall.inactivity_threshold_seconds,
+                                    ),
+                                    Duration::from_secs(
+                                        state.config.stall.escalation_threshold_seconds,
+                                    ),
+                                    state.config.stall.max_retries,
+                                    tx.clone(),
+                                    session_cancel,
+                                );
+                                let handle = detector.spawn();
+                                detectors.lock().await.insert(session.id.clone(), handle);
+                                info!(session_id = %session.id, "stall detector spawned");
+                            }
+                        }
                     }
                     Ok(None) => {
                         warn!(session_id = %sid, "pre-created session not found in database");
@@ -628,6 +653,29 @@ impl ServerHandler for IntercomServer {
                                     .with_session(created.id.clone());
                                 if let Err(err) = logger.log_entry(entry) {
                                     warn!(%err, "audit log write failed (session start)");
+                                }
+                            }
+                            // Spawn a per-session stall detector for direct connections (FR-028).
+                            if state.config.stall.enabled {
+                                if let (Some(ref detectors), Some(ref tx)) =
+                                    (&state.stall_detectors, &state.stall_event_tx)
+                                {
+                                    let session_cancel = CancellationToken::new();
+                                    let detector = StallDetector::new(
+                                        created.id.clone(),
+                                        Duration::from_secs(
+                                            state.config.stall.inactivity_threshold_seconds,
+                                        ),
+                                        Duration::from_secs(
+                                            state.config.stall.escalation_threshold_seconds,
+                                        ),
+                                        state.config.stall.max_retries,
+                                        tx.clone(),
+                                        session_cancel,
+                                    );
+                                    let handle = detector.spawn();
+                                    detectors.lock().await.insert(created.id.clone(), handle);
+                                    info!(session_id = %created.id, "stall detector spawned");
                                 }
                             }
                         }
@@ -775,8 +823,29 @@ impl Drop for IntercomServer {
     ///
     /// Only direct-connection sessions (Case 2 of `on_initialized`) store an ID
     /// in `session_db_id`.  Spawned-agent servers leave it unset, so their Drop
-    /// is always a no-op.
+    /// is always a no-op for the DB path but still cleans up the stall detector.
     fn drop(&mut self) {
+        // ── Remove stall detector for both Case 1 and Case 2 ────────────────
+        // Case 1 (spawned): session_id_override is set; Case 2 (direct): session_db_id is set.
+        let stall_sid = self
+            .session_id_override
+            .clone()
+            .or_else(|| self.session_db_id.get().cloned());
+
+        if let Some(sid) = stall_sid {
+            let state = Arc::clone(&self.state);
+            if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                rt.spawn(async move {
+                    if let Some(ref detectors) = state.stall_detectors {
+                        if detectors.lock().await.remove(&sid).is_some() {
+                            info!(session_id = %sid, "stall detector removed on session end");
+                        }
+                    }
+                });
+            }
+        }
+
+        // ── Terminate direct-connection session in the database (Case 2) ────
         if let Some(id) = self.session_db_id.get().cloned() {
             let db = Arc::clone(&self.state.db);
             let audit_logger = self.state.audit_logger.clone();

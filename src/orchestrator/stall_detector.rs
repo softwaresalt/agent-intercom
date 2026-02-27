@@ -88,37 +88,31 @@ impl StallDetector {
         let paused = Arc::new(AtomicBool::new(false));
         let stalled = Arc::new(AtomicBool::new(false));
 
-        let handle = StallDetectorHandle {
-            reset_notify: Arc::clone(&reset_notify),
-            paused: Arc::clone(&paused),
-            stalled: Arc::clone(&stalled),
-            session_id: self.session_id.clone(),
-            event_tx: self.event_tx.clone(),
-            join_handle: None,
-        };
+        // Clone the cancellation token so the handle can cancel the task on drop.
+        let cancel_for_handle = self.cancel.clone();
 
         let task_handle = tokio::spawn(
             Self::run(
-                self.session_id,
+                self.session_id.clone(),
                 self.inactivity_threshold,
                 self.escalation_interval,
                 self.max_retries,
                 self.event_tx,
                 self.cancel,
-                reset_notify,
-                paused,
-                stalled,
+                Arc::clone(&reset_notify),
+                Arc::clone(&paused),
+                Arc::clone(&stalled),
             )
             .instrument(info_span!("stall_detector")),
         );
 
         StallDetectorHandle {
-            reset_notify: handle.reset_notify,
-            paused: handle.paused,
-            stalled: handle.stalled,
-            session_id: handle.session_id,
-            event_tx: handle.event_tx,
+            reset_notify,
+            paused,
+            stalled,
+            session_id: self.session_id,
             join_handle: Some(task_handle),
+            cancel: cancel_for_handle,
         }
     }
 
@@ -273,9 +267,17 @@ pub struct StallDetectorHandle {
     paused: Arc<AtomicBool>,
     stalled: Arc<AtomicBool>,
     session_id: String,
-    event_tx: mpsc::Sender<StallEvent>,
     /// Task handle for the background detector loop.
     join_handle: Option<JoinHandle<()>>,
+    /// Per-session cancellation token — cancelled when the handle is dropped.
+    cancel: CancellationToken,
+}
+
+impl Drop for StallDetectorHandle {
+    /// Cancel the background detector task when the handle is dropped.
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
 }
 
 impl StallDetectorHandle {
@@ -311,10 +313,11 @@ impl StallDetectorHandle {
 impl StallDetectorHandle {
     /// Await the detector's completion.
     ///
-    /// The detector runs until cancelled via `CancellationToken`.
-    /// If no `JoinHandle` is stored, this is a no-op.
-    pub async fn await_completion(self) {
-        if let Some(handle) = self.join_handle {
+    /// Signals the background task to stop via the cancellation token, then
+    /// waits for it to exit.  If no `JoinHandle` is stored, this is a no-op.
+    pub async fn await_completion(mut self) {
+        self.cancel.cancel();
+        if let Some(handle) = self.join_handle.take() {
             let _ = handle.await;
         }
     }

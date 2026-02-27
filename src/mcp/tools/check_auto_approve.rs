@@ -14,8 +14,9 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
-use tracing::{info, info_span, Instrument};
+use tracing::{info, info_span, warn, Instrument};
 
+use crate::audit::{AuditEntry, AuditEventType};
 use crate::mcp::handler::IntercomServer;
 use crate::persistence::session_repo::SessionRepo;
 use crate::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
@@ -99,6 +100,21 @@ pub async fn handle(
             matched_rule = ?result.matched_rule,
             "policy evaluation complete"
         );
+
+        // ── Audit-log the policy decision (FR-026) ───────────
+        if let Some(ref logger) = state.audit_logger {
+            let event_type = if result.auto_approved {
+                AuditEventType::CommandApproval
+            } else {
+                AuditEventType::CommandRejection
+            };
+            let entry = AuditEntry::new(event_type)
+                .with_session(session.id.clone())
+                .with_command(input.tool_name.clone());
+            if let Err(err) = logger.log_entry(entry) {
+                warn!(%err, "audit log write failed (auto_check)");
+            }
+        }
 
         // ── Build response per contract ──────────────────────
         let response = if result.auto_approved {
