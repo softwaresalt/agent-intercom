@@ -17,6 +17,52 @@ pub struct FilePatterns {
     pub read: Vec<String>,
 }
 
+/// Deserialize `chat.tools.terminal.autoApprove` from either:
+/// - A **map** `{ "pattern": true }` or `{ "pattern": { "approve": true, ... } }`
+///   — the format used by VS Code (`.code-workspace`, `.vscode/settings.json`)
+/// - An **array** `["pattern1", "pattern2"]`
+///   — the legacy format (backward compat)
+///
+/// In both cases the result is a `Vec<String>` of pattern strings (map keys or
+/// array elements).
+fn deserialize_auto_approve_commands<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{SeqAccess, MapAccess, Visitor};
+    use std::fmt;
+
+    struct AutoApproveVisitor;
+
+    impl<'de> Visitor<'de> for AutoApproveVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a map or array of command patterns")
+        }
+
+        fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Vec<String>, M::Error> {
+            let mut patterns = Vec::new();
+            while let Some(key) = map.next_key::<String>()? {
+                // Consume (and discard) the value — we only need keys as patterns.
+                map.next_value::<serde_json::Value>()?;
+                patterns.push(key);
+            }
+            Ok(patterns)
+        }
+
+        fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Vec<String>, S::Error> {
+            let mut patterns = Vec::new();
+            while let Some(elem) = seq.next_element::<String>()? {
+                patterns.push(elem);
+            }
+            Ok(patterns)
+        }
+    }
+
+    deserializer.deserialize_any(AutoApproveVisitor)
+}
+
 /// Workspace auto-approve configuration loaded from `.intercom/settings.json`.
 ///
 /// In-memory only — not persisted to `SQLite`.
@@ -28,23 +74,21 @@ pub struct WorkspacePolicy {
     pub enabled: bool,
     /// Shell command patterns that bypass approval (regex).
     ///
-    /// Each entry is a regular expression matched against the full command
-    /// line.  Plain command names (e.g. `"cargo test"`) still work because
-    /// they match themselves literally.  Use anchors (`^…$`) and
-    /// alternation to cover families of commands:
+    /// Accepts the same `chat.tools.terminal.autoApprove` key used by VS Code
+    /// in `.code-workspace` and `.vscode/settings.json`, so a single setting
+    /// is shared across all three files.
     ///
-    /// ```json
-    /// "chat.tools.terminal.autoApprove": [
-    ///   "^cargo (build|test|check|clippy|fmt)(\\s.*)?$"
-    /// ]
-    /// ```
+    /// The value may be either:
+    /// - A **map** `{ "pattern": true }` or `{ "pattern": { "approve": true, "matchCommandLine": true } }`
+    ///   (VS Code / `.code-workspace` native format — preferred)
+    /// - An **array** `["pattern", ...]` (legacy format — still accepted)
     ///
-    /// Accepted JSON keys (in order of preference):
-    /// - `chat.tools.terminal.autoApprove` — shared key with VS Code workspace
-    /// - `auto_approve_commands` — legacy key (still accepted)
+    /// Accepted JSON keys (aliases accepted for backward compat):
+    /// - `chat.tools.terminal.autoApprove` — primary, shared with VS Code
+    /// - `auto_approve_commands` — legacy alias
     /// - `commands` — short alias
-    #[serde(default, alias = "auto_approve_commands", alias = "commands")]
-    #[serde(rename = "chat.tools.terminal.autoApprove")]
+    #[serde(default, deserialize_with = "deserialize_auto_approve_commands")]
+    #[serde(rename = "chat.tools.terminal.autoApprove", alias = "auto_approve_commands", alias = "commands")]
     pub auto_approve_commands: Vec<String>,
     /// MCP tool names that bypass approval.
     #[serde(default)]

@@ -68,21 +68,22 @@ pub fn write_pattern_to_settings(settings_path: &Path, command: &str) -> crate::
 
     let pattern = generate_pattern(command);
 
-    // Write to `chat.tools.terminal.autoApprove` — the unified key shared by
-    // both .intercom/settings.json (MCP evaluator) and *.code-workspace (VS Code).
+    // Write to `chat.tools.terminal.autoApprove` as a map — the same format
+    // used by VS Code in *.code-workspace and .vscode/settings.json.
     let obj = root
         .as_object_mut()
         .ok_or_else(|| crate::AppError::Config("settings root is not an object".into()))?;
     let commands_val = obj
         .entry("chat.tools.terminal.autoApprove")
-        .or_insert_with(|| serde_json::json!([]));
-    let arr = commands_val
-        .as_array_mut()
-        .ok_or_else(|| crate::AppError::Config("chat.tools.terminal.autoApprove is not an array".into()))?;
-    // Avoid duplicates.
-    let pattern_val = serde_json::Value::String(pattern);
-    if !arr.contains(&pattern_val) {
-        arr.push(pattern_val);
+        .or_insert_with(|| serde_json::json!({}));
+    let map = commands_val
+        .as_object_mut()
+        .ok_or_else(|| crate::AppError::Config("chat.tools.terminal.autoApprove is not an object".into()))?;
+    if !map.contains_key(&pattern) {
+        map.insert(
+            pattern,
+            serde_json::json!({ "approve": true, "matchCommandLine": true }),
+        );
     }
 
     // Write back atomically via a temp file in the same directory.
@@ -207,6 +208,71 @@ pub fn write_pattern_to_workspace_file(
     Ok(true)
 }
 
+/// Write `command`'s auto-approve pattern to `.vscode/settings.json` if it exists.
+///
+/// `.vscode/settings.json` is read by VS Code and GitHub Copilot CLI when
+/// running locally without the MCP server.  The pattern is inserted into the
+/// top-level `chat.tools.terminal.autoApprove` map (same key, same regex as
+/// the other files, but as a map entry rather than an array element).
+///
+/// Returns `Ok(true)` if the file was found and updated, `Ok(false)` if the
+/// file does not exist (not an error), or an error if the file exists but
+/// cannot be parsed or written.
+///
+/// # Errors
+///
+/// Returns `crate::AppError` on I/O or JSON parse/serialisation failures.
+pub fn write_pattern_to_vscode_settings(
+    workspace_root: &Path,
+    command: &str,
+) -> crate::Result<bool> {
+    let vscode_path = workspace_root.join(".vscode").join("settings.json");
+    if !vscode_path.exists() {
+        return Ok(false);
+    }
+
+    let raw = std::fs::read_to_string(&vscode_path)
+        .map_err(|e| crate::AppError::Config(format!("read .vscode/settings.json: {e}")))?;
+    let stripped = raw
+        .lines()
+        .map(|line| strip_jsonc_line_comment(line).into_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut root: serde_json::Value = serde_json::from_str(&stripped)
+        .map_err(|e| crate::AppError::Config(format!("parse .vscode/settings.json: {e}")))?;
+
+    let pattern = generate_pattern(command);
+
+    // The autoApprove map is at the top level in .vscode/settings.json
+    // (unlike *.code-workspace where it is nested under "settings").
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| crate::AppError::Config(".vscode/settings.json root is not an object".into()))?;
+    let auto_approve = obj
+        .entry("chat.tools.terminal.autoApprove")
+        .or_insert_with(|| serde_json::json!({}));
+    let map = auto_approve
+        .as_object_mut()
+        .ok_or_else(|| crate::AppError::Config("chat.tools.terminal.autoApprove is not an object".into()))?;
+
+    if !map.contains_key(&pattern) {
+        map.insert(
+            pattern,
+            serde_json::json!({ "approve": true, "matchCommandLine": true }),
+        );
+    }
+
+    let parent = vscode_path.parent().unwrap_or(std::path::Path::new("."));
+    let tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| crate::AppError::Config(format!("create temp file: {e}")))?;
+    serde_json::to_writer_pretty(tmp.as_file(), &root)
+        .map_err(|e| crate::AppError::Config(format!("serialise .vscode/settings.json: {e}")))?;
+    tmp.persist(&vscode_path)
+        .map_err(|e| crate::AppError::Config(format!("persist .vscode/settings.json: {e}")))?;
+
+    Ok(true)
+}
+
 /// Handle an `auto_approve_add` or `auto_approve_dismiss` button click.
 ///
 /// * `auto_approve_add` — writes the pattern to `.intercom/settings.json`
@@ -256,6 +322,13 @@ pub async fn handle_auto_approve_action(
             Ok(true) => info!(user_id, command, "auto-approve pattern added to workspace file"),
             Ok(false) => info!(user_id, command, "no .code-workspace file found; skipping VS Code update"),
             Err(err) => warn!(%err, user_id, command, "failed to update .code-workspace file (non-fatal)"),
+        }
+
+        // Best-effort: also propagate to .vscode/settings.json for Copilot CLI.
+        match write_pattern_to_vscode_settings(workspace_root, command) {
+            Ok(true) => info!(user_id, command, "auto-approve pattern added to .vscode/settings.json"),
+            Ok(false) => info!(user_id, command, "no .vscode/settings.json found; skipping"),
+            Err(err) => warn!(%err, user_id, command, "failed to update .vscode/settings.json (non-fatal)"),
         }
 
         info!(

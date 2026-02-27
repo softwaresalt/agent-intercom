@@ -75,10 +75,10 @@ fn write_pattern_appends_to_existing_settings() {
 }
 
 /// S074 — `write_pattern_to_settings` writes the pattern to
-/// `chat.tools.terminal.autoApprove` (the unified key read by both the MCP
-/// policy evaluator and VS Code Copilot Chat).
+/// `chat.tools.terminal.autoApprove` as a map — matching the format used by
+/// VS Code in `.code-workspace` and `.vscode/settings.json`.
 #[test]
-fn write_pattern_populates_auto_approve_commands_array() {
+fn write_pattern_populates_auto_approve_commands_map() {
     let dir = tempfile::tempdir().expect("tempdir");
     let settings_path = dir.path().join("settings.json");
     command_approve::write_pattern_to_settings(&settings_path, "DEL /F /Q test.txt")
@@ -87,18 +87,18 @@ fn write_pattern_populates_auto_approve_commands_array() {
     let raw = std::fs::read_to_string(&settings_path).expect("read settings");
     let json: serde_json::Value = serde_json::from_str(&raw).expect("parse json");
 
-    let cmds = json
+    let map = json
         .get("chat.tools.terminal.autoApprove")
-        .and_then(|v| v.as_array())
-        .expect("chat.tools.terminal.autoApprove must be an array");
+        .and_then(|v| v.as_object())
+        .expect("chat.tools.terminal.autoApprove must be an object");
     assert!(
-        !cmds.is_empty(),
+        !map.is_empty(),
         "chat.tools.terminal.autoApprove must contain at least one entry"
     );
     let pattern = command_approve::generate_pattern("DEL /F /Q test.txt");
     assert!(
-        cmds.iter().any(|v| v.as_str() == Some(&pattern)),
-        "chat.tools.terminal.autoApprove must contain the generated pattern `{pattern}`; got: {cmds:?}"
+        map.contains_key(&pattern),
+        "chat.tools.terminal.autoApprove must contain the generated pattern `{pattern}` as a key; got: {map:?}"
     );
 }
 
@@ -113,13 +113,13 @@ fn write_pattern_does_not_duplicate_auto_approve_commands() {
     let raw = std::fs::read_to_string(&settings_path).expect("read settings");
     let json: serde_json::Value = serde_json::from_str(&raw).expect("parse json");
 
-    let cmds = json
+    let map = json
         .get("chat.tools.terminal.autoApprove")
-        .and_then(|v| v.as_array())
-        .expect("chat.tools.terminal.autoApprove must be an array");
+        .and_then(|v| v.as_object())
+        .expect("chat.tools.terminal.autoApprove must be an object");
     let pattern = command_approve::generate_pattern("cargo test");
-    let count = cmds.iter().filter(|v| v.as_str() == Some(&pattern)).count();
-    assert_eq!(count, 1, "pattern should appear exactly once, got {count}; entries: {cmds:?}");
+    let count = map.keys().filter(|k| **k == pattern).count();
+    assert_eq!(count, 1, "pattern should appear exactly once as a map key, got {count}; keys: {map:?}");
 }
 
 /// S076 — `write_pattern_to_workspace_file` returns `Ok(false)` when no *.code-workspace exists.
@@ -176,6 +176,71 @@ fn write_pattern_to_workspace_file_does_not_duplicate() {
     let pattern = command_approve::generate_pattern("cargo test");
     let map = json
         .pointer("/settings/chat.tools.terminal.autoApprove")
+        .and_then(|v| v.as_object())
+        .expect("autoApprove must be an object");
+    let count = map.keys().filter(|k| k.as_str() == pattern).count();
+    assert_eq!(count, 1, "pattern key should appear exactly once");
+}
+
+/// S079 — `write_pattern_to_vscode_settings` returns `Ok(false)` when `.vscode/settings.json`
+/// does not exist.
+#[test]
+fn write_pattern_to_vscode_settings_returns_false_when_absent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let result = command_approve::write_pattern_to_vscode_settings(dir.path(), "cargo test")
+        .expect("should not error");
+    assert!(!result, "should return false when .vscode/settings.json is absent");
+}
+
+/// S080 — `write_pattern_to_vscode_settings` writes the pattern into the top-level
+/// `chat.tools.terminal.autoApprove` map when the file exists.
+#[test]
+fn write_pattern_to_vscode_settings_writes_to_auto_approve_map() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vscode_dir = dir.path().join(".vscode");
+    std::fs::create_dir_all(&vscode_dir).expect("create .vscode dir");
+    let settings_path = vscode_dir.join("settings.json");
+    std::fs::write(&settings_path, r#"{"chat.tools.terminal.autoApprove": {}}"#)
+        .expect("create settings.json");
+
+    let found =
+        command_approve::write_pattern_to_vscode_settings(dir.path(), "DEL /F /Q test.txt")
+            .expect("write should succeed");
+    assert!(found, "should return true when .vscode/settings.json exists");
+
+    let raw = std::fs::read_to_string(&settings_path).expect("read settings.json");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("parse settings.json");
+    let pattern = command_approve::generate_pattern("DEL /F /Q test.txt");
+    let map = json
+        .get("chat.tools.terminal.autoApprove")
+        .and_then(|v| v.as_object())
+        .expect("chat.tools.terminal.autoApprove must be an object");
+    assert!(
+        map.contains_key(&pattern),
+        "autoApprove map must contain the pattern `{pattern}`; got keys: {map:?}"
+    );
+}
+
+/// S081 — `write_pattern_to_vscode_settings` does not duplicate patterns.
+#[test]
+fn write_pattern_to_vscode_settings_does_not_duplicate() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vscode_dir = dir.path().join(".vscode");
+    std::fs::create_dir_all(&vscode_dir).expect("create .vscode dir");
+    let settings_path = vscode_dir.join("settings.json");
+    std::fs::write(&settings_path, r#"{"chat.tools.terminal.autoApprove": {}}"#)
+        .expect("create settings.json");
+
+    command_approve::write_pattern_to_vscode_settings(dir.path(), "cargo test")
+        .expect("first write");
+    command_approve::write_pattern_to_vscode_settings(dir.path(), "cargo test")
+        .expect("second write");
+
+    let raw = std::fs::read_to_string(&settings_path).expect("read settings.json");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("parse settings.json");
+    let pattern = command_approve::generate_pattern("cargo test");
+    let map = json
+        .get("chat.tools.terminal.autoApprove")
         .and_then(|v| v.as_object())
         .expect("autoApprove must be an object");
     let count = map.keys().filter(|k| k.as_str() == pattern).count();
