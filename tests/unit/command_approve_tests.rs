@@ -73,3 +73,50 @@ fn write_pattern_appends_to_existing_settings() {
         "second pattern should be present; got: {contents}"
     );
 }
+
+/// S074 — `write_pattern_to_settings` writes the pattern to `auto_approve_commands`
+/// (the array read by the MCP `auto_check` policy evaluator).
+#[test]
+fn write_pattern_populates_auto_approve_commands_array() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let settings_path = dir.path().join("settings.json");
+    command_approve::write_pattern_to_settings(&settings_path, "DEL /F /Q test.txt")
+        .expect("write pattern");
+
+    let raw = std::fs::read_to_string(&settings_path).expect("read settings");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("parse json");
+
+    let cmds = json
+        .get("auto_approve_commands")
+        .and_then(|v| v.as_array())
+        .expect("auto_approve_commands must be an array");
+    assert!(
+        !cmds.is_empty(),
+        "auto_approve_commands must contain at least one entry"
+    );
+    let pattern = command_approve::generate_pattern("DEL /F /Q test.txt");
+    assert!(
+        cmds.iter().any(|v| v.as_str() == Some(&pattern)),
+        "auto_approve_commands must contain the generated pattern `{pattern}`; got: {cmds:?}"
+    );
+}
+
+/// S075 — `write_pattern_to_settings` does not add duplicate entries to `auto_approve_commands`.
+#[test]
+fn write_pattern_does_not_duplicate_auto_approve_commands() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let settings_path = dir.path().join("settings.json");
+    command_approve::write_pattern_to_settings(&settings_path, "cargo test").expect("first write");
+    command_approve::write_pattern_to_settings(&settings_path, "cargo test").expect("second write");
+
+    let raw = std::fs::read_to_string(&settings_path).expect("read settings");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("parse json");
+
+    let cmds = json
+        .get("auto_approve_commands")
+        .and_then(|v| v.as_array())
+        .expect("auto_approve_commands must be an array");
+    let pattern = command_approve::generate_pattern("cargo test");
+    let count = cmds.iter().filter(|v| v.as_str() == Some(&pattern)).count();
+    assert_eq!(count, 1, "pattern should appear exactly once, got {count}; entries: {cmds:?}");
+}

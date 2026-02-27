@@ -46,8 +46,11 @@ pub fn generate_pattern(command: &str) -> String {
 /// Write `command`'s auto-approve pattern to `settings_path`.
 ///
 /// If `settings_path` does not exist it is created with a minimal JSON
-/// skeleton.  If it already exists the pattern is merged into the
-/// `"chat.tools.terminal.autoApprove"` map without removing prior entries.
+/// skeleton.  If it already exists the pattern is merged into **both**:
+/// * `"auto_approve_commands"` — the array read by the MCP `auto_check`
+///   policy evaluator (primary, required for in-session caching).
+/// * `"chat.tools.terminal.autoApprove"` — the VS Code tool-approval map
+///   (secondary, for IDE-level command gating).
 ///
 /// # Errors
 ///
@@ -62,23 +65,42 @@ pub fn write_pattern_to_settings(settings_path: &Path, command: &str) -> crate::
         serde_json::json!({})
     };
 
-    // Ensure the auto-approve map exists.
-    let auto_approve = root
-        .as_object_mut()
-        .ok_or_else(|| crate::AppError::Config("settings root is not an object".into()))?
-        .entry("chat.tools.terminal.autoApprove")
-        .or_insert_with(|| serde_json::json!({}));
-
-    let map = auto_approve
-        .as_object_mut()
-        .ok_or_else(|| crate::AppError::Config("autoApprove is not an object".into()))?;
-
-    // Insert the generated pattern.
     let pattern = generate_pattern(command);
-    map.insert(
-        pattern,
-        serde_json::json!({ "approve": true, "matchCommandLine": true }),
-    );
+
+    {
+        // ── 1. Write to `auto_approve_commands` (MCP evaluator) ──────────────
+        let obj = root
+            .as_object_mut()
+            .ok_or_else(|| crate::AppError::Config("settings root is not an object".into()))?;
+        let commands_val = obj
+            .entry("auto_approve_commands")
+            .or_insert_with(|| serde_json::json!([]));
+        let arr = commands_val
+            .as_array_mut()
+            .ok_or_else(|| crate::AppError::Config("auto_approve_commands is not an array".into()))?;
+        // Avoid duplicates.
+        let pattern_val = serde_json::Value::String(pattern.clone());
+        if !arr.contains(&pattern_val) {
+            arr.push(pattern_val);
+        }
+    }
+
+    {
+        // ── 2. Write to `chat.tools.terminal.autoApprove` (VS Code) ──────────
+        let obj = root
+            .as_object_mut()
+            .ok_or_else(|| crate::AppError::Config("settings root is not an object".into()))?;
+        let auto_approve = obj
+            .entry("chat.tools.terminal.autoApprove")
+            .or_insert_with(|| serde_json::json!({}));
+        let map = auto_approve
+            .as_object_mut()
+            .ok_or_else(|| crate::AppError::Config("autoApprove is not an object".into()))?;
+        map.insert(
+            pattern,
+            serde_json::json!({ "approve": true, "matchCommandLine": true }),
+        );
+    }
 
     // Write back atomically via a temp file in the same directory.
     let parent = settings_path.parent().unwrap_or(std::path::Path::new("."));
