@@ -21,6 +21,8 @@ Pass `--config <path>` to use a different location (default: `config.toml` in th
 | `host_cli` | string | *(required)* | Path or command name for the AI coding agent CLI. Examples: `"copilot"`, `"claude"`, `"/usr/local/bin/gh"`. |
 | `host_cli_args` | array of strings | `[]` | Default arguments passed to `host_cli` when spawning sessions. Typical: `["--stdio"]` for stdio transport or `["--sse"]` for SSE transport. |
 | `retention_days` | integer | `30` | Days to keep terminated session data before automatic purge. Applies to sessions, approvals, prompts, checkpoints, steering messages, and inbox items. |
+
+> **Retention and recovery:** Terminated and interrupted sessions remain in the database for `retention_days`. This means an agent can use `reboot` (recover_state) with a specific `session_id` to reload checkpoints from a prior session — but only within the retention window. After purge, all session data is permanently deleted.
 | `slack_detail_level` | string | `"standard"` | Controls Slack message verbosity. One of `"minimal"`, `"standard"`, or `"verbose"`. See [Detail Levels](#detail-levels). |
 
 ### Detail Levels

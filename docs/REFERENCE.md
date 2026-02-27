@@ -247,13 +247,13 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ### 1.6 `reboot`
 
-**Purpose:** Retrieve the last known state from persistent storage on startup. Called by the agent to check for interrupted sessions or pending requests. **Non-blocking.**
+**Purpose:** Retrieve the last known state from persistent storage on startup. Called by the agent to check for interrupted sessions or pending requests. This is the primary mechanism for carrying context across agent sessions. **Non-blocking.**
 
 **Input Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `session_id` | `string` | No | `null` | Specific session to recover. When omitted, auto-finds the most recently interrupted session. |
+| `session_id` | `string` | No | `null` | Specific session to recover. When omitted, auto-finds the most recently **interrupted** session only. To recover a terminated session from a prior day, the session ID must be provided explicitly. |
 
 **Response (clean):**
 
@@ -282,11 +282,28 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
   },
   "progress_snapshot": [
     { "label": "<string>", "status": "done" | "in_progress" | "pending" }
+  ],
+  "pending_tasks": [
+    {
+      "task_id": "<uuid>",
+      "message": "<string>",
+      "source": "<string>",
+      "created_at": "<ISO 8601>"
+    }
   ]
 }
 ```
 
-Fields `pending_requests`, `last_checkpoint`, and `progress_snapshot` are omitted when empty/absent.
+Fields `pending_requests`, `last_checkpoint`, `progress_snapshot`, and `pending_tasks` are omitted when empty/absent.
+
+**Session ID resolution behavior:**
+
+| `session_id` provided | Resolution |
+|---|---|
+| Yes | Looks up that exact session regardless of status (may be `Terminated`, `Interrupted`, or `Active`). Returns its checkpoints, progress snapshot, and pending items. |
+| No | Queries only for sessions with `status = 'interrupted'`. Normal disconnections set status to `Terminated`, so this auto-discovery path only finds sessions from a server crash or graceful shutdown. |
+
+**Cross-session context recovery:** Agents from a new session can pass a previous session's ID to retrieve its progress snapshot, last checkpoint, and any pending inbox tasks. This is the intended workflow for resuming work across days — the operator obtains the old session ID via `/intercom sessions` or `/intercom session-checkpoints` and provides it to the agent.
 
 ---
 
@@ -488,25 +505,37 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 
 ### 3.4 `session-pause [session_id]`
 
-**Description:** Pause a running session. Defaults to the caller's most recently active session if `session_id` is omitted.
+**Description:** Pause a running session by setting its database status to `Paused`. While paused, subsequent tool calls from the agent are rejected. The MCP transport connection remains open — the agent is connected but idle.
 
-**Authorization:** Must be the session owner.
+**Default target:** Caller's most recently active session if `session_id` is omitted.
+
+**Authorization:** Must be the session owner. Primary agent sessions (owned by `agent:local`) cannot be paused from Slack — only spawned sessions (owned by a Slack user ID) are accessible.
+
+**Important:** This is a database flag change only. It does not suspend the agent process, disconnect the transport, or save any state. The agent may continue attempting tool calls (which will fail) until it detects the paused state.
 
 ---
 
 ### 3.5 `session-resume [session_id]`
 
-**Description:** Resume a paused session. Defaults to the caller's most recently active session if `session_id` is omitted.
+**Description:** Resume a paused session by setting its database status back to `Active`. Tool calls from the agent work again.
+
+**Default target:** Caller's most recently active session if `session_id` is omitted.
 
 **Authorization:** Must be the session owner.
+
+**Limitation: This command cannot resume sessions across agent restarts.** `session-resume` changes a database flag. It does not re-establish a transport connection or re-attach an agent process. If the agent has disconnected (IDE closed, process exited), the session is already `Terminated` and `session-resume` has no effect. To carry context from a terminated session to a new one, use checkpoints and the `reboot` MCP tool.
 
 ---
 
 ### 3.6 `session-clear [session_id]`
 
-**Description:** Terminate and clean up a session. Kills the child process with a 5-second grace period, then force-kills if needed. Defaults to the caller's most recently active session if `session_id` is omitted.
+**Description:** Terminate and clean up a session. For spawned sessions, kills the child process with a 5-second grace period, then force-kills if needed. For primary agent sessions, marks the database record as `Terminated` (the agent's next tool call discovers the termination).
+
+**Default target:** Caller's most recently active session if `session_id` is omitted.
 
 **Authorization:** Must be the session owner.
+
+**Warning:** If only one session is active and you omit the `session_id`, this command targets it regardless of type. Verify the target session with `/intercom sessions` first.
 
 ---
 
@@ -531,7 +560,7 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 
 ### 3.8 `session-restore <checkpoint_id>`
 
-**Description:** Restore a previously created checkpoint. Warns about any files that have diverged since the checkpoint was created.
+**Description:** Load a previously created checkpoint and report file divergences to Slack. This is an **operator diagnostic tool** — it shows you (in Slack) which workspace files have changed since the checkpoint was taken.
 
 **Parameters:**
 
@@ -546,6 +575,8 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 | `Modified` | File content has changed since checkpoint |
 | `Deleted` | File existed at checkpoint time but is now missing |
 | `Added` | File was added after the checkpoint |
+
+**Important:** This command does **not** deliver context to the running agent. The divergence report is posted to Slack for the operator only. To give the agent the checkpoint's session context (progress snapshot, pending items), the agent must call the `reboot` MCP tool with the old session's ID.
 
 ---
 
@@ -1254,10 +1285,29 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 | Function | Description |
 |---|---|
-| `pause_session(id, repo)` | Sets session status to `Paused` |
-| `resume_session(id, repo)` | Sets session status to `Active` |
+| `pause_session(id, repo)` | Sets session status to `Paused` (DB flag only) |
+| `resume_session(id, repo)` | Sets session status to `Active` (DB flag only) |
 | `terminate_session(id, repo, child)` | Terminates session: 5-second grace period for child process, then force-kill. Sets status to `Terminated`. |
 | `resolve_session(id?, user, repo)` | Resolves session by ID or most recently active for user. Validates ownership. |
+
+**Session ownership model:**
+
+| Owner value | Session type | Created by |
+|---|---|---|
+| `agent:local` | Primary agent session | Auto-created by `on_initialized` when an agent connects via MCP (VS Code, Copilot CLI) |
+| Slack user ID (e.g., `U0AEWPEKEQK`) | Spawned session | Created by `spawn_session()` when operator runs `/intercom session-start` |
+
+`resolve_session` checks `session.owner_user_id != user_id` and returns `Unauthorized` on mismatch. This means Slack operators cannot manage primary agent sessions (owned by `agent:local`) and the primary agent cannot manage spawned sessions (owned by a Slack user).
+
+**Session status transitions:**
+
+```
+Created → Active → Paused → Active → ...
+                 ↘ Terminated (disconnect, session-clear, or stale cleanup)
+                 ↘ Interrupted (server shutdown)
+```
+
+*Note:* `pause_session` and `resume_session` are database flag changes only. They do not affect the transport connection, suspend the agent process, or trigger any notification to the agent. The agent discovers the paused state when its next tool call is rejected.
 
 ### 11.2 Spawner
 
@@ -1280,6 +1330,8 @@ Background hourly task purges data older than `retention_days` (default 30). Run
    - stdin: null, stdout: piped, stderr: piped
    - `kill_on_drop(true)`
 7. Activates the session after successful spawn.
+
+> **Known limitation:** The spawned CLI process receives `INTERCOM_MCP_URL` as an environment variable, but the VS Code Copilot CLI reads MCP server URLs from `.vscode/mcp.json` in the workspace — it does not consume the environment variable. This means the spawned agent connects as a new primary connection (Case 2 in §14.2) rather than associating with the pre-created session. The session is still created and the agent still connects; session_id association is the gap.
 
 **Function:** `verify_session_owner(session, user_id)` — Returns `Unauthorized` error if user is not the owner.
 
@@ -1402,11 +1454,25 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 10. Generate random IPC auth token (UUID).
 11. Check for interrupted sessions from prior crash (posts recovery summary to Slack).
 12. Start stdio transport (primary agent connection).
-13. Start HTTP/SSE transport.
+13. Start HTTP transport (Streamable HTTP on `/mcp`).
 14. Log "MCP server ready".
 15. Wait for shutdown signal (Ctrl+C or SIGTERM).
 
-### 14.2 Graceful Shutdown
+### 14.2 Agent Connection Lifecycle
+
+When an agent connects via MCP, the server's `on_initialized` handler runs:
+
+**Case 1 — Spawned agent (pre-created session):**
+The connection carries a `session_id` parameter (set by the spawner). The handler looks up the existing session record and logs the association. No new session is created.
+
+**Case 2 — Primary agent (direct connection):**
+All previously active sessions owned by `agent:local` are terminated (stale cleanup). A new session is created with `owner_user_id = "agent:local"` and status `Active`.
+
+**Stale cleanup rationale:** IDE window reloads, reconnections, and multi-panel configurations can leave orphaned session records. Terminating all stale `agent:local` sessions on each new connection ensures clean state. Spawned sessions (owned by real Slack user IDs) are never affected by stale cleanup.
+
+**Disconnection:** When the transport closes (IDE closed, agent process exited, network drop), the server's `Drop` handler sets the session status to `Terminated` in the database. This is a best-effort async operation — if the Tokio runtime is unavailable (e.g., already shut down), stale cleanup on the next `on_initialized` handles it.
+
+### 14.3 Graceful Shutdown
 
 On shutdown signal:
 
@@ -1418,13 +1484,15 @@ On shutdown signal:
 6. Brief sleep (500ms) to let the Slack queue drain.
 7. Wait for stdio, SSE, and retention task handles to complete.
 
-### 14.3 Startup Recovery
+### 14.4 Startup Recovery
 
-On startup, the server checks for interrupted sessions from a prior crash:
+On startup after a crash or graceful shutdown, the server:
 
 1. Queries all sessions with status `Interrupted`.
 2. Counts pending approvals and prompts across those sessions.
 3. Posts recovery summary to Slack: "🔄 Server restarted. Found N interrupted session(s) with N pending approval(s) and N pending prompt(s). Agents can use `recover_state` to resume."
+
+> **Note on auto-discovery:** The `reboot` MCP tool (when called without a `session_id`) only finds sessions with `status = 'interrupted'`. Sessions terminated by normal disconnection have `status = 'terminated'` and are not auto-discovered. To recover context from a normally terminated session, the agent must pass the specific `session_id` to `reboot`.
 
 ---
 
