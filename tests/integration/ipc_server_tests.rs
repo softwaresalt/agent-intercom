@@ -91,6 +91,7 @@ fn ipc_app_state(
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     })
 }
 

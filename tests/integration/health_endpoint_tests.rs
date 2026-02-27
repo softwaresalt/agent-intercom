@@ -53,6 +53,7 @@ async fn spawn_server() -> (String, CancellationToken) {
             policy_cache: Arc::default(),
             audit_logger: None,
             active_children: Arc::default(),
+            stall_event_tx: None,
         };
         Arc::new(new_state)
     };

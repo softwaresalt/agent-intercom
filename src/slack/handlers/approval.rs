@@ -18,6 +18,7 @@ use crate::mcp::handler::{AppState, ApprovalResponse};
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::slack::blocks;
+use crate::slack::handlers::command_approve;
 
 /// Process a single approval button action from Slack.
 ///
@@ -173,9 +174,12 @@ pub async fn handle_approval_action(
         let msg_ts = message.map(|m| m.origin.ts.clone());
         let chan_id = channel.map(|c| c.id.clone());
 
-        if let (Some(ts), Some(ch)) = (msg_ts, chan_id) {
+        if let (Some(ts), Some(ref ch)) = (&msg_ts, &chan_id) {
             let replacement_blocks = vec![blocks::text_section(&status_text)];
-            if let Err(err) = slack.update_message(ch, ts, replacement_blocks).await {
+            if let Err(err) = slack
+                .update_message(ch.clone(), ts.clone(), replacement_blocks)
+                .await
+            {
                 warn!(%err, request_id, "failed to replace approval buttons");
             }
         } else {
@@ -183,6 +187,31 @@ pub async fn handle_approval_action(
                 request_id,
                 "missing message ts or channel; cannot replace buttons"
             );
+        }
+
+        // ── Auto-approve suggestion (FR-036) ─────────────
+        // After a manual approval, offer the operator a one-click button
+        // to add this command pattern to the workspace auto-approve policy.
+        if status == ApprovalStatus::Approved {
+            if let Some(ref ch) = chan_id {
+                // Lookup the approval record title to use as the command name.
+                let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+                if let Ok(Some(record)) = approval_repo.get_by_id(request_id).await {
+                    let suggestion = command_approve::suggestion_blocks(&record.title);
+                    let msg = crate::slack::client::SlackMessage {
+                        channel: slack_morphism::prelude::SlackChannelId(ch.to_string()),
+                        text: Some(format!(
+                            "\u{1f4a1} Auto-approve suggestion for: {}",
+                            record.title
+                        )),
+                        blocks: Some(suggestion),
+                        thread_ts: None,
+                    };
+                    if let Err(err) = slack.enqueue(msg).await {
+                        warn!(%err, request_id, "failed to post auto-approve suggestion");
+                    }
+                }
+            }
         }
     }
 

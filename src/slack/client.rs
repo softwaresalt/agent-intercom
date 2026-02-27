@@ -407,13 +407,19 @@ impl SlackService {
             .map_err(|err| AppError::Slack(format!("failed to get upload url: {err}")))?;
 
         // Step 2: Upload content to the URL.
+        // Slack requires Content-Type: application/octet-stream for the raw
+        // body upload. We also call error_for_status() to surface HTTP-level
+        // failures (e.g. 400 Bad Request) that .send() alone would succeed on.
         let http_client = reqwest::Client::new();
         http_client
             .post(url_response.upload_url.0.to_string())
+            .header("Content-Type", "application/octet-stream")
             .body(content.to_owned())
             .send()
             .await
-            .map_err(|err| AppError::Slack(format!("failed to upload file: {err}")))?;
+            .map_err(|err| AppError::Slack(format!("failed to send file upload request: {err}")))?
+            .error_for_status()
+            .map_err(|err| AppError::Slack(format!("failed to upload file (http {err})")))?;
 
         // Step 3: Complete the upload.
         let file_ref = SlackApiFilesComplete {

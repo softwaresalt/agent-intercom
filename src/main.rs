@@ -20,6 +20,7 @@ use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
 use agent_intercom::mcp::{sse, transport};
+use agent_intercom::orchestrator::{child_monitor, stall_consumer};
 use agent_intercom::persistence::{db, retention};
 use agent_intercom::slack::client::{SlackRuntime, SlackService};
 use agent_intercom::{AppError, Result};
@@ -161,6 +162,9 @@ async fn run(args: Cli) -> Result<()> {
         }
     };
 
+    // ── Create stall event channel ──────────────────────
+    let (stall_tx, stall_rx) = tokio::sync::mpsc::channel(256);
+
     let state = Arc::new(AppState {
         config: Arc::clone(&config),
         db,
@@ -174,10 +178,42 @@ async fn run(args: Cli) -> Result<()> {
         policy_cache: Arc::default(),
         audit_logger,
         active_children: Arc::default(),
+        stall_event_tx: Some(stall_tx),
     });
 
     // ── Check for interrupted sessions from prior crash (T082) ──
     check_interrupted_on_startup(&state).await;
+
+    // ── Spawn stall event consumer ──────────────────────
+    let _stall_consumer_handle = if let Some(ref slack) = state.slack {
+        let default_channel = state.config.slack.channel_id.clone();
+        Some(stall_consumer::spawn_stall_event_consumer(
+            stall_rx,
+            Arc::clone(slack),
+            default_channel,
+            ct.clone(),
+        ))
+    } else {
+        info!("stall event consumer not started (no slack service)");
+        // Drop the receiver so senders fail fast.
+        drop(stall_rx);
+        None
+    };
+
+    // ── Spawn child process monitor ─────────────────────
+    let _child_monitor_handle = if let Some(ref slack) = state.slack {
+        let default_channel = state.config.slack.channel_id.clone();
+        Some(child_monitor::spawn_child_monitor(
+            Arc::clone(&state.active_children),
+            Arc::clone(slack),
+            default_channel,
+            Arc::clone(&state.db),
+            ct.clone(),
+        ))
+    } else {
+        info!("child process monitor not started (no slack service)");
+        None
+    };
 
     // ── Wire socket mode with the live AppState (T093/T094 fix) ────
     // Start socket mode AFTER AppState is built so the interaction

@@ -60,6 +60,7 @@ async fn spawn_test_server() -> (String, CancellationToken) {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     });
 
     let server_ct = ct.clone();

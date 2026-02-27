@@ -52,6 +52,7 @@ async fn shutdown_state_is_stable_with_no_slack() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     });
 
     // Reaching here without panic confirms no-Slack shutdown path is safe.
@@ -91,6 +92,7 @@ async fn empty_session_list_shutdown_is_noop() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     });
 
     // list_active on an empty DB should return empty Vec without error.

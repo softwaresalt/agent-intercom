@@ -22,7 +22,7 @@ use tracing::{info, info_span, warn};
 use crate::audit::{AuditEntry, AuditEventType, AuditLogger};
 use crate::config::GlobalConfig;
 use crate::models::session::{Session, SessionMode, SessionStatus};
-use crate::orchestrator::stall_detector::StallDetectorHandle;
+use crate::orchestrator::stall_detector::{StallDetectorHandle, StallEvent};
 use crate::persistence::session_repo::SessionRepo;
 use crate::policy::watcher::PolicyCache;
 use crate::slack::client::SlackService;
@@ -106,6 +106,9 @@ pub struct AppState {
     pub audit_logger: Option<Arc<dyn AuditLogger>>,
     /// Live child processes spawned by session-start, keyed by `session_id`.
     pub active_children: ActiveChildren,
+    /// Shared sender for stall events. Each per-session stall detector
+    /// clones from this to emit events into the single consumer task.
+    pub stall_event_tx: Option<tokio::sync::mpsc::Sender<StallEvent>>,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.

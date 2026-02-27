@@ -92,6 +92,7 @@ pub async fn test_app_state(config: GlobalConfig) -> Arc<AppState> {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     })
 }
 
@@ -111,6 +112,7 @@ pub fn test_app_state_with_db(config: GlobalConfig, db: Arc<SqlitePool>) -> Arc<
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     })
 }
 

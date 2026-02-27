@@ -54,6 +54,7 @@ async fn on_initialized_direct_connection_creates_session() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     });
 
     // Direct connection: no session_id_override, no channel_id_override.
@@ -227,6 +228,7 @@ async fn server_constructors_correct_overrides() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        stall_event_tx: None,
     });
 
     // new() — no overrides.
