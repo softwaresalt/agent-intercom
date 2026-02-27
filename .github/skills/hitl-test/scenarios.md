@@ -225,18 +225,20 @@ The operator's expected action is stated in **bold**.
 **Steps:**
 1. Call `check_clearance` with:
    - `title`: `"HITL Test: Critical risk visual check"`
-   - `diff`: `"+# CRITICAL CHANGE — this is a visual test\n"`
+   - `diff`: `"--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n #![forbid(unsafe_code)]\n \n+// CRITICAL CHANGE — this is a visual test\n //! `agent-intercom` — MCP remote agent server binary."`
    - `file_path`: `"src/main.rs"`
    - `description`: `"HITL TEST: Please APPROVE. Verify that this message looks visually different from low-risk proposals AND that the original file content is attached as a Slack file."`
    - `risk_level`: `"critical"`
 2. **Operator action: APPROVE after visually confirming the risk indicator and file attachment**
 3. Call `check_diff` with the returned `request_id`
+4. Verify response `status` is `"applied"` — the diff applied cleanly to `src/main.rs`
+5. Immediately revert the change: use `check_clearance` with a reverse diff to remove the inserted comment line, then `check_diff` to apply
 
-**Expected:** Approved. Operator confirms critical-risk visual treatment AND original file attachment.
+**Expected:** Approved, diff applied successfully. Operator confirms critical-risk visual treatment AND original file attachment. Revert restores original `src/main.rs`.
 
 **Operator validates:**
 - [ ] Message had distinct visual treatment for critical risk (different from Scenario 4's high risk)
-- [ ] Diff preview was rendered correctly
+- [ ] Diff preview was rendered correctly with proper unified diff format
 - [ ] Risk level was clearly communicated
 - [ ] **Original file content** (`src/main.rs`) was attached as a Slack file alongside the diff (FR-046)
 
@@ -432,21 +434,21 @@ The operator's expected action is stated in **bold**.
 
 ## Scenario 21: Terminal Command Gate — Operator Approval + Auto-Approve
 
-**Purpose:** Verify the terminal command approval gate in `auto_check` (`kind: "terminal_command"`). When the command is not already in the auto-approve policy, the server posts a Slack approval prompt and blocks until the operator responds.
+**Purpose:** Verify the terminal command approval gate in `auto_check` (`kind: "terminal_command"`). When a real shell command is not already in the auto-approve policy, the server posts a Slack approval prompt and blocks until the operator responds. This tests actual destructive terminal commands — not MCP tool names.
 
 **Prerequisites:**
-- `.intercom/settings.json` must NOT already contain `"cargo test --workspace"` in `auto_approve_commands`.
-  If it does, temporarily rename the file or remove the entry before running this scenario.
+- `.intercom/settings.json` must NOT already contain a regex matching `"DEL /F /Q tests\\fixtures\\hitl-scratch.txt"` in `auto_approve_commands`.
+  If it does, temporarily remove the entry before running this scenario.
 
 **Steps:**
 1. Call `auto_check` with:
-   - `tool_name`: `"cargo test --workspace"`
+   - `tool_name`: `"DEL /F /Q tests\\fixtures\\hitl-scratch.txt"`
    - `kind`: `"terminal_command"`
    - `context`: `{ "risk_level": "low" }`
 2. Wait for the Slack message to appear (the call blocks until the operator responds)
 3. **Operator action: Observe the Slack message. Confirm:**
    - It shows 🔐 "Terminal command approval requested"
-   - The command `cargo test --workspace` is displayed in a code fence
+   - The command `DEL /F /Q tests\fixtures\hitl-scratch.txt` is displayed in a code fence
    - There are Approve / Reject buttons
 4. **Operator action: Press APPROVE**
 5. Verify the `auto_check` response:
@@ -454,16 +456,18 @@ The operator's expected action is stated in **bold**.
    - `matched_rule` is `"operator:approved"`
 6. **Operator action: Observe whether an "Add to auto-approve?" suggestion appears in Slack**
 7. **Operator action: Press "Add to auto-approve?"** (to test the round-trip)
-8. Use the terminal to verify `.intercom/settings.json` now includes `"cargo test --workspace"` (or a matching regex) in `auto_approve_commands`
+8. Use the terminal to verify `.intercom/settings.json` now includes a pattern matching `DEL` (or a matching regex) in `auto_approve_commands`
 9. Call `auto_check` again with the same arguments:
-   - `tool_name`: `"cargo test --workspace"`
+   - `tool_name`: `"DEL /F /Q tests\\fixtures\\hitl-scratch.txt"`
    - `kind`: `"terminal_command"`
 10. Verify the second call returns **immediately** (no Slack prompt) with `auto_approved: true` (policy hit)
 
 **Expected:** First call blocks for operator approval, returns `auto_approved: true` after acceptance. Auto-approve suggestion appears and operator adds the pattern. Second call resolves instantly from policy without Slack interaction.
 
+**Cleanup:** After the scenario, remove the auto-approve entry for `DEL` from `.intercom/settings.json` to avoid polluting the workspace policy.
+
 **Operator validates:**
-- [ ] Slack message appeared with code fence showing the command
+- [ ] Slack message appeared with code fence showing the DEL command
 - [ ] Approve / Reject buttons were present
 - [ ] Response after approval: `auto_approved: true`, `matched_rule: "operator:approved"`
 - [ ] "Add to auto-approve?" suggestion appeared after approval
@@ -474,32 +478,32 @@ The operator's expected action is stated in **bold**.
 
 ## Scenario 22: Terminal Command Gate — Operator Rejection + Backward Compatibility
 
-**Purpose:** Verify that the operator can reject a terminal command request (returning `auto_approved: false`), and that omitting `kind` or using a non-terminal kind still returns immediately without Slack interaction (backward compatibility).
+**Purpose:** Verify that the operator can reject a destructive terminal command request (returning `auto_approved: false`), and that omitting `kind` or using a non-terminal kind still returns immediately without Slack interaction (backward compatibility). Uses real shell commands, not MCP tool names.
 
 **Steps:**
 1. Call `auto_check` with:
-   - `tool_name`: `"rm -rf /tmp/hitl-test"`
+   - `tool_name`: `"rmdir /S /Q .intercom\\backups"`
    - `kind`: `"terminal_command"`
    - `context`: `{ "risk_level": "high" }`
 2. Wait for the Slack message to appear (the call blocks until the operator responds)
-3. **Operator action: Observe the Slack message and confirm the command is shown in a code fence**
+3. **Operator action: Observe the Slack message and confirm the destructive command is shown in a code fence**
 4. **Operator action: Press REJECT**
 5. Verify the `auto_check` response:
    - `auto_approved` is `false`
    - `matched_rule` is `null` (or absent)
 6. Verify no "Add to auto-approve?" suggestion appears in Slack after the rejection
 7. Call `auto_check` **without** the `kind` field:
-   - `tool_name`: `"rm -rf /tmp/hitl-test"` (same command, no kind)
+   - `tool_name`: `"rmdir /S /Q .intercom\\backups"` (same command, no kind)
 8. Verify this call returns **immediately** with `auto_approved: false` (non-blocking policy check — no Slack interaction)
 9. Call `auto_check` with `kind: "file_operation"`:
-   - `tool_name`: `"delete src/main.rs"`
+   - `tool_name`: `"DEL src\\main.rs"`
    - `kind`: `"file_operation"`
 10. Verify this call also returns **immediately** without Slack interaction (non-terminal kinds bypass the command gate)
 
 **Expected:** Rejection returns `auto_approved: false` with no auto-approve suggestion. Calls without `kind` or with non-terminal kinds are non-blocking and return from policy evaluation immediately.
 
 **Operator validates:**
-- [ ] Slack approval message appeared for the `terminal_command` call and rejection was processed correctly
+- [ ] Slack approval message appeared for the `terminal_command` call showing the rmdir command and rejection was processed correctly
 - [ ] Response after rejection: `auto_approved: false`, `matched_rule: null`
 - [ ] No "Add to auto-approve?" suggestion appeared after rejection
 - [ ] Call without `kind` returned immediately (no Slack prompt)

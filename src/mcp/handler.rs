@@ -356,14 +356,27 @@ impl IntercomServer {
                 name: "auto_check".into(),
                 description: Some(
                     "Query the workspace auto-approve policy to determine whether an \
-                     operation can bypass the remote approval gate."
+                     operation can bypass the remote approval gate. When kind is \
+                     'terminal_command' and the command is not already auto-approved, \
+                     blocks and posts a Slack approval prompt to the operator."
                         .into(),
                 ),
                 input_schema: Self::schema(serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "tool_name": { "type": "string" },
-                        "context": { "type": "object" }
+                        "tool_name": {
+                            "type": "string",
+                            "description": "Name of the tool or shell command to check"
+                        },
+                        "kind": {
+                            "type": "string",
+                            "description": "Operation kind: 'terminal_command' for shell commands (triggers blocking Slack gate when not auto-approved), 'file_operation' for file changes, or omit for standard non-blocking policy check",
+                            "enum": ["terminal_command", "file_operation"]
+                        },
+                        "context": {
+                            "type": "object",
+                            "description": "Optional metadata for fine-grained evaluation (e.g. file_path, risk_level)"
+                        }
                     },
                     "required": ["tool_name"]
                 })),
