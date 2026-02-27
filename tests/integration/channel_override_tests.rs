@@ -63,6 +63,7 @@ async fn test_state() -> Arc<AppState> {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     })
 }
@@ -155,6 +156,7 @@ default_nudge_message = "continue"
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 

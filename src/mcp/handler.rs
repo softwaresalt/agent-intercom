@@ -65,6 +65,15 @@ pub type PendingPrompts = Arc<Mutex<HashMap<String, oneshot::Sender<PromptRespon
 /// Thread-safe map of pending wait-for-instruction `oneshot` senders keyed by `session_id`.
 pub type PendingWaits = Arc<Mutex<HashMap<String, oneshot::Sender<WaitResponse>>>>;
 
+/// Thread-safe map of pending terminal-command approval `request_id`s to their original
+/// command strings.
+///
+/// Populated by the `check_auto_approve` tool when `kind = "terminal_command"` and the
+/// command is not in the workspace auto-approve policy. The approval handler reads this
+/// map to distinguish command approvals (no DB record) from diff approvals (DB record
+/// exists) and to supply the command string for the auto-approve suggestion UI.
+pub type PendingCommandApprovals = Arc<Mutex<HashMap<String, String>>>;
+
 /// Thread-safe map of per-session stall detector handles keyed by `session_id`.
 pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 
@@ -96,6 +105,11 @@ pub struct AppState {
     pub pending_prompts: PendingPrompts,
     /// Pending wait-for-instruction senders keyed by `session_id`.
     pub pending_waits: PendingWaits,
+    /// Pending terminal-command approval `request_id`s → original command strings.
+    ///
+    /// Keyed by `request_id`; used by the Slack approval handler to identify
+    /// command approvals and skip the DB approval record path.
+    pub pending_command_approvals: PendingCommandApprovals,
     /// Cached modal message contexts for FR-022 button replacement.
     pub pending_modal_contexts: PendingModalContexts,
     /// Per-session stall detector handles keyed by `session_id`.

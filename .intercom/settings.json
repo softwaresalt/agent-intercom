@@ -1,6 +1,4 @@
 {
-  "enabled": true,
-
   "auto_approve_commands": [
     "^cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$",
     "^& cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$",
@@ -18,7 +16,25 @@
     "append_to_file",
     "replace_string_in_file"
   ],
-
+  "chat.tools.terminal.autoApprove": {
+    "^HITL Test: Auto\\-approve suggestion check(\\s[^;|&`]*)?$": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  },
+  "enabled": true,
+  "file_patterns": {
+    "read": [
+      "**"
+    ],
+    "write": [
+      "logs/**",
+      "tests/fixtures/**"
+    ]
+  },
+  "log_auto_approved": true,
+  "risk_level_threshold": "high",
+  "summary_interval_seconds": 300,
   "tools": [
     "ping",
     "broadcast",
@@ -29,19 +45,5 @@
     "reboot",
     "switch_freq",
     "standby"
-  ],
-
-  "file_patterns": {
-    "write": [
-      "logs/**",
-      "tests/fixtures/**"
-    ],
-    "read": [
-      "**"
-    ]
-  },
-
-  "risk_level_threshold": "high",
-  "log_auto_approved": true,
-  "summary_interval_seconds": 300
+  ]
 }

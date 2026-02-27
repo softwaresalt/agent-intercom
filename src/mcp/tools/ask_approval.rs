@@ -23,6 +23,23 @@ use crate::slack::client::SlackMessage;
 /// Maximum number of diff lines to render inline in Slack.
 const INLINE_DIFF_THRESHOLD: usize = 20;
 
+/// A curated code excerpt supplied by the agent for operator review.
+///
+/// Snippets are posted as a threaded Slack reply using inline code blocks,
+/// which Slack always renders as readable text (no content-scanner issues).
+#[derive(Debug, serde::Deserialize)]
+struct CodeSnippet {
+    /// Short human-readable label (e.g. `"handle() — main entry point"`).
+    label: String,
+    /// Markdown code-fence language hint (e.g. `"rust"`, `"toml"`).  May be
+    /// empty, in which case the code block is untagged.
+    #[serde(default)]
+    language: String,
+    /// The code content to display.  Truncated server-side if it exceeds
+    /// `SNIPPET_CHAR_LIMIT` characters.
+    content: String,
+}
+
 /// Input parameters for the `ask_approval` tool per mcp-tools.json contract.
 #[derive(Debug, serde::Deserialize)]
 struct AskApprovalInput {
@@ -37,6 +54,16 @@ struct AskApprovalInput {
     /// Risk classification.
     #[serde(default = "default_risk_level")]
     risk_level: RiskLevel,
+    /// Curated code excerpts for inline Slack review.
+    ///
+    /// When provided, the agent identifies the most meaningful sections of
+    /// the affected file (new functions, modified logic, key interfaces)
+    /// and supplies them here.  The server posts these as a threaded Slack
+    /// reply using inline code blocks so the operator can review them
+    /// without opening any attachment.  When omitted, the server falls back
+    /// to uploading the full original file as a Slack file attachment.
+    #[serde(default)]
+    snippets: Vec<CodeSnippet>,
 }
 
 fn default_risk_level() -> RiskLevel {
@@ -170,16 +197,15 @@ pub async fn handle(
             let diff_line_count = input.diff.lines().count();
 
             if diff_line_count >= INLINE_DIFF_THRESHOLD {
-                // Upload large diff as a file snippet.
+                // Upload large diff as a file snippet.  Pass snippet_type
+                // "text" so Slack pre-classifies the file before its content
+                // scanner runs, preventing the "Binary" label.
                 let upload_span = info_span!("slack_upload_diff", request_id = %request_id);
                 async {
+                    let sanitized = input.file_path.replace(['/', '.'], "_");
+                    let filename = format!("{sanitized}.diff.txt");
                     if let Err(err) = slack
-                        .upload_file(
-                            channel.clone(),
-                            &format!("{}.diff", input.file_path.replace('/', "_")),
-                            &input.diff,
-                            None,
-                        )
+                        .upload_file(channel.clone(), &filename, &input.diff, None, Some("text"))
                         .await
                     {
                         warn!(%err, "failed to upload diff snippet to slack");
@@ -189,15 +215,71 @@ pub async fn handle(
                 .await;
             }
 
-            // Upload original file content so the operator can review full
-            // context alongside the diff (T084). Skipped for new files (T085)
-            // or when the file became unreadable after the hash (T086).
-            if let Some(ref original) = original_content {
+            // Post the approval message directly so we can capture the Slack
+            // `ts` for threading snippet replies.
+            let post_span = info_span!("slack_post_approval", request_id = %request_id);
+            let approval_ts: Option<slack_morphism::prelude::SlackTs> = async {
+                let msg = SlackMessage {
+                    channel: channel.clone(),
+                    text: Some(format!("\u{1f4cb} Approval Request: {}", input.title)),
+                    blocks: Some(message_blocks),
+                    thread_ts: None,
+                };
+                match slack.post_message_direct(msg).await {
+                    Ok(ts) => Some(ts),
+                    Err(err) => {
+                        warn!(%err, "failed to post approval message");
+                        None
+                    }
+                }
+            }
+            .instrument(post_span)
+            .await;
+
+            // ── Snippet thread (preferred) or file upload (fallback) ──────
+            //
+            // When the agent supplies curated `snippets`, post them as a
+            // threaded Slack reply.  Inline code blocks in messages always
+            // render as readable text — no content-scanner interference.
+            //
+            // When no snippets are provided, fall back to uploading the full
+            // original file for operator review (T084–T086).
+            if !input.snippets.is_empty() {
+                if let Some(ref ts) = approval_ts {
+                    let snippet_span = info_span!("slack_post_snippets", request_id = %request_id);
+                    async {
+                        let snippet_blocks = blocks::code_snippet_blocks(
+                            &input
+                                .snippets
+                                .iter()
+                                .map(|s| {
+                                    (s.label.as_str(), s.language.as_str(), s.content.as_str())
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                        let msg = SlackMessage {
+                            channel: channel.clone(),
+                            text: Some("Code snippets for review".into()),
+                            blocks: Some(snippet_blocks),
+                            thread_ts: Some(ts.clone()),
+                        };
+                        if let Err(err) = slack.enqueue(msg).await {
+                            warn!(%err, "failed to post snippet thread");
+                        }
+                    }
+                    .instrument(snippet_span)
+                    .await;
+                }
+            } else if let Some(ref original) = original_content {
+                // Fallback: upload the full original file (T084). Skipped for
+                // new files (T085) or unreadable files (T086).
                 let orig_span = info_span!("slack_upload_original", request_id = %request_id);
                 async {
-                    let filename = format!("{}.original", input.file_path.replace('/', "_"));
+                    let sanitized = input.file_path.replace(['/', '.'], "_");
+                    let filename = format!("{sanitized}.original.txt");
+                    let lang = crate::slack::commands::file_extension_language(&input.file_path);
                     if let Err(err) = slack
-                        .upload_file(channel.clone(), &filename, original, None)
+                        .upload_file(channel.clone(), &filename, original, None, Some(lang))
                         .await
                     {
                         warn!(%err, "failed to upload original file to slack");
@@ -206,22 +288,6 @@ pub async fn handle(
                 .instrument(orig_span)
                 .await;
             }
-
-            // Post the message with buttons.
-            let post_span = info_span!("slack_post_approval", request_id = %request_id);
-            async {
-                let msg = SlackMessage {
-                    channel,
-                    text: Some(format!("\u{1f4cb} Approval Request: {}", input.title)),
-                    blocks: Some(message_blocks),
-                    thread_ts: None,
-                };
-                if let Err(err) = slack.enqueue(msg).await {
-                    warn!(%err, "failed to enqueue approval message");
-                }
-            }
-            .instrument(post_span)
-            .await;
         } else {
             warn!("slack not configured; approval request will block without notification");
         }

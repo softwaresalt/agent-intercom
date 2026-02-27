@@ -32,8 +32,9 @@
 #     }
 #   }
 
-# Absolute path to your primary Git workspace root.
-# The MCP agent will operate within this directory.
+# **Absolute path** (NOT relative path) to your primary Git workspace root.
+# The MCP agent will operate within this directory as a default backup.
+# You will likely have more than one workspace/cwd, so you can use any real directory as default.
 default_workspace_root = "/path/to/your/workspace"
 
 # Port for the HTTP/SSE MCP transport endpoint.

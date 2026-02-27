@@ -63,6 +63,82 @@ pub async fn handle_approval_action(
         return Err("user not authorised for approval actions".into());
     }
 
+    // ── Command approval shortcircuit (no DB record) ─────
+    // Terminal command approvals from `check_auto_approve` are registered in
+    // `pending_command_approvals` without a DB `ApprovalRequest` record.
+    // Intercept and handle them here before the DB-backed approval path to
+    // avoid a spurious "no record found" error. No modal is opened for
+    // command rejections — they resolve immediately.
+    {
+        let cmd_guard = state.pending_command_approvals.lock().await;
+        if cmd_guard.contains_key(request_id) {
+            let command = cmd_guard[request_id].clone();
+            drop(cmd_guard);
+
+            let approved = action_id == "approve_accept";
+
+            // Resolve the waiting oneshot in check_auto_approve.
+            {
+                let mut pending = state.pending_approvals.lock().await;
+                if let Some(tx) = pending.remove(request_id) {
+                    let resp_status =
+                        if approved { "approved" } else { "rejected" }.to_owned();
+                    if tx.send(ApprovalResponse { status: resp_status, reason: None }).is_err() {
+                        warn!(request_id, "command approval oneshot receiver already dropped");
+                    }
+                }
+            }
+
+            // Remove from the command map.
+            state.pending_command_approvals.lock().await.remove(request_id);
+
+            // Replace Slack buttons with a static status line (FR-022).
+            if let Some(ref slack) = state.slack {
+                let status_text = if approved {
+                    format!("\u{2705} *Approved* by <@{user_id}>")
+                } else {
+                    format!("\u{274c} *Rejected* by <@{user_id}>")
+                };
+
+                let msg_ts = message.map(|m| m.origin.ts.clone());
+                let chan_id = channel.map(|c| c.id.clone());
+
+                if let (Some(ts), Some(ref ch)) = (&msg_ts, &chan_id) {
+                    let replacement = vec![blocks::text_section(&status_text)];
+                    if let Err(err) = slack.update_message(ch.clone(), ts.clone(), replacement).await
+                    {
+                        warn!(%err, request_id, "failed to replace command approval buttons");
+                    }
+                }
+
+                // Post auto-approve suggestion after acceptance.
+                if approved {
+                    if let Some(ref ch) = chan_id {
+                        let suggestion = command_approve::suggestion_blocks(&command);
+                        let msg = crate::slack::client::SlackMessage {
+                            channel: slack_morphism::prelude::SlackChannelId(ch.to_string()),
+                            text: Some(format!(
+                                "\u{1f4a1} Auto-approve suggestion for: {command}"
+                            )),
+                            blocks: Some(suggestion),
+                            thread_ts: None,
+                        };
+                        if let Err(err) = slack.enqueue(msg).await {
+                            warn!(
+                                %err,
+                                request_id,
+                                "failed to post command auto-approve suggestion"
+                            );
+                        }
+                    }
+                }
+            }
+
+            info!(request_id, approved, user_id, "command approval resolved");
+            return Ok(());
+        }
+    }
+
     // ── Determine status from action_id ──────────────────
     let (status, reason) = if action_id == "approve_accept" {
         (ApprovalStatus::Approved, None::<String>)

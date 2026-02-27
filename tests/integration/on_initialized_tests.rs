@@ -54,6 +54,7 @@ async fn on_initialized_direct_connection_creates_session() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 
@@ -228,6 +229,7 @@ async fn server_constructors_correct_overrides() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 

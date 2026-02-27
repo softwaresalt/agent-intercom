@@ -111,6 +111,57 @@ fn output_denied_has_required_fields() {
     assert!(output["matched_rule"].is_null());
 }
 
+// ─── kind field validation ─────────────────────────────────────────────────
+
+#[test]
+fn input_accepts_kind_terminal_command() {
+    let input = json!({
+        "tool_name": "cargo test",
+        "kind": "terminal_command"
+    });
+    assert!(input.get("tool_name").is_some());
+    assert_eq!(
+        input["kind"].as_str(),
+        Some("terminal_command"),
+        "{TOOL_NAME} should accept kind='terminal_command'"
+    );
+}
+
+#[test]
+fn input_accepts_kind_file_operation() {
+    let input = json!({
+        "tool_name": "write_file",
+        "kind": "file_operation",
+        "context": { "file_path": "src/main.rs" }
+    });
+    assert_eq!(
+        input["kind"].as_str(),
+        Some("file_operation"),
+        "{TOOL_NAME} should accept kind='file_operation'"
+    );
+}
+
+#[test]
+fn input_kind_is_optional() {
+    let input = json!({ "tool_name": "cargo check" });
+    assert!(
+        input.get("kind").is_none(),
+        "{TOOL_NAME}: 'kind' must be optional for backward compatibility"
+    );
+}
+
+#[test]
+fn output_terminal_command_approved_shape() {
+    // When operator approves a terminal command, the response must be the
+    // standard auto_approved=true shape (same contract as policy approval).
+    let output = json!({
+        "auto_approved": true,
+        "matched_rule": "operator:approved"
+    });
+    assert!(output["auto_approved"].as_bool().unwrap_or(false));
+    assert_eq!(output["matched_rule"].as_str(), Some("operator:approved"));
+}
+
 #[test]
 fn output_matched_rule_is_optional() {
     let output = json!({

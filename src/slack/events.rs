@@ -209,6 +209,18 @@ pub async fn handle_interaction(
                         {
                             warn!(%err, action_id, "wait action failed");
                         }
+                    } else if action_id.starts_with("auto_approve_") {
+                        if let Err(err) = handlers::command_approve::handle_auto_approve_action(
+                            action,
+                            &user_id,
+                            block_event.channel.as_ref(),
+                            block_event.message.as_ref(),
+                            app,
+                        )
+                        .await
+                        {
+                            warn!(%err, action_id, "auto-approve action failed");
+                        }
                     } else {
                         warn!(action_id, "unknown action_id prefix");
                     }

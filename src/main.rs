@@ -178,6 +178,7 @@ async fn run(args: Cli) -> Result<()> {
         policy_cache: Arc::default(),
         audit_logger,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: Some(stall_tx),
     });
 

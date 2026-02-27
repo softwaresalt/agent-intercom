@@ -33,6 +33,14 @@ pub struct SlackConfig {
     /// Slack workspace team ID (populated at runtime).
     #[serde(skip)]
     pub team_id: String,
+    /// File extensions that should be uploaded to Slack as markdown-fenced
+    /// `.md` files so that Slack renders them as text instead of "Binary".
+    ///
+    /// Keys are bare extensions (without leading dot, e.g. `rs`, `toml`);
+    /// values are the markdown code-fence language label (e.g. `rust`, `toml`).
+    /// Files whose extension is NOT in this map are uploaded as plain `.txt`.
+    #[serde(default)]
+    pub markdown_upload_extensions: HashMap<String, String>,
 }
 
 impl std::fmt::Debug for SlackConfig {
@@ -42,7 +50,24 @@ impl std::fmt::Debug for SlackConfig {
             .field("app_token", &"[REDACTED]")
             .field("bot_token", &"[REDACTED]")
             .field("team_id", &self.team_id)
+            .field(
+                "markdown_upload_extensions",
+                &self.markdown_upload_extensions,
+            )
             .finish()
+    }
+}
+
+impl SlackConfig {
+    /// Look up the markdown code-fence language label for a file path.
+    ///
+    /// Returns `Some("rust")` for a path ending in `.rs` when `rs = "rust"`
+    /// is present in `[slack.markdown_upload_extensions]`.  Returns `None`
+    /// when the extension is absent from the map (the file should be
+    /// uploaded as plain `.txt` instead).
+    pub fn markdown_fence_label(&self, file_path: &str) -> Option<&str> {
+        let ext = file_path.rsplit('.').next()?;
+        self.markdown_upload_extensions.get(ext).map(String::as_str)
     }
 }
 

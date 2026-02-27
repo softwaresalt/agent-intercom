@@ -282,12 +282,24 @@ Call **before** every destructive file operation (deletion, directory removal) t
 Submit the proposed destructive operation for operator review. This call **blocks** until the operator taps Accept/Reject in Slack or the timeout elapses.
 
 | Parameter     | Type     | Required | Description |
-|---------------|----------|----------|-------------|
+|---------------|----------|----------|---------------------------------------------------------------------------------------|
 | `title`       | `string` | yes      | Concise summary of the proposed change |
 | `diff`        | `string` | yes      | Standard unified diff or full file content |
 | `file_path`   | `string` | yes      | Target file path relative to workspace root |
 | `description` | `string` | no       | Additional context about the change |
 | `risk_level`  | `string` | no       | `low` (default), `high`, or `critical` |
+| `snippets`    | `array`  | no       | Curated code excerpts for inline Slack review (see below) |
+
+**`snippets` array** — each element has:
+- `label` (string, required) — short human-readable title, e.g. `"handle() — main entry point"`
+- `language` (string, optional) — markdown code-fence language, e.g. `"rust"`, `"toml"`
+- `content` (string, required) — the code to display (server truncates at 2,600 chars)
+
+When `snippets` is provided, the server posts them as a **threaded Slack message** using inline code blocks, which Slack always renders as readable text. This is the preferred approach for all `check_clearance` calls: curate the 1–4 most meaningful sections of the affected file (changed functions, modified public APIs, key callers) rather than relying on the server to upload the whole file. See the build-feature skill for full curation guidance.
+
+Two key conventions apply to every snippet:
+- **Function-boundary scoping**: each snippet must span one complete function or method — from its signature to its closing delimiter. Never include a partial function even if only one line changed.
+- **Changed-line annotation**: Slack code blocks render all content as literal text (`**bold**` becomes asterisks). Annotate changed lines with inline comments instead: `// ← new`, `// ← modified`, `// ← deleted` (or `#`, `--`, `<!-- -->` for Python/SQL/HTML respectively).
 
 **Response:** `{ "status": "approved" | "rejected" | "timeout", "request_id": "...", "reason": "..." }`
 

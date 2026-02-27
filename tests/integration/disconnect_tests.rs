@@ -54,6 +54,7 @@ async fn drop_marks_direct_session_terminated() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 
@@ -120,6 +121,7 @@ async fn drop_spawned_server_does_not_terminate_session() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 
@@ -182,6 +184,7 @@ async fn drop_fresh_server_with_no_session_is_noop() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 

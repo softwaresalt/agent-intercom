@@ -63,7 +63,7 @@ When agent-intercom is active, file creation and modification may proceed with d
 Before deleting a file, removing a directory, or performing any other destructive filesystem operation, route the change through the approval workflow:
 
 1. **`auto_check`** — Call with `tool_name` set to the destructive action (e.g., `"delete_file"`, `"remove_directory"`) and `context: { "file_path": "<relative_path>", "risk_level": "<low|high|critical>" }`. If `auto_approved: true`, execute the operation directly and skip steps 2–3.
-2. **`check_clearance`** — Submit the proposal with a `title` describing the deletion, `diff` listing the files or directories to be removed, `file_path`, `description`, and appropriate `risk_level`. This call **blocks** until the operator responds.
+2. **`check_clearance`** — Submit the proposal with a `title` describing the deletion, `diff` listing the files or directories to be removed, `file_path`, `description`, appropriate `risk_level`, and curated `snippets` (see Curating Code Snippets below). This call **blocks** until the operator responds.
 3. **`check_diff`** — After receiving `status: "approved"`, call with the returned `request_id` to execute the deletion.
 
 Response handling:
@@ -85,6 +85,79 @@ File creation, modification, and all other non-destructive filesystem writes pro
 * Include the unified diff for modifications or the full file content for new files in the broadcast message body so the operator can follow changes in real time.
 
 These broadcasts are non-blocking and do not require operator response.
+
+#### Curating Code Snippets for Operator Review
+
+When calling `check_clearance`, always populate the **`snippets`** array with the most meaningful excerpts from the file being reviewed. The Slack UI renders snippets as inline, syntax-highlighted code blocks, giving the operator an immediately readable view without needing to open any attachment. Uploading the full file is a server-side fallback for when `snippets` is omitted — avoid it, because Slack desktop labels complex source files as "Binary".
+
+**What to include in `snippets`:**
+
+| Priority | Include when… | Example label |
+|---|---|---|
+| **Always** | The diff changes an existing function or method | `"handle() — main MCP tool entry point"` |
+| **Always** | A public API signature changes (fn, struct, trait) | `"ApprovalRequest struct — field layout"` |
+| **High** | Security-relevant code in scope of the change | `"path_safety::validate_path — traversal check"` |
+| **High** | The surrounding context needed to understand the diff | `"fn build_approval_blocks — full context"` |
+| **Optional** | Important callers of the changed code | `"SlackService::enqueue — caller site"` |
+| **Skip** | Boilerplate, derives, trivial getters, auto-generated code | — |
+
+**Snippet curation algorithm:**
+
+1. Read the target file before writing your change.
+2. Identify the chunk(s) you are modifying (functions, structs, trait impls).
+3. For each chunk: extract the complete item — from its `pub`/`fn`/`struct`/`impl` line to its closing `}` — not just the changed lines. Context is what makes a diff reviewable.
+4. Limit each snippet to the natural boundary of the item (don't truncate mid-function). The server truncates at 2,600 chars with a visible notice if a snippet is too long.
+5. Supply 1–4 snippets per approval. More than 4 risks overwhelming the operator; fewer than 1 defeats the purpose.
+6. Set `language` to the markdown code-fence label matching the file extension (e.g. `"rust"`, `"toml"`, `"typescript"`). Use `file_extension_language` conventions: `.rs` → `rust`, `.toml` → `toml`, `.json` → `json`, `.ts` → `typescript`, `.py` → `python`, etc.
+
+**Function-boundary scoping rule:**
+
+Each snippet must span *one complete function or method* — from its signature (including `pub`, `async`, generics) to its closing delimiter. If a change touches a single line inside a 30-line function, include all 30 lines. Never submit a snippet that starts or ends mid-function: the operator needs the full call site to reason about correctness, not a decontextualized fragment.
+
+**Highlighting changed lines:**
+
+Slack renders content inside backtick code fences (` ``` `) as literal preformatted text — no inline markdown is processed. `**bold**` and `_italic_` appear as literal asterisks and underscores. The only viable way to mark changed lines is to append an inline comment after each one:
+
+| Change type | Annotation |
+|---|---|
+| Modified line | `// ← modified` |
+| New line | `// ← new` |
+| Deleted line | `// ← deleted` |
+
+Use the comment prefix for the target language:
+
+| Languages | Comment syntax |
+|---|---|
+| Rust, Go, Java, JS, TS, C, C++ | `//` |
+| Python, Ruby, YAML, Shell | `#` |
+| SQL, Lua | `--` |
+| HTML, XML | `<!-- -->` |
+
+Apply the annotation to every line that differs from the pre-change version of the function. Leave unchanged lines unannotated. A line already longer than ~90 characters may have the comment on the next line as a standalone remark (not standard practice — prefer one-line annotations).
+
+**Example `check_clearance` call with snippets:**
+
+```json
+{
+  "title": "Add retry_count field to ApprovalRequest",
+  "diff": "--- a/src/models/approval.rs\n+++ b/src/models/approval.rs\n@@ -12,6 +12,7 @@ pub struct ApprovalRequest {\n     pub request_id: String,\n     pub file_path: String,\n     pub diff: String,\n+    pub retry_count: u32,\n     pub status: ApprovalStatus,\n }",
+  "file_path": "src/models/approval.rs",
+  "description": "Adds retry_count to track how many times a request has been resubmitted after a patch conflict.",
+  "risk_level": "low",
+  "snippets": [
+    {
+      "label": "ApprovalRequest struct — field layout after change",
+      "language": "rust",
+      "content": "pub struct ApprovalRequest {\n    pub request_id: String,\n    pub file_path: String,\n    pub diff: String,\n    pub retry_count: u32,  // ← new\n    pub status: ApprovalStatus,\n    pub created_at: DateTime<Utc>,\n    pub resolved_at: Option<DateTime<Utc>>,\n}"
+    },
+    {
+      "label": "ApprovalRequest::new() — constructor updated to initialise retry_count",
+      "language": "rust",
+      "content": "impl ApprovalRequest {\n    pub fn new(request_id: String, file_path: String, diff: String) -> Self {\n        Self {\n            request_id,\n            file_path,\n            diff,\n            retry_count: 0,  // ← new\n            status: ApprovalStatus::Pending,\n            created_at: Utc::now(),\n            resolved_at: None,\n        }\n    }\n}"
+    }
+  ]
+}
+```
 
 ## Quick Start
 

@@ -553,7 +553,7 @@ async fn handle_show_file(
                 .file_name()
                 .map_or("file.txt".to_owned(), |n| n.to_string_lossy().to_string());
             slack
-                .upload_file(channel, &filename, &content, None)
+                .upload_file(channel, &filename, &content, None, Some(lang))
                 .await?;
             Ok(format!(
                 "File `{}` uploaded as snippet.",

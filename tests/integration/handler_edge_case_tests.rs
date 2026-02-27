@@ -66,6 +66,7 @@ async fn stall_detector_reset_works() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 
@@ -342,6 +343,7 @@ async fn ipc_auth_some_means_enabled() {
         policy_cache: Arc::default(),
         audit_logger: None,
         active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
         stall_event_tx: None,
     });
 
