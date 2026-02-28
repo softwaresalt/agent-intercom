@@ -22,7 +22,10 @@ fn clean_response_always_has_pending_tasks_field() {
         .get("pending_tasks")
         .and_then(Value::as_array)
         .expect("pending_tasks must always be present, even when empty");
-    assert!(tasks.is_empty(), "pending_tasks must be empty when no inbox items exist");
+    assert!(
+        tasks.is_empty(),
+        "pending_tasks must be empty when no inbox items exist"
+    );
 }
 
 // ─── S016: recovered with tasks — pending_tasks array present ────────

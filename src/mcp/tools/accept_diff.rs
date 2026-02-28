@@ -198,10 +198,7 @@ pub async fn handle(
         // Guard: reject non-unified content for existing non-empty files.
         // write_full_file is intentional only for new/empty file creation.
         if !is_unified_diff {
-            let existing_size = validated_path
-                .metadata()
-                .map(|m| m.len())
-                .unwrap_or(0);
+            let existing_size = validated_path.metadata().map(|m| m.len()).unwrap_or(0);
             if existing_size > 0 {
                 return Ok(error_result(
                     "invalid_diff",

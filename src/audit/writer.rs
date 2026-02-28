@@ -38,7 +38,7 @@ impl JsonlAuditWriter {
     /// Returns [`crate::AppError::Config`] if the directory cannot be created.
     pub fn new(log_dir: PathBuf) -> crate::Result<Self> {
         fs::create_dir_all(&log_dir).map_err(|e| {
-            crate::AppError::Config(format!(
+            crate::AppError::Io(format!(
                 "failed to create audit log directory {}: {e}",
                 log_dir.display()
             ))
@@ -57,7 +57,7 @@ impl JsonlAuditWriter {
             .append(true)
             .open(&path)
             .map_err(|e| {
-                crate::AppError::Config(format!("failed to open audit log {}: {e}", path.display()))
+                crate::AppError::Io(format!("failed to open audit log {}: {e}", path.display()))
             })?;
         Ok(BufWriter::new(file))
     }
@@ -70,7 +70,7 @@ impl AuditLogger for JsonlAuditWriter {
         let mut guard = self
             .state
             .lock()
-            .map_err(|_| crate::AppError::Config("audit writer mutex poisoned".to_string()))?;
+            .map_err(|_| crate::AppError::Io("audit writer mutex poisoned".to_string()))?;
 
         let needs_rotation = guard.as_ref().is_none_or(|s| s.current_date != today);
 
@@ -84,15 +84,15 @@ impl AuditLogger for JsonlAuditWriter {
 
         if let Some(state) = guard.as_mut() {
             let line = serde_json::to_string(&entry).map_err(|e| {
-                crate::AppError::Config(format!("failed to serialize audit entry: {e}"))
+                crate::AppError::Io(format!("failed to serialize audit entry: {e}"))
             })?;
             if let Err(e) = writeln!(state.writer, "{line}") {
                 warn!("failed to write audit log entry: {e}");
-                return Err(crate::AppError::Config(format!("audit write failed: {e}")));
+                return Err(crate::AppError::Io(format!("audit write failed: {e}")));
             }
             if let Err(e) = state.writer.flush() {
                 warn!("failed to flush audit log: {e}");
-                return Err(crate::AppError::Config(format!("audit flush failed: {e}")));
+                return Err(crate::AppError::Io(format!("audit flush failed: {e}")));
             }
         }
 

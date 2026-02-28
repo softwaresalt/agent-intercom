@@ -32,6 +32,8 @@ pub enum AppError {
     Unauthorized(String),
     /// Approval or prompt has already been consumed.
     AlreadyConsumed(String),
+    /// File-system or I/O operation failure.
+    Io(String),
 }
 
 impl Display for AppError {
@@ -49,6 +51,7 @@ impl Display for AppError {
             Self::NotFound(msg) => write!(f, "not found: {msg}"),
             Self::Unauthorized(msg) => write!(f, "unauthorized: {msg}"),
             Self::AlreadyConsumed(msg) => write!(f, "already consumed: {msg}"),
+            Self::Io(msg) => write!(f, "io: {msg}"),
         }
     }
 }

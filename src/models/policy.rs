@@ -29,7 +29,7 @@ fn deserialize_auto_approve_commands<'de, D>(deserializer: D) -> Result<Vec<Stri
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de::{SeqAccess, MapAccess, Visitor};
+    use serde::de::{MapAccess, SeqAccess, Visitor};
     use std::fmt;
 
     struct AutoApproveVisitor;
@@ -88,7 +88,11 @@ pub struct WorkspacePolicy {
     /// - `auto_approve_commands` — legacy alias
     /// - `commands` — short alias
     #[serde(default, deserialize_with = "deserialize_auto_approve_commands")]
-    #[serde(rename = "chat.tools.terminal.autoApprove", alias = "auto_approve_commands", alias = "commands")]
+    #[serde(
+        rename = "chat.tools.terminal.autoApprove",
+        alias = "auto_approve_commands",
+        alias = "commands"
+    )]
     pub auto_approve_commands: Vec<String>,
     /// MCP tool names that bypass approval.
     #[serde(default)]

@@ -195,6 +195,21 @@ pub async fn handle(
                                 serde_json::Value::Null
                             },
                         });
+                        // Audit-log the operator decision (RI-06).
+                        if let Some(ref logger) = state.audit_logger {
+                            let event_type = if approved {
+                                AuditEventType::CommandApproval
+                            } else {
+                                AuditEventType::CommandRejection
+                            };
+                            let entry = AuditEntry::new(event_type)
+                                .with_session(session.id.clone())
+                                .with_command(input.tool_name.clone())
+                                .with_request_id(request_id.clone());
+                            if let Err(err) = logger.log_entry(entry) {
+                                warn!(%err, "audit log write failed (terminal command gate)");
+                            }
+                        }
                         return Ok(CallToolResult::success(vec![
                             rmcp::model::Content::json(terminal_response)?,
                         ]));
@@ -207,7 +222,15 @@ pub async fn handle(
                     );
                 }
             }
-            // Slack unavailable or enqueue failed — return deny.
+            // Slack unavailable or enqueue failed — audit and return deny.
+            if let Some(ref logger) = state.audit_logger {
+                let entry = AuditEntry::new(AuditEventType::CommandRejection)
+                    .with_session(session.id.clone())
+                    .with_command(input.tool_name.clone());
+                if let Err(err) = logger.log_entry(entry) {
+                    warn!(%err, "audit log write failed (terminal command gate, Slack unavailable)");
+                }
+            }
             return Ok(CallToolResult::success(vec![rmcp::model::Content::json(
                 serde_json::json!({ "auto_approved": false, "matched_rule": null }),
             )?]));

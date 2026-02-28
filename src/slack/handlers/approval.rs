@@ -81,16 +81,28 @@ pub async fn handle_approval_action(
             {
                 let mut pending = state.pending_approvals.lock().await;
                 if let Some(tx) = pending.remove(request_id) {
-                    let resp_status =
-                        if approved { "approved" } else { "rejected" }.to_owned();
-                    if tx.send(ApprovalResponse { status: resp_status, reason: None }).is_err() {
-                        warn!(request_id, "command approval oneshot receiver already dropped");
+                    let resp_status = if approved { "approved" } else { "rejected" }.to_owned();
+                    if tx
+                        .send(ApprovalResponse {
+                            status: resp_status,
+                            reason: None,
+                        })
+                        .is_err()
+                    {
+                        warn!(
+                            request_id,
+                            "command approval oneshot receiver already dropped"
+                        );
                     }
                 }
             }
 
             // Remove from the command map.
-            state.pending_command_approvals.lock().await.remove(request_id);
+            state
+                .pending_command_approvals
+                .lock()
+                .await
+                .remove(request_id);
 
             // Replace Slack buttons with a static status line (FR-022).
             if let Some(ref slack) = state.slack {
@@ -105,7 +117,9 @@ pub async fn handle_approval_action(
 
                 if let (Some(ts), Some(ref ch)) = (&msg_ts, &chan_id) {
                     let replacement = vec![blocks::text_section(&status_text)];
-                    if let Err(err) = slack.update_message(ch.clone(), ts.clone(), replacement).await
+                    if let Err(err) = slack
+                        .update_message(ch.clone(), ts.clone(), replacement)
+                        .await
                     {
                         warn!(%err, request_id, "failed to replace command approval buttons");
                     }
@@ -117,9 +131,7 @@ pub async fn handle_approval_action(
                         let suggestion = command_approve::suggestion_blocks(&command);
                         let msg = crate::slack::client::SlackMessage {
                             channel: slack_morphism::prelude::SlackChannelId(ch.to_string()),
-                            text: Some(format!(
-                                "\u{1f4a1} Auto-approve suggestion for: {command}"
-                            )),
+                            text: Some(format!("\u{1f4a1} Auto-approve suggestion for: {command}")),
                             blocks: Some(suggestion),
                             thread_ts: None,
                         };

@@ -206,11 +206,17 @@ fn apply_patch_deletes_file_when_all_content_removed() {
 -line2
 ";
 
-    let summary =
-        apply_patch(&PathBuf::from("to_delete.txt"), patch, ws.path()).expect("apply should succeed");
+    let summary = apply_patch(&PathBuf::from("to_delete.txt"), patch, ws.path())
+        .expect("apply should succeed");
 
-    assert_eq!(summary.bytes_written, 0, "bytes_written should be 0 for deletion");
-    assert!(!target.exists(), "file should be deleted from disk when all content is removed");
+    assert_eq!(
+        summary.bytes_written, 0,
+        "bytes_written should be 0 for deletion"
+    );
+    assert!(
+        !target.exists(),
+        "file should be deleted from disk when all content is removed"
+    );
 }
 
 // ─── apply_patch: CRLF line-ending handling ───────────────────────────
@@ -242,7 +248,10 @@ fn apply_patch_succeeds_on_crlf_file_with_lf_patch() {
     // The inserted line should be present.
     assert!(result.contains("added line"), "inserted line should exist");
     // Output should preserve CRLF endings to avoid corrupting Windows source files.
-    assert!(result.contains("\r\n"), "output should preserve CRLF line endings");
+    assert!(
+        result.contains("\r\n"),
+        "output should preserve CRLF line endings"
+    );
     // Sanity: no bare LF should remain (every \n should be preceded by \r).
     for (i, b) in result.as_bytes().iter().enumerate() {
         if *b == b'\n' {
@@ -271,11 +280,13 @@ fn apply_patch_preserves_lf_on_lf_file() {
  fn bar() {}
 ";
 
-    apply_patch(&PathBuf::from("lf.rs"), patch, ws.path())
-        .expect("LF file should patch cleanly");
+    apply_patch(&PathBuf::from("lf.rs"), patch, ws.path()).expect("LF file should patch cleanly");
 
     let result = fs::read_to_string(&target).expect("read back");
-    assert!(result.contains("baz"), "inserted function should be present");
+    assert!(
+        result.contains("baz"),
+        "inserted function should be present"
+    );
     // No CRLF should appear in a pure-LF file.
     assert!(
         !result.contains("\r\n"),
@@ -299,5 +310,8 @@ fn apply_patch_crlf_diff_against_crlf_file() {
 
     let result = fs::read_to_string(&target).expect("read back");
     assert!(result.contains("BETA"), "substitution should be applied");
-    assert!(result.contains("\r\n"), "CRLF should be preserved in output");
+    assert!(
+        result.contains("\r\n"),
+        "CRLF should be preserved in output"
+    );
 }

@@ -44,6 +44,7 @@ pub async fn store_from_slack(
     // the channel context. For now, if only one active session exists use it;
     // if multiple exist, use any — routing by channel_id is handled at the
     // `fetch_unconsumed` level via session_id scoping.
+    // TODO(005): Filter sessions by channel_id when multi-session channel routing is available.
     let session = sessions.into_iter().next().ok_or_else(|| {
         crate::AppError::Config("no active session to steer — start a session first".into())
     })?;
@@ -138,14 +139,18 @@ pub async fn ingest_app_mention(text: &str, channel_id: &str, state: &Arc<AppSta
 }
 
 /// Strip `<@UXXXXX>` mention tokens from the start of a string.
+///
+/// Uses [`str::split_once`] to avoid byte-offset arithmetic that could
+/// accidentally split a multi-byte UTF-8 sequence.
 fn strip_mention(text: &str) -> &str {
     let trimmed = text.trim_start();
-    if let Some(rest) = trimmed.strip_prefix('<') {
-        if let Some(end) = rest.find('>') {
-            return trimmed[end + 2..].trim_start(); // skip '<@UXXXXX>' and trailing space
-        }
+    if trimmed.starts_with("<@") {
+        trimmed
+            .split_once('>')
+            .map_or(trimmed, |(_, rest)| rest.trim_start())
+    } else {
+        trimmed
     }
-    trimmed
 }
 
 #[cfg(test)]

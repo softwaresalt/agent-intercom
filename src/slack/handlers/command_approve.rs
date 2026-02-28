@@ -53,9 +53,26 @@ pub fn generate_pattern(command: &str) -> String {
     /// Commands that dispatch through a subcommand (the second token carries
     /// semantic meaning and should be included in the anchor).
     const MULTI_LEVEL_COMMANDS: &[&str] = &[
-        "cargo", "git", "npm", "npx", "yarn", "pnpm", "dotnet", "docker",
-        "kubectl", "az", "aws", "gcloud", "pwsh", "powershell", "pip",
-        "python", "python3", "node", "deno", "rustup",
+        "cargo",
+        "git",
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "dotnet",
+        "docker",
+        "kubectl",
+        "az",
+        "aws",
+        "gcloud",
+        "pwsh",
+        "powershell",
+        "pip",
+        "python",
+        "python3",
+        "node",
+        "deno",
+        "rustup",
     ];
 
     let tokens: Vec<&str> = command.split_whitespace().collect();
@@ -111,9 +128,9 @@ pub fn write_pattern_to_settings(settings_path: &Path, command: &str) -> crate::
     let commands_val = obj
         .entry("chat.tools.terminal.autoApprove")
         .or_insert_with(|| serde_json::json!({}));
-    let map = commands_val
-        .as_object_mut()
-        .ok_or_else(|| crate::AppError::Config("chat.tools.terminal.autoApprove is not an object".into()))?;
+    let map = commands_val.as_object_mut().ok_or_else(|| {
+        crate::AppError::Config("chat.tools.terminal.autoApprove is not an object".into())
+    })?;
     if !map.contains_key(&pattern) {
         map.insert(
             pattern,
@@ -183,7 +200,7 @@ pub fn write_pattern_to_workspace_file(
 ) -> crate::Result<bool> {
     // Find the first *.code-workspace file in the workspace root (not recursive).
     let workspace_file = std::fs::read_dir(workspace_root)
-        .map_err(|e| crate::AppError::Config(format!("read workspace root: {e}")))?  
+        .map_err(|e| crate::AppError::Config(format!("read workspace root: {e}")))?
         .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .find(|p| p.extension().and_then(|s| s.to_str()) == Some("code-workspace"));
@@ -223,13 +240,15 @@ pub fn write_pattern_to_workspace_file(
         .as_object_mut()
         .ok_or_else(|| crate::AppError::Config("autoApprove is not an object".into()))?;
 
-    // Insert only if not already present.
-    if !map.contains_key(&pattern) {
-        map.insert(
-            pattern,
-            serde_json::json!({ "approve": true, "matchCommandLine": true }),
-        );
+    // Early return if pattern already present — skips the full file rewrite
+    // and preserves any user-maintained JSONC comments in the workspace file.
+    if map.contains_key(&pattern) {
+        return Ok(true);
     }
+    map.insert(
+        pattern,
+        serde_json::json!({ "approve": true, "matchCommandLine": true }),
+    );
 
     // Write back atomically.
     let parent = ws_path.parent().unwrap_or(std::path::Path::new("."));
@@ -280,22 +299,25 @@ pub fn write_pattern_to_vscode_settings(
 
     // The autoApprove map is at the top level in .vscode/settings.json
     // (unlike *.code-workspace where it is nested under "settings").
-    let obj = root
-        .as_object_mut()
-        .ok_or_else(|| crate::AppError::Config(".vscode/settings.json root is not an object".into()))?;
+    let obj = root.as_object_mut().ok_or_else(|| {
+        crate::AppError::Config(".vscode/settings.json root is not an object".into())
+    })?;
     let auto_approve = obj
         .entry("chat.tools.terminal.autoApprove")
         .or_insert_with(|| serde_json::json!({}));
-    let map = auto_approve
-        .as_object_mut()
-        .ok_or_else(|| crate::AppError::Config("chat.tools.terminal.autoApprove is not an object".into()))?;
+    let map = auto_approve.as_object_mut().ok_or_else(|| {
+        crate::AppError::Config("chat.tools.terminal.autoApprove is not an object".into())
+    })?;
 
-    if !map.contains_key(&pattern) {
-        map.insert(
-            pattern,
-            serde_json::json!({ "approve": true, "matchCommandLine": true }),
-        );
+    // Early return if pattern already present — skips the full file rewrite
+    // and preserves any user-maintained JSONC comments in the settings file.
+    if map.contains_key(&pattern) {
+        return Ok(true);
     }
+    map.insert(
+        pattern,
+        serde_json::json!({ "approve": true, "matchCommandLine": true }),
+    );
 
     let parent = vscode_path.parent().unwrap_or(std::path::Path::new("."));
     let tmp = tempfile::NamedTempFile::new_in(parent)
@@ -341,29 +363,65 @@ pub async fn handle_auto_approve_action(
             .join(".intercom")
             .join("settings.json");
 
-        // Ensure the parent directory exists.
-        if let Some(parent) = settings_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create .intercom dir: {e}"))?;
-        }
-
-        write_pattern_to_settings(&settings_path, command)
-            .map_err(|e| format!("failed to write auto-approve pattern: {e}"))?;
+        // Write .intercom/settings.json via spawn_blocking — sync I/O must not
+        // block the Tokio async executor (consistent with keyring credential lookups).
+        let settings_path_owned = settings_path.clone();
+        let command_for_settings = command.to_owned();
+        tokio::task::spawn_blocking(move || {
+            if let Some(parent) = settings_path_owned.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("failed to create .intercom dir: {e}"))?;
+            }
+            write_pattern_to_settings(&settings_path_owned, &command_for_settings)
+                .map_err(|e| format!("failed to write auto-approve pattern: {e}"))
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking join error (settings write): {e}"))??;
 
         // Best-effort: also write to the VS Code *.code-workspace file so the
         // rule is active for local Copilot Chat sessions without manual editing.
-        let workspace_root = state.config.default_workspace_root();
-        match write_pattern_to_workspace_file(workspace_root, command) {
-            Ok(true) => info!(user_id, command, "auto-approve pattern added to workspace file"),
-            Ok(false) => info!(user_id, command, "no .code-workspace file found; skipping VS Code update"),
-            Err(err) => warn!(%err, user_id, command, "failed to update .code-workspace file (non-fatal)"),
+        let workspace_root_buf = state.config.default_workspace_root().to_path_buf();
+        let command_for_ws = command.to_owned();
+        match tokio::task::spawn_blocking(move || {
+            write_pattern_to_workspace_file(&workspace_root_buf, &command_for_ws)
+        })
+        .await
+        {
+            Err(e) => {
+                warn!(%e, user_id, command, "spawn_blocking join error for workspace file (non-fatal)")
+            }
+            Ok(Ok(true)) => info!(
+                user_id,
+                command, "auto-approve pattern added to workspace file"
+            ),
+            Ok(Ok(false)) => info!(
+                user_id,
+                command, "no .code-workspace file found; skipping VS Code update"
+            ),
+            Ok(Err(err)) => {
+                warn!(%err, user_id, command, "failed to update .code-workspace file (non-fatal)")
+            }
         }
 
         // Best-effort: also propagate to .vscode/settings.json for Copilot CLI.
-        match write_pattern_to_vscode_settings(workspace_root, command) {
-            Ok(true) => info!(user_id, command, "auto-approve pattern added to .vscode/settings.json"),
-            Ok(false) => info!(user_id, command, "no .vscode/settings.json found; skipping"),
-            Err(err) => warn!(%err, user_id, command, "failed to update .vscode/settings.json (non-fatal)"),
+        let workspace_root_buf2 = state.config.default_workspace_root().to_path_buf();
+        let command_for_vscode = command.to_owned();
+        match tokio::task::spawn_blocking(move || {
+            write_pattern_to_vscode_settings(&workspace_root_buf2, &command_for_vscode)
+        })
+        .await
+        {
+            Err(e) => {
+                warn!(%e, user_id, command, "spawn_blocking join error for .vscode/settings.json (non-fatal)")
+            }
+            Ok(Ok(true)) => info!(
+                user_id,
+                command, "auto-approve pattern added to .vscode/settings.json"
+            ),
+            Ok(Ok(false)) => info!(user_id, command, "no .vscode/settings.json found; skipping"),
+            Ok(Err(err)) => {
+                warn!(%err, user_id, command, "failed to update .vscode/settings.json (non-fatal)")
+            }
         }
 
         info!(

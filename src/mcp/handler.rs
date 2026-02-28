@@ -520,6 +520,30 @@ impl IntercomServer {
     }
 }
 
+/// Spawn a per-session stall detector and insert its handle into the shared map.
+///
+/// No-op if stall detection is disabled in the global configuration or if no
+/// stall event channel is present in `state`.
+async fn spawn_stall_detector_for_session(state: &AppState, session_id: &str) {
+    if !state.config.stall.enabled {
+        return;
+    }
+    if let (Some(ref detectors), Some(ref tx)) = (&state.stall_detectors, &state.stall_event_tx) {
+        let session_cancel = CancellationToken::new();
+        let detector = StallDetector::new(
+            session_id.to_owned(),
+            Duration::from_secs(state.config.stall.inactivity_threshold_seconds),
+            Duration::from_secs(state.config.stall.escalation_threshold_seconds),
+            state.config.stall.max_retries,
+            tx.clone(),
+            session_cancel,
+        );
+        let handle = detector.spawn();
+        detectors.lock().await.insert(session_id.to_owned(), handle);
+        info!(session_id, "stall detector spawned");
+    }
+}
+
 impl ServerHandler for IntercomServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -568,28 +592,7 @@ impl ServerHandler for IntercomServer {
                             "spawned agent connected to pre-created session"
                         );
                         // Spawn a per-session stall detector for the spawned agent (FR-028).
-                        if state.config.stall.enabled {
-                            if let (Some(ref detectors), Some(ref tx)) =
-                                (&state.stall_detectors, &state.stall_event_tx)
-                            {
-                                let session_cancel = CancellationToken::new();
-                                let detector = StallDetector::new(
-                                    session.id.clone(),
-                                    Duration::from_secs(
-                                        state.config.stall.inactivity_threshold_seconds,
-                                    ),
-                                    Duration::from_secs(
-                                        state.config.stall.escalation_threshold_seconds,
-                                    ),
-                                    state.config.stall.max_retries,
-                                    tx.clone(),
-                                    session_cancel,
-                                );
-                                let handle = detector.spawn();
-                                detectors.lock().await.insert(session.id.clone(), handle);
-                                info!(session_id = %session.id, "stall detector spawned");
-                            }
-                        }
+                        spawn_stall_detector_for_session(&state, &session.id).await;
                     }
                     Ok(None) => {
                         warn!(session_id = %sid, "pre-created session not found in database");
@@ -683,28 +686,7 @@ impl ServerHandler for IntercomServer {
                                 }
                             }
                             // Spawn a per-session stall detector for direct connections (FR-028).
-                            if state.config.stall.enabled {
-                                if let (Some(ref detectors), Some(ref tx)) =
-                                    (&state.stall_detectors, &state.stall_event_tx)
-                                {
-                                    let session_cancel = CancellationToken::new();
-                                    let detector = StallDetector::new(
-                                        created.id.clone(),
-                                        Duration::from_secs(
-                                            state.config.stall.inactivity_threshold_seconds,
-                                        ),
-                                        Duration::from_secs(
-                                            state.config.stall.escalation_threshold_seconds,
-                                        ),
-                                        state.config.stall.max_retries,
-                                        tx.clone(),
-                                        session_cancel,
-                                    );
-                                    let handle = detector.spawn();
-                                    detectors.lock().await.insert(created.id.clone(), handle);
-                                    info!(session_id = %created.id, "stall detector spawned");
-                                }
-                            }
+                            spawn_stall_detector_for_session(&state, &created.id).await;
                         }
                         Err(err) => {
                             warn!(
@@ -735,12 +717,19 @@ impl ServerHandler for IntercomServer {
         let state = Arc::clone(&self.state);
         let audit_logger = self.state.audit_logger.clone();
         let session_id = self.session_db_id.get().cloned();
+        // For spawned agents session_db_id is never set; fall back to the
+        // pre-assigned session_id_override so the correct detector is reset.
+        let effective_session_id = self
+            .session_id_override
+            .clone()
+            .or_else(|| session_id.clone());
 
         async move {
-            // Reset stall detector for all active sessions on any tool call.
-            if let Some(ref detectors) = state.stall_detectors {
-                let guards = detectors.lock().await;
-                for handle in guards.values() {
+            // Reset stall detector only for the calling session (T053).
+            if let (Some(ref detectors), Some(ref sid)) =
+                (&state.stall_detectors, &effective_session_id)
+            {
+                if let Some(handle) = detectors.lock().await.get(sid.as_str()) {
                     handle.reset();
                 }
             }
@@ -749,10 +738,11 @@ impl ServerHandler for IntercomServer {
                 .call(ToolCallContext::new(self, request, context))
                 .await;
 
-            // Reset again after tool completion.
-            if let Some(ref detectors) = state.stall_detectors {
-                let guards = detectors.lock().await;
-                for handle in guards.values() {
+            // Reset again after tool completion to avoid false stall triggers.
+            if let (Some(ref detectors), Some(ref sid)) =
+                (&state.stall_detectors, &effective_session_id)
+            {
+                if let Some(handle) = detectors.lock().await.get(sid.as_str()) {
                     handle.reset();
                 }
             }
@@ -763,7 +753,7 @@ impl ServerHandler for IntercomServer {
                 let mut entry = AuditEntry::new(AuditEventType::ToolCall)
                     .with_tool(tool_name.clone())
                     .with_result(summary.to_owned());
-                if let Some(ref sid) = session_id {
+                if let Some(ref sid) = effective_session_id {
                     entry = entry.with_session(sid.clone());
                 }
                 if let Err(err) = logger.log_entry(entry) {

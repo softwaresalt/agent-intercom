@@ -119,7 +119,10 @@ fn write_pattern_does_not_duplicate_auto_approve_commands() {
         .expect("chat.tools.terminal.autoApprove must be an object");
     let pattern = command_approve::generate_pattern("cargo test");
     let count = map.keys().filter(|k| **k == pattern).count();
-    assert_eq!(count, 1, "pattern should appear exactly once as a map key, got {count}; keys: {map:?}");
+    assert_eq!(
+        count, 1,
+        "pattern should appear exactly once as a map key, got {count}; keys: {map:?}"
+    );
 }
 
 /// S076 — `write_pattern_to_workspace_file` returns `Ok(false)` when no *.code-workspace exists.
@@ -128,7 +131,10 @@ fn write_pattern_to_workspace_file_returns_false_when_no_workspace_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let result = command_approve::write_pattern_to_workspace_file(dir.path(), "cargo test")
         .expect("should not error");
-    assert!(!result, "should return false when no .code-workspace file is present");
+    assert!(
+        !result,
+        "should return false when no .code-workspace file is present"
+    );
 }
 
 /// S077 — `write_pattern_to_workspace_file` writes the pattern into
@@ -190,8 +196,14 @@ fn generate_pattern_simple_command_anchors_to_base_command_only() {
     let re = Regex::new(&pattern).expect("valid regex");
 
     // Must match the base command with different arguments.
-    assert!(re.is_match("DEL /F /Q other-file.txt"), "should match DEL with other args");
-    assert!(re.is_match("DEL some-other-file.txt"), "should match DEL with any file");
+    assert!(
+        re.is_match("DEL /F /Q other-file.txt"),
+        "should match DEL with other args"
+    );
+    assert!(
+        re.is_match("DEL some-other-file.txt"),
+        "should match DEL with any file"
+    );
     assert!(re.is_match("DEL"), "should match bare DEL");
 
     // Must NOT match a completely different command.
@@ -214,12 +226,24 @@ fn generate_pattern_multilevel_command_captures_base_and_subcommand() {
 
     // Must match the same base+subcommand with different flags.
     assert!(re.is_match("cargo test"), "should match bare 'cargo test'");
-    assert!(re.is_match("cargo test --release"), "should match with --release flag");
-    assert!(re.is_match("cargo test src/other.rs"), "should match with other file");
+    assert!(
+        re.is_match("cargo test --release"),
+        "should match with --release flag"
+    );
+    assert!(
+        re.is_match("cargo test src/other.rs"),
+        "should match with other file"
+    );
 
     // Must NOT match a different cargo subcommand.
-    assert!(!re.is_match("cargo build"), "should not match 'cargo build'");
-    assert!(!re.is_match("cargo clippy"), "should not match 'cargo clippy'");
+    assert!(
+        !re.is_match("cargo build"),
+        "should not match 'cargo build'"
+    );
+    assert!(
+        !re.is_match("cargo clippy"),
+        "should not match 'cargo clippy'"
+    );
     assert!(!re.is_match("cargo"), "should not match bare 'cargo'");
 
     // Pattern should contain "cargo test" anchor.
@@ -235,9 +259,15 @@ fn generate_pattern_git_add_anchors_to_git_add() {
     let pattern = command_approve::generate_pattern("git add src/main.rs");
     let re = Regex::new(&pattern).expect("valid regex");
 
-    assert!(re.is_match("git add src/main.rs"), "should match original command");
+    assert!(
+        re.is_match("git add src/main.rs"),
+        "should match original command"
+    );
     assert!(re.is_match("git add ."), "should match `git add .`");
-    assert!(!re.is_match("git commit -m 'msg'"), "should not match git commit");
+    assert!(
+        !re.is_match("git commit -m 'msg'"),
+        "should not match git commit"
+    );
     assert!(!re.is_match("git push"), "should not match git push");
 }
 
@@ -248,7 +278,10 @@ fn generate_pattern_rmdir_anchors_to_rmdir_only() {
     let re = Regex::new(&pattern).expect("valid regex");
 
     assert!(re.is_match("rmdir /S /Q backup"), "should match original");
-    assert!(re.is_match("rmdir /S /Q other-dir"), "should match other dirs");
+    assert!(
+        re.is_match("rmdir /S /Q other-dir"),
+        "should match other dirs"
+    );
     assert!(re.is_match("rmdir"), "should match bare rmdir");
     assert!(!re.is_match("DEL /F /Q file"), "should not match DEL");
 
@@ -265,7 +298,10 @@ fn write_pattern_to_vscode_settings_returns_false_when_absent() {
     let dir = tempfile::tempdir().expect("tempdir");
     let result = command_approve::write_pattern_to_vscode_settings(dir.path(), "cargo test")
         .expect("should not error");
-    assert!(!result, "should return false when .vscode/settings.json is absent");
+    assert!(
+        !result,
+        "should return false when .vscode/settings.json is absent"
+    );
 }
 
 /// S080 — `write_pattern_to_vscode_settings` writes the pattern into the top-level
@@ -279,10 +315,12 @@ fn write_pattern_to_vscode_settings_writes_to_auto_approve_map() {
     std::fs::write(&settings_path, r#"{"chat.tools.terminal.autoApprove": {}}"#)
         .expect("create settings.json");
 
-    let found =
-        command_approve::write_pattern_to_vscode_settings(dir.path(), "DEL /F /Q test.txt")
-            .expect("write should succeed");
-    assert!(found, "should return true when .vscode/settings.json exists");
+    let found = command_approve::write_pattern_to_vscode_settings(dir.path(), "DEL /F /Q test.txt")
+        .expect("write should succeed");
+    assert!(
+        found,
+        "should return true when .vscode/settings.json exists"
+    );
 
     let raw = std::fs::read_to_string(&settings_path).expect("read settings.json");
     let json: serde_json::Value = serde_json::from_str(&raw).expect("parse settings.json");

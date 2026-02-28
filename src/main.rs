@@ -171,7 +171,10 @@ async fn run(args: Cli) -> Result<()> {
     // immediately visible to `check_auto_approve` without any additional
     // invalidation logic.
     let policy_watcher = PolicyWatcher::new();
-    if let Err(err) = policy_watcher.register(&config.default_workspace_root).await {
+    if let Err(err) = policy_watcher
+        .register(&config.default_workspace_root)
+        .await
+    {
         warn!(%err, "policy watcher registration failed — falling back to on-demand loads");
     } else {
         info!("policy watcher registered for default workspace root");
