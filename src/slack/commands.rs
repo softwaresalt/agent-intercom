@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use slack_morphism::prelude::{
     SlackChannelId, SlackClient, SlackClientEventsUserState, SlackClientHyperHttpsConnector,
@@ -17,8 +18,11 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, info_span, warn};
 
+use crate::acp::spawner::SpawnConfig;
 use crate::diff::path_safety::validate_path;
 use crate::mcp::handler::AppState;
+use crate::mode::ServerMode;
+use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
 use crate::orchestrator::{checkpoint_manager, session_manager, spawner};
 use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::db::Database;
@@ -98,7 +102,7 @@ async fn dispatch_command(
             } else {
                 args.join(" ")
             };
-            handle_session_start(&prompt, user_id, state).await
+            handle_session_start(&prompt, user_id, channel_id, state).await
         }
 
         "session-pause" => {
@@ -265,6 +269,105 @@ async fn handle_sessions(db: &Arc<Database>) -> crate::Result<String> {
 }
 
 async fn handle_session_start(
+    prompt: &str,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    match state.server_mode {
+        ServerMode::Acp => handle_acp_session_start(prompt, user_id, channel_id, state).await,
+        ServerMode::Mcp => handle_mcp_session_start(prompt, user_id, state).await,
+    }
+}
+
+/// Start a new ACP session: spawn a headless agent process and record the
+/// session in the database with `protocol_mode = Acp` (T038, FR-025, FR-027).
+async fn handle_acp_session_start(
+    prompt: &str,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    // Validate ACP configuration before attempting to spawn.
+    state.config.validate_for_acp_mode()?;
+
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // S024: enforce max concurrent ACP sessions.
+    let active_count = repo.count_active().await?;
+    let max = i64::try_from(state.config.acp.max_sessions).unwrap_or(i64::MAX);
+    if active_count >= max {
+        return Err(crate::AppError::Acp(format!(
+            "max concurrent ACP sessions reached ({active_count}/{})",
+            state.config.acp.max_sessions
+        )));
+    }
+
+    let workspace_root = state
+        .config
+        .default_workspace_root()
+        .to_string_lossy()
+        .to_string();
+
+    // Build the session record with ACP-specific fields.
+    let mut session = Session::new(
+        user_id.to_owned(),
+        workspace_root,
+        Some(prompt.to_owned()),
+        SessionMode::Remote,
+    );
+    session.protocol_mode = ProtocolMode::Acp;
+    session.channel_id = Some(channel_id.to_owned());
+
+    let created = repo.create(&session).await?;
+
+    // Spawn the agent process.
+    let spawn_cfg = SpawnConfig {
+        host_cli: state.config.host_cli.clone(),
+        host_cli_args: state.config.host_cli_args.clone(),
+        workspace_root: state.config.default_workspace_root().to_path_buf(),
+        startup_timeout: Duration::from_secs(state.config.acp.startup_timeout_seconds),
+    };
+
+    let conn = match crate::acp::spawner::spawn_agent(&spawn_cfg, &created.id, prompt).await {
+        Ok(c) => c,
+        Err(err) => {
+            // Mark the session interrupted so it's visible in recovery flows.
+            repo.set_terminated(&created.id, SessionStatus::Interrupted)
+                .await
+                .ok();
+            return Err(err);
+        }
+    };
+
+    // Store the child process handle — the spawner's `kill_on_drop` keeps it
+    // alive as long as the AppState holds the map entry.
+    // stdin/stdout are dropped here; Phase 6 will introduce ACP I/O tasks.
+    let child = conn.child;
+    state
+        .active_children
+        .lock()
+        .await
+        .insert(created.id.clone(), child);
+
+    // Activate the session.
+    let active = repo
+        .update_status(&created.id, SessionStatus::Active)
+        .await?;
+
+    info!(
+        session_id = active.id,
+        channel_id, user_id, "ACP session started"
+    );
+
+    Ok(format!(
+        "ACP session `{}` started in channel `{}` with prompt: _{}_",
+        active.id, channel_id, prompt
+    ))
+}
+
+/// Start a new MCP session (existing behaviour, now refactored into its own fn).
+async fn handle_mcp_session_start(
     prompt: &str,
     user_id: &str,
     state: &Arc<AppState>,

@@ -3,6 +3,7 @@
 mod integration {
     mod test_helpers;
 
+    mod acp_lifecycle_tests;
     mod approval_flow_tests;
     mod call_tool_dispatch_tests;
     mod channel_override_tests;

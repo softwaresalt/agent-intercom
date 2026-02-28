@@ -224,6 +224,7 @@ async fn run(args: Cli) -> Result<()> {
         pending_command_approvals: Arc::default(),
         stall_event_tx: Some(stall_tx),
         driver: Arc::new(driver),
+        server_mode: args.mode,
     });
 
     // Keep the watcher alive for the server's lifetime — dropping it stops the

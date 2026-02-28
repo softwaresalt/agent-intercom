@@ -143,6 +143,42 @@ fn default_max_concurrent_sessions() -> u32 {
     3
 }
 
+fn default_acp_max_sessions() -> usize {
+    5
+}
+
+fn default_acp_startup_timeout_seconds() -> u64 {
+    30
+}
+
+/// ACP-mode specific configuration.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct AcpConfig {
+    /// Maximum number of concurrent ACP sessions.
+    ///
+    /// Requests beyond this limit are rejected with a descriptive error.
+    /// Defaults to `5`.
+    #[serde(default = "default_acp_max_sessions")]
+    pub max_sessions: usize,
+    /// Seconds to wait for the agent to emit its ready signal on stdout.
+    ///
+    /// If no line is received within this window the spawner kills the
+    /// process and returns `AppError::Acp("startup timeout")`. Defaults
+    /// to `30`.
+    #[serde(default = "default_acp_startup_timeout_seconds")]
+    pub startup_timeout_seconds: u64,
+}
+
+impl Default for AcpConfig {
+    fn default() -> Self {
+        Self {
+            max_sessions: default_acp_max_sessions(),
+            startup_timeout_seconds: default_acp_startup_timeout_seconds(),
+        }
+    }
+}
+
 fn default_http_port() -> u16 {
     3000
 }
@@ -242,6 +278,9 @@ pub struct GlobalConfig {
     /// Controls how much detail is posted to Slack during agent sessions.
     #[serde(default = "default_slack_detail_level")]
     pub slack_detail_level: SlackDetailLevel,
+    /// ACP-mode configuration (max sessions, startup timeout).
+    #[serde(default)]
+    pub acp: AcpConfig,
 }
 
 impl GlobalConfig {

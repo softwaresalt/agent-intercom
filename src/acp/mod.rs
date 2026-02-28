@@ -10,3 +10,5 @@
 //!   [`AgentEvent`](crate::driver::AgentEvent)s.
 //! - `writer`: Async write task that serializes outbound responses to the agent.
 //! - `spawner`: Process spawning with environment isolation and stdio capture.
+
+pub mod spawner;

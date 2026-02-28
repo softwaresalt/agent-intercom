@@ -24,6 +24,7 @@ use tracing::{info, info_span, warn};
 use crate::audit::{AuditEntry, AuditEventType, AuditLogger};
 use crate::config::GlobalConfig;
 use crate::driver::AgentDriver;
+use crate::mode::ServerMode;
 use crate::models::session::{Session, SessionMode, SessionStatus};
 use crate::orchestrator::stall_detector::{StallDetector, StallDetectorHandle, StallEvent};
 use crate::persistence::session_repo::SessionRepo;
@@ -129,6 +130,12 @@ pub struct AppState {
     /// Protocol-agnostic agent driver for resolving pending clearances,
     /// prompts, and waits via Slack handlers.
     pub driver: Arc<dyn AgentDriver>,
+    /// Server protocol mode chosen at startup (`mcp` or `acp`).
+    ///
+    /// Determines which session-start path the Slack command handler
+    /// takes: MCP spawns an HTTP/SSE-connecting process; ACP spawns a
+    /// headless stdio-connected process.
+    pub server_mode: ServerMode,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.

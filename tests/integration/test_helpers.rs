@@ -10,6 +10,7 @@ use std::sync::Arc;
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::mcp::handler::{AppState, IntercomServer};
+use agent_intercom::mode::ServerMode;
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
@@ -96,6 +97,7 @@ pub async fn test_app_state(config: GlobalConfig) -> Arc<AppState> {
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
         driver: McpDriver::new_empty(),
+        server_mode: ServerMode::Mcp,
     })
 }
 
@@ -118,6 +120,7 @@ pub fn test_app_state_with_db(config: GlobalConfig, db: Arc<SqlitePool>) -> Arc<
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
         driver: McpDriver::new_empty(),
+        server_mode: ServerMode::Mcp,
     })
 }
 
