@@ -274,9 +274,11 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_active(&self) -> Result<Vec<Session>> {
-        let rows: Vec<SessionRow> = sqlx::query_as("SELECT * FROM session WHERE status = 'active'")
-            .fetch_all(self.db.as_ref())
-            .await?;
+        let rows: Vec<SessionRow> = sqlx::query_as(
+            "SELECT * FROM session WHERE status = 'active' ORDER BY updated_at DESC",
+        )
+        .fetch_all(self.db.as_ref())
+        .await?;
 
         rows.into_iter().map(SessionRow::into_session).collect()
     }

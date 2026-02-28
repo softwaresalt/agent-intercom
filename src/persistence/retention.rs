@@ -102,7 +102,10 @@ pub async fn purge(db: &Database, retention_days: u32) -> Result<()> {
     .await?;
 
     // Task inbox items are not session-scoped, so purge by created_at (T077).
-    sqlx::query("DELETE FROM task_inbox WHERE consumed = 1 AND created_at < ?1")
+    // Purge all items older than the cutoff regardless of consumed status —
+    // unconsumed tasks older than the retention window are stale and should
+    // not accumulate indefinitely.
+    sqlx::query("DELETE FROM task_inbox WHERE created_at < ?1")
         .bind(&cutoff_str)
         .execute(db)
         .await?;

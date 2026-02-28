@@ -63,7 +63,8 @@ pub async fn handle_command(
             warn!(%err, user = %user_id, "unauthorized slash command attempt");
             "You are not authorized to use this command.".to_owned()
         } else {
-            dispatch_command(command_name, &args, &user_id, app)
+            let channel = event.channel_id.to_string();
+            dispatch_command(command_name, &args, &user_id, &channel, app)
                 .await
                 .unwrap_or_else(|err| format!("Error: {err}"))
         }
@@ -79,6 +80,7 @@ async fn dispatch_command(
     command: &str,
     args: &[&str],
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let db = &state.db;
@@ -143,7 +145,7 @@ async fn dispatch_command(
             } else {
                 args.join(" ")
             };
-            steer_handler::store_from_slack(&text, None, state).await
+            steer_handler::store_from_slack(&text, Some(channel_id), state).await
         }
 
         "task" => {
@@ -152,7 +154,7 @@ async fn dispatch_command(
             } else {
                 args.join(" ")
             };
-            task_handler::store_from_slack(&text, None, state).await
+            task_handler::store_from_slack(&text, Some(channel_id), state).await
         }
 
         other => {

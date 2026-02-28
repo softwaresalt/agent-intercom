@@ -181,6 +181,117 @@ fn strip_jsonc_line_comment(line: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Borrowed(line)
 }
 
+/// Find the matching closing `}` for a `{` at `open_pos`, correctly handling
+/// nested braces and JSON string escaping.  Returns `None` if the structure
+/// is malformed or unbalanced.
+fn find_matching_brace(text: &str, open_pos: usize) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for (i, c) in text[open_pos..].char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        if c == '\\' && in_string {
+            escape_next = true;
+            continue;
+        }
+        if c == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(open_pos + i);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Attempt to insert a new auto-approve pattern entry into a JSONC file
+/// without destroying user-maintained comments.
+///
+/// Locates the `"chat.tools.terminal.autoApprove"` key in the raw text,
+/// finds the boundaries of its `{ … }` value object via brace-matching,
+/// and inserts the new entry before the closing `}`.  Returns `None` if
+/// the key is not found or the structure is unexpected, signalling the
+/// caller to fall back to a full (comment-stripping) rewrite.
+fn try_insert_pattern_preserving(raw: &str, pattern: &str) -> Option<String> {
+    let key_needle = "\"chat.tools.terminal.autoApprove\"";
+    let key_idx = raw.find(key_needle)?;
+
+    // Find the ':' after the key.
+    let after_key = key_idx + key_needle.len();
+    let colon_offset = raw[after_key..].find(':')?;
+    let after_colon = after_key + colon_offset + 1;
+
+    // Find opening '{' of the value object.
+    let brace_offset = raw[after_colon..].find('{')? + after_colon;
+
+    // Find matching '}'.
+    let close_pos = find_matching_brace(raw, brace_offset)?;
+
+    // Derive indentation from the line containing the closing brace.
+    let line_start = raw[..close_pos].rfind('\n').map_or(0, |p| p + 1);
+    let base_indent: String = raw[line_start..close_pos]
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .collect();
+    let entry_indent = format!("{base_indent}    ");
+
+    // Build the JSON entry text.  The pattern may contain regex back-slash
+    // escapes (`\s`, `\.`, …), which must be double-escaped inside a JSON
+    // string.  Serialise via serde_json to guarantee correct escaping.
+    let key_json = serde_json::to_string(pattern)
+        .unwrap_or_else(|_| format!("\"{pattern}\""));
+    let entry = format!(
+        "{entry_indent}{key_json}: {{\n\
+         {entry_indent}    \"approve\": true,\n\
+         {entry_indent}    \"matchCommandLine\": true\n\
+         {entry_indent}}}"
+    );
+
+    // Check whether there are existing entries between { and }.
+    let inner = raw[brace_offset + 1..close_pos].trim();
+    let has_entries = !inner.is_empty();
+
+    let mut result = String::with_capacity(raw.len() + entry.len() + 16);
+
+    if has_entries {
+        // Find the last non-whitespace character before the closing brace to
+        // decide whether a trailing comma is needed.
+        let content_end = raw[..close_pos]
+            .rfind(|c: char| !c.is_whitespace())
+            .map_or(close_pos, |p| p + 1);
+        result.push_str(&raw[..content_end]);
+        if !raw[..content_end].ends_with(',') {
+            result.push(',');
+        }
+        result.push('\n');
+        result.push_str(&entry);
+        result.push('\n');
+        result.push_str(&raw[close_pos..]);
+    } else {
+        result.push_str(&raw[..=brace_offset]);
+        result.push('\n');
+        result.push_str(&entry);
+        result.push('\n');
+        result.push_str(&raw[close_pos..]);
+    }
+
+    Some(result)
+}
+
 /// Find the first `*.code-workspace` file in `workspace_root` and write the
 /// generated pattern to its `settings.chat.tools.terminal.autoApprove` map.
 ///
@@ -245,6 +356,26 @@ pub fn write_pattern_to_workspace_file(
     if map.contains_key(&pattern) {
         return Ok(true);
     }
+
+    // ── Comment-preserving insertion (RI-05) ───────────────
+    // Try to insert the new entry into the raw (comment-preserved) file text
+    // via targeted brace-matching rather than re-serialising the entire JSON.
+    // Falls back to a full rewrite only if the autoApprove section is absent.
+    if let Some(modified) = try_insert_pattern_preserving(&raw, &pattern) {
+        let parent = ws_path.parent().unwrap_or(std::path::Path::new("."));
+        let tmp = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|e| crate::AppError::Config(format!("create temp file: {e}")))?;
+        std::io::Write::write_all(&mut tmp.as_file(), modified.as_bytes())
+            .map_err(|e| crate::AppError::Config(format!("write workspace file: {e}")))?;
+        tmp.persist(&ws_path)
+            .map_err(|e| crate::AppError::Config(format!("persist workspace file: {e}")))?;
+        return Ok(true);
+    }
+
+    // Fallback: the autoApprove section does not exist yet — create it via
+    // full JSON rewrite (this strips JSONC comments on first auto-approve).
+    warn!("autoApprove section not found in workspace file; falling back to full rewrite");
+
     map.insert(
         pattern,
         serde_json::json!({ "approve": true, "matchCommandLine": true }),
@@ -314,6 +445,22 @@ pub fn write_pattern_to_vscode_settings(
     if map.contains_key(&pattern) {
         return Ok(true);
     }
+
+    // ── Comment-preserving insertion (RI-05) ───────────────
+    if let Some(modified) = try_insert_pattern_preserving(&raw, &pattern) {
+        let parent = vscode_path.parent().unwrap_or(std::path::Path::new("."));
+        let tmp = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|e| crate::AppError::Config(format!("create temp file: {e}")))?;
+        std::io::Write::write_all(&mut tmp.as_file(), modified.as_bytes())
+            .map_err(|e| crate::AppError::Config(format!("write .vscode/settings.json: {e}")))?;
+        tmp.persist(&vscode_path)
+            .map_err(|e| crate::AppError::Config(format!("persist .vscode/settings.json: {e}")))?;
+        return Ok(true);
+    }
+
+    // Fallback: the autoApprove section does not exist yet.
+    warn!("autoApprove section not found in .vscode/settings.json; falling back to full rewrite");
+
     map.insert(
         pattern,
         serde_json::json!({ "approve": true, "matchCommandLine": true }),
@@ -388,7 +535,7 @@ pub async fn handle_auto_approve_action(
         .await
         {
             Err(e) => {
-                warn!(%e, user_id, command, "spawn_blocking join error for workspace file (non-fatal)")
+                warn!(%e, user_id, command, "spawn_blocking join error for workspace file (non-fatal)");
             }
             Ok(Ok(true)) => info!(
                 user_id,
@@ -399,7 +546,7 @@ pub async fn handle_auto_approve_action(
                 command, "no .code-workspace file found; skipping VS Code update"
             ),
             Ok(Err(err)) => {
-                warn!(%err, user_id, command, "failed to update .code-workspace file (non-fatal)")
+                warn!(%err, user_id, command, "failed to update .code-workspace file (non-fatal)");
             }
         }
 
@@ -412,7 +559,7 @@ pub async fn handle_auto_approve_action(
         .await
         {
             Err(e) => {
-                warn!(%e, user_id, command, "spawn_blocking join error for .vscode/settings.json (non-fatal)")
+                warn!(%e, user_id, command, "spawn_blocking join error for .vscode/settings.json (non-fatal)");
             }
             Ok(Ok(true)) => info!(
                 user_id,
@@ -420,7 +567,7 @@ pub async fn handle_auto_approve_action(
             ),
             Ok(Ok(false)) => info!(user_id, command, "no .vscode/settings.json found; skipping"),
             Ok(Err(err)) => {
-                warn!(%err, user_id, command, "failed to update .vscode/settings.json (non-fatal)")
+                warn!(%err, user_id, command, "failed to update .vscode/settings.json (non-fatal)");
             }
         }
 

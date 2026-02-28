@@ -66,7 +66,7 @@ impl SlackConfig {
     /// when the extension is absent from the map (the file should be
     /// uploaded as plain `.txt` instead).
     pub fn markdown_fence_label(&self, file_path: &str) -> Option<&str> {
-        let ext = file_path.rsplit('.').next()?;
+        let ext = Path::new(file_path).extension()?.to_str()?;
         self.markdown_upload_extensions.get(ext).map(String::as_str)
     }
 }
