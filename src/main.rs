@@ -20,6 +20,7 @@ use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
 use agent_intercom::mcp::{sse, transport};
+use agent_intercom::mode::ServerMode;
 use agent_intercom::orchestrator::{child_monitor, stall_consumer};
 use agent_intercom::persistence::{db, retention};
 use agent_intercom::policy::watcher::PolicyWatcher;
@@ -73,6 +74,14 @@ struct Cli {
     /// Defaults to `both`.
     #[arg(long, value_enum, default_value_t = Transport::Both)]
     transport: Transport,
+
+    /// Server protocol mode: `mcp` (default) or `acp`.
+    ///
+    /// `mcp` starts the standard Model Context Protocol transport.
+    /// `acp` starts the Agent Communication Protocol stream processor
+    /// and skips the MCP HTTP/SSE and stdio transports.
+    #[arg(long, value_enum, default_value_t = ServerMode::Mcp)]
+    mode: ServerMode,
 }
 
 fn main() -> Result<()> {
@@ -114,6 +123,12 @@ async fn run(args: Cli) -> Result<()> {
 
     // Load Slack credentials from keyring / env vars.
     config.load_credentials().await?;
+
+    // Validate ACP-specific configuration when running in ACP mode.
+    if args.mode == ServerMode::Acp {
+        config.validate_for_acp_mode()?;
+        info!("ACP mode: host_cli validated");
+    }
 
     let config = Arc::new(config);
     info!("configuration loaded");
@@ -249,8 +264,16 @@ async fn run(args: Cli) -> Result<()> {
     }
 
     // ── Start transports ────────────────────────────────
-    let start_stdio = matches!(args.transport, Transport::Stdio | Transport::Both);
-    let start_sse = matches!(args.transport, Transport::Sse | Transport::Both);
+    // In ACP mode, MCP transports are not started. The ACP stream processor
+    // will be wired in a later phase.
+    let start_stdio = args.mode == ServerMode::Mcp
+        && matches!(args.transport, Transport::Stdio | Transport::Both);
+    let start_sse =
+        args.mode == ServerMode::Mcp && matches!(args.transport, Transport::Sse | Transport::Both);
+
+    if args.mode == ServerMode::Acp {
+        info!("ACP mode: MCP transports disabled — ACP stream processor not yet started");
+    }
 
     let stdio_handle = if start_stdio {
         let stdio_ct = ct.clone();
@@ -307,7 +330,7 @@ async fn run(args: Cli) -> Result<()> {
         None
     };
 
-    info!(transport = ?args.transport, "MCP server ready");
+    info!(transport = ?args.transport, mode = ?args.mode, "server ready");
 
     // ── Wait for first shutdown signal ──────────────────
     shutdown_signal().await;

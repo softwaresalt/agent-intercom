@@ -14,6 +14,7 @@ pub mod driver;
 pub mod errors;
 pub mod ipc;
 pub mod mcp;
+pub mod mode;
 pub mod models;
 pub mod orchestrator;
 pub mod persistence;

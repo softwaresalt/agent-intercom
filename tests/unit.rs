@@ -7,6 +7,7 @@ mod unit {
     mod blocks_tests;
     mod checkpoint_tests;
     mod child_monitor_tests;
+    mod cli_tests;
     mod command_approve_tests;
     mod command_exec_tests;
     mod config_tests;

@@ -370,6 +370,36 @@ impl GlobalConfig {
 
         Ok(())
     }
+
+    /// Validate configuration requirements for ACP mode.
+    ///
+    /// Verifies that `host_cli` is non-empty and, if it is an absolute path,
+    /// that the path exists on disk. Relative command names (resolved via
+    /// `PATH` at spawn time) are accepted as-is.
+    ///
+    /// Call this before starting the ACP transport to surface misconfiguration
+    /// early with a clear error message.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` when:
+    /// - `host_cli` is empty
+    /// - `host_cli` is an absolute path that does not exist
+    pub fn validate_for_acp_mode(&self) -> Result<()> {
+        if self.host_cli.is_empty() {
+            return Err(AppError::Config(
+                "host_cli must be set to use ACP mode".into(),
+            ));
+        }
+        let path = std::path::Path::new(&self.host_cli);
+        if path.is_absolute() && !path.exists() {
+            return Err(AppError::Config(format!(
+                "host_cli '{}' does not exist",
+                self.host_cli
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Keychain service identifier used for credential storage.

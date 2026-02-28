@@ -346,7 +346,56 @@ default_nudge_message = "continue"
     );
 }
 
-/// T020: Environment variable prefix is INTERCOM_ (not MONOCOQUE_).
+/// T016/S004: ACP mode validation rejects an empty `host_cli`.
+#[test]
+fn acp_validate_rejects_empty_host_cli() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut config = GlobalConfig::from_toml_str(&sample_toml(temp.path().to_str().expect("utf8")))
+        .expect("config parses");
+    config.host_cli = String::new();
+
+    let result = config.validate_for_acp_mode();
+    assert!(
+        result.is_err(),
+        "empty host_cli should fail ACP validation (S004)"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("host_cli"),
+        "error must mention host_cli, got: {msg}"
+    );
+}
+
+/// T016/S005: ACP mode validation rejects a non-existent absolute path.
+#[test]
+fn acp_validate_rejects_nonexistent_absolute_path() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut config = GlobalConfig::from_toml_str(&sample_toml(temp.path().to_str().expect("utf8")))
+        .expect("config parses");
+    // Use a path inside tempdir that does not exist — guaranteed to be absolute.
+    let nonexistent = temp.path().join("does_not_exist_binary");
+    config.host_cli = nonexistent.to_string_lossy().into_owned();
+
+    let result = config.validate_for_acp_mode();
+    assert!(
+        result.is_err(),
+        "nonexistent absolute path should fail ACP validation (S005)"
+    );
+}
+
+/// T016: ACP mode validation accepts a relative command name (PATH resolution deferred).
+#[test]
+fn acp_validate_accepts_relative_command_name() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    // sample_toml has host_cli = "claude", which is a relative command name.
+    let config = GlobalConfig::from_toml_str(&sample_toml(temp.path().to_str().expect("utf8")))
+        .expect("config parses");
+    let result = config.validate_for_acp_mode();
+    assert!(
+        result.is_ok(),
+        "relative command name accepted at config validation time: {result:?}"
+    );
+}
 ///
 /// Verifies the spawner uses INTERCOM_ prefix by checking that config
 /// parsing does not reference MONOCOQUE_ prefixed env vars.
