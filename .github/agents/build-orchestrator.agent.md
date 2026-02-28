@@ -38,6 +38,8 @@ The build-feature skill handles task-level and gate-level broadcasting. The orch
 | All gates passed | `broadcast` | `success` | `[🛠️ ORCHESTRATOR] Phase {N} gates verified — lint, memory, compaction, commit all PASS` |
 | Gate failure | `broadcast` | `error` | `[🛠️ ORCHESTRATOR] Gate failure: {gate_name} — {details}` |
 | Phase transition (full mode) | `broadcast` | `info` | `[🛠️ ORCHESTRATOR] Phase {N} complete → starting phase {M} ({remaining} phases left)` |
+| Final review complete | `broadcast` | `info` | `[🛠️ ORCHESTRATOR] Final adversarial review complete — {critical} critical, {high} high, {medium} medium, {low} low findings` |
+| Final review fixes applied | `broadcast` | `success` | `[🛠️ ORCHESTRATOR] Final review fixes applied — {applied} fixes, {deferred} deferred, all gates PASS` |
 | Build complete | `broadcast` | `success` | `[🛠️ ORCHESTRATOR] Build complete — {phases_done} phases, {total_tasks} tasks, {commits} commits` |
 
 Capture the `ts` from the first `broadcast` and thread all subsequent orchestrator messages under it. The build-feature skill manages its own thread per phase.
@@ -96,18 +98,205 @@ After the build-feature skill finishes, verify that all mandatory gates were sat
 All four gates are mandatory. Do not advance to the next phase until all gates pass.
 
 `broadcast` the aggregate gate result when all four pass: `[🛠️ ORCHESTRATOR] Phase {N} gates verified — lint, memory, compaction, commit all PASS` at `success` level. If any gate fails after remediation, `broadcast` at `error` level with the failing gate name and details.
+
 ### Step 5: Phase Loop (Full Mode Only)
 This step applies only when `${input:mode}` is `full`. Skip to Step 6 in single mode.
 After Step 4 confirms all gates passed for the current phase:
 1. Remove the completed phase from the phase queue.
-2. If the phase queue is empty, proceed to Step 6 (all phases complete).
+2. If the phase queue is empty, proceed to Step 6 (final review).
 3. If the phase queue has remaining phases:
    * Report a phase transition summary: which phase just completed, which phase is next, how many phases remain.
    * `broadcast` the transition: `[🛠️ ORCHESTRATOR] Phase {N} complete → starting phase {M} ({remaining} phases left)` at `info` level.
    * Set the next phase number from the queue.
    * Return to Step 3 to execute the next phase.
 The loop continues until every phase in the queue has been built, verified, memory-recorded, compacted, and committed. Each iteration of this loop produces its own memory file and checkpoint, ensuring session state is never lost between phases.
-### Step 6: Report Completion
+
+### Step 6: Final Adversarial Code Review (Mandatory Gate)
+
+This step is a mandatory quality gate that runs after all phases are complete (full mode after the loop exits, single mode after the phase gates pass). It performs a comprehensive adversarial code review of the entire feature implementation using three independent model reviewers.
+
+1. **Collect feature artifacts**: Identify all files created or modified across all completed phases of the feature. Use `git diff` against the branch point or the commit before the first phase to gather the complete set of changes. For each file, capture the current content and the cumulative diff.
+
+2. **Load review context**: Read the feature specification (`specs/${input:specName}/spec.md`, `plan.md`, `tasks.md`) and the project constitution (`.github/instructions/constitution.instructions.md`) to provide reviewers with requirements context.
+
+3. **Dispatch adversarial reviewers**: Launch three adversarial code review subagents in parallel using `runSubagent`, each configured with a different model and a distinct review focus. All three receive the identical set of file contents, diffs, the specification artifacts, and the constitution.
+
+   Each reviewer produces a structured findings list. Limit each reviewer to 25 findings maximum.
+
+   #### A. Reviewer — Code Correctness and Security (Gemini 3.1 Pro Preview)
+
+   Invoke `runSubagent` with `model: "gemini-3.1-pro-preview"` and the following prompt:
+
+   ```text
+   You are an adversarial code reviewer performing a comprehensive review of an
+   entire feature implementation in a Rust codebase. Focus on correctness,
+   security, and edge-case handling.
+
+   Analyze all provided source files and diffs alongside the feature specification
+   and project constitution. Produce structured findings for:
+
+   1. Logic errors, incorrect control flow, or race conditions across modules.
+   2. Security vulnerabilities — path traversal, injection, unauthorized access,
+      missing input validation, credential exposure.
+   3. Error handling gaps — missing error propagation, swallowed errors, incorrect
+      error variant usage.
+   4. Edge cases not covered — empty inputs, boundary values, concurrent access,
+      resource exhaustion, network failures.
+   5. Constitution violations — unsafe code, unwrap/expect usage, missing doc
+      comments, incorrect error handling patterns.
+   6. Cross-module integration issues — mismatched types at module boundaries,
+      broken contracts between components.
+
+   For each finding, produce a table row with columns:
+   ID (prefix CS), Severity (CRITICAL/HIGH/MEDIUM/LOW),
+   File, Line(s), Summary, Recommended Fix.
+
+   After the findings table, include:
+   - A summary paragraph with your overall assessment of code quality.
+   - A count of findings by severity level.
+
+   Limit output to 25 findings. Prioritize by severity.
+   ```
+
+   When constructing the `runSubagent` prompt parameter, concatenate the reviewer prompt text above with the full content of each modified file, the corresponding diffs, the specification artifacts, and the constitution.
+
+   #### B. Reviewer — Technical Quality and Architecture (GPT-5.3 Codex)
+
+   Invoke `runSubagent` with `model: "gpt-5.3-codex"` and the following prompt:
+
+   ```text
+   You are an adversarial code reviewer performing a comprehensive review of an
+   entire feature implementation in a Rust codebase. Focus on technical quality,
+   architectural consistency, and performance.
+
+   Analyze all provided source files and diffs alongside the feature specification
+   and project constitution. Produce structured findings for:
+
+   1. Architectural violations — code breaking module boundaries, bypassing the
+      repository layer, circular dependencies, or violating separation of concerns.
+   2. Performance concerns — unnecessary allocations, blocking in async contexts,
+      missing concurrency primitives, inefficient algorithms.
+   3. API design issues — inconsistent naming, leaky abstractions, incorrect
+      visibility modifiers, missing pub(crate) restrictions.
+   4. Code duplication across the feature — repeated logic extractable into shared
+      functions, traits, or utility modules.
+   5. Specification compliance — implementation that deviates from the feature spec
+      requirements, missing functionality, or over-engineering beyond scope.
+   6. Test architecture — missing integration tests, inadequate negative test cases,
+      tests that don't validate the specification's acceptance criteria.
+
+   For each finding, produce a table row with columns:
+   ID (prefix TQ), Severity (CRITICAL/HIGH/MEDIUM/LOW),
+   File, Line(s), Summary, Recommended Fix.
+
+   After the findings table, include:
+   - A summary paragraph with your overall assessment of code quality.
+   - A count of findings by severity level.
+
+   Limit output to 25 findings. Prioritize by severity.
+   ```
+
+   When constructing the `runSubagent` prompt parameter, concatenate the reviewer prompt text above with the full content of each modified file, the corresponding diffs, the specification artifacts, and the constitution.
+
+   #### C. Reviewer — Logical Consistency and Completeness (Claude Opus 4.6)
+
+   Invoke `runSubagent` with `model: "claude-opus-4.6"` and the following prompt:
+
+   ```text
+   You are an adversarial code reviewer performing a comprehensive review of an
+   entire feature implementation in a Rust codebase. Focus on logical consistency,
+   requirement completeness, and holistic code quality.
+
+   Analyze all provided source files and diffs alongside the feature specification
+   and project constitution. Produce structured findings for:
+
+   1. Requirement coverage gaps — spec requirements without corresponding
+      implementation or with incomplete implementation.
+   2. Logical inconsistencies — contradictory behavior across modules, state
+      machine violations, invariant breaches.
+   3. Error recovery gaps — failure modes without recovery paths, missing
+      retry logic, silent failures in distributed flows.
+   4. Configuration and deployment issues — hardcoded values, missing
+      configuration options, environment-specific assumptions.
+   5. Documentation gaps — public APIs without doc comments, misleading
+      comments, outdated documentation relative to implementation.
+   6. Maintainability concerns — overly complex functions, deep nesting,
+      unclear naming, missing abstractions that will hinder future development.
+
+   For each finding, produce a table row with columns:
+   ID (prefix LC), Severity (CRITICAL/HIGH/MEDIUM/LOW),
+   File, Line(s), Summary, Recommended Fix.
+
+   After the findings table, include:
+   - A summary paragraph with your overall assessment of code quality.
+   - A count of findings by severity level.
+
+   Limit output to 25 findings. Prioritize by severity.
+   ```
+
+   When constructing the `runSubagent` prompt parameter, concatenate the reviewer prompt text above with the full content of each modified file, the corresponding diffs, the specification artifacts, and the constitution.
+
+4. **Synthesize findings**: After all three reviewers return, merge their findings into a unified report:
+   * **Agreement elevation**: Findings identified independently by two or more reviewers are elevated in confidence. When reviewers assign different severities to the same finding, adopt the higher severity.
+   * **Conflict resolution**: When reviewers produce contradictory findings, reason about the conflict using the source code as ground truth. Resolve in favor of the interpretation most consistent with the constitution and specification. Record the reasoning.
+   * **Deduplication**: Merge findings referencing the same file and line range with the same issue. Retain the strongest reasoning and most actionable recommendation.
+   * **Severity normalization**:
+     * *Critical*: Constitution violations, security vulnerabilities, data loss risks, specification non-compliance affecting core functionality.
+     * *High*: Logic errors, architectural violations, missing error handling, or findings agreed by all three reviewers.
+     * *Medium*: Performance concerns, code duplication, test gaps, or findings identified by exactly two reviewers.
+     * *Low*: Style improvements, documentation polish, or single-reviewer findings without corroboration.
+   * **Consensus tagging**: Tag each finding as *unanimous* (3/3), *majority* (2/3), or *single* (1/3).
+   * Limit the unified findings list to 40 entries.
+
+5. **Produce combined report**: Generate a markdown report including:
+   * Reviewer summary table (model, focus area, findings count).
+   * Unified findings table (ID, Severity, File, Lines, Summary, Recommended Fix, Consensus).
+   * Metrics: total findings pre-deduplication, post-synthesis, agreement rate, conflict count.
+
+6. **When agent-intercom is active**: `broadcast` the review summary at `info` level: `[🛠️ ORCHESTRATOR] Final adversarial review complete — {critical} critical, {high} high, {medium} medium, {low} low findings across {reviewers} reviewers`.
+
+If the review produces zero critical or high findings, skip Step 7 and proceed directly to Step 8. Otherwise, proceed to Step 7 to apply fixes.
+
+### Step 7: Apply Final Adversarial Review Fixes (Mandatory Gate)
+
+This step applies fixes from the final adversarial code review in Step 6. It is mandatory when the review produced critical or high severity findings. Skip to Step 8 when the review found zero critical or high findings.
+
+1. **Dispatch fix subagent**: Launch a `runSubagent` to apply the recommended fixes from the combined adversarial review report. The subagent receives the unified findings (critical and high severity), all affected source files, the project constitution, and the coding standards from `.github/copilot-instructions.md`.
+
+   Subagent instructions:
+   * Read the unified adversarial review findings.
+   * For each critical and high severity finding with an actionable recommendation:
+     * Read the affected source file.
+     * Apply the recommended code change.
+     * Run `cargo check` after each fix to verify compilation is maintained.
+     * If a fix introduces a compilation error, diagnose and adjust before proceeding.
+   * For medium severity findings, apply fixes that are low-risk and clearly beneficial. Defer fixes that conflict with the feature's design intent and document the reasoning.
+   * For low severity findings, skip — these are recorded as suggestions only.
+   * After all fixes are applied, run `cargo test` to verify no regressions.
+   * Return a remediation summary: findings addressed, files modified, deferred items with justification.
+
+2. **Verification pass**: After the fix subagent returns:
+   * Run `cargo check` to confirm compilation.
+   * Run `cargo clippy --all-targets -- -D warnings -D clippy::pedantic` to confirm lint compliance.
+   * Run `cargo fmt --all -- --check` to confirm formatting.
+   * Run `cargo test` to confirm all tests pass.
+   * If any check fails, fix the violations and re-run all checks until clean.
+
+3. **Log remediation**: Record the fix subagent's output in the session memory, including:
+   * Findings applied with file paths and change descriptions.
+   * Findings deferred with justification.
+   * Final verification results (test count, clippy status, fmt status).
+
+4. **Commit fixes**: If any files were modified during remediation:
+   * Run `git add -A` to stage all changes.
+   * Commit with message: `fix({spec-name}): apply adversarial review fixes for feature`.
+   * Run `git push` to sync.
+
+5. **When agent-intercom is active**: `broadcast` the remediation result at `success` level: `[🛠️ ORCHESTRATOR] Final review fixes applied — {applied} fixes, {deferred} deferred, all gates PASS`.
+
+Proceed to Step 8 after all fixes are applied and the verification pass succeeds.
+
+### Step 8: Report Completion
 
 Summarize the build results:
 

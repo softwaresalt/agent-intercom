@@ -1,4 +1,5 @@
 ---
+name: speckit.analyze
 description: Perform a non-destructive cross-artifact consistency and quality analysis across spec.md, plan.md, tasks.md, and SCENARIOS.md after task generation.
 handoffs: 
   - label: Build the Feature

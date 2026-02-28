@@ -1,28 +1,34 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 2.0.0 → 2.1.0
-Bump rationale: MINOR — new Principle VII (CLI Workspace Containment)
-  added to enforce cwd-only filesystem access for Copilot CLI mode
+Version change: 2.1.0 → 2.2.0
+Bump rationale: MINOR — new Principle VIII (Destructive Terminal
+  Command Approval) added to mandate operator approval for all
+  destructive terminal commands regardless of agent mode
 
 New principles:
-  - VII. CLI Workspace Containment (NON-NEGOTIABLE) — forbids file
-    writes/deletes outside the current working directory in CLI mode
+  - VIII. Destructive Terminal Command Approval (NON-NEGOTIABLE) —
+    all destructive terminal commands MUST go through agent-intercom
+    operator approval regardless of --allow-all or --yolo mode
 
 Modified sections: (none)
 Removed sections: (none)
 
 Templates requiring updates:
   - .specify/templates/plan-template.md ✅ no changes required
+    (Constitution Check section already maps all principles generically)
   - .specify/templates/spec-template.md ✅ no changes required
   - .specify/templates/tasks-template.md ✅ no changes required
-  - .specify/templates/checklist-template.md ✅ no changes required
-  - .specify/templates/agent-file-template.md ✅ no changes required
+  - .github/instructions/constitution.instructions.md ✅ updated
+  - .github/copilot-instructions.md ✅ already contains matching
+    "Destructive Terminal Command Approval (NON-NEGOTIABLE)" section
 
-Amendment: v2.1.0 ratified on 004-intercom-advanced-features branch
+Follow-up TODOs: (none)
 
-Previous amendment: v2.0.0 ratified post-merge of 003-agent-intercom-release
-(branch: 003-agent-intercom-release, commit: b6f5898)
+Amendment: v2.2.0 ratified on 005-intercom-acp-server branch
+
+Previous amendment: v2.1.0 ratified on 004-intercom-advanced-features
+  branch (added Principle VII: CLI Workspace Containment)
 -->
 
 # agent-intercom Constitution
@@ -143,6 +149,34 @@ configuration, or destroy data in sibling directories. Strict
 cwd containment is the last line of defense when no human is
 watching.
 
+### VIII. Destructive Terminal Command Approval (NON-NEGOTIABLE)
+
+All destructive terminal commands MUST go through agent-intercom
+operator approval before execution, regardless of whether the
+agent is running in `--allow-all`, `--yolo`, or any other
+permissive mode. A terminal command is destructive if it deletes
+files or directories, overwrites files without backup, modifies
+system configuration, alters version control history (e.g.,
+`git reset --hard`, `git push --force`), drops or truncates
+database content, installs or removes system-level packages, or
+executes arbitrary code from untrusted sources. The required
+workflow is: (1) detect whether the command is destructive,
+(2) route through agent-intercom (`auto_check` → `check_clearance`),
+(3) execute only after receiving `status: "approved"` from the
+operator. Permissive agent flags (`--allow-all`, `--yolo`) MUST
+NOT bypass this gate — they apply only to non-destructive
+operations.
+
+**Rationale**: Permissive agent modes exist to reduce friction for
+routine operations like file creation, modification, and safe
+build/test commands. A single misrouted destructive command can
+irrecoverably corrupt repositories, delete production data, or
+break system configuration. Agents operating autonomously for
+extended periods may accumulate context drift that leads to
+incorrect destructive actions. The operator retains final
+authority over any operation that permanently removes or alters
+critical resources.
+
 ## Technical Constraints
 
 - **Language**: Rust stable, edition 2021
@@ -204,4 +238,4 @@ checks MUST verify compliance with these principles.
   principle violated, the justification, and the simpler
   alternative that was rejected.
 
-**Version**: 2.1.0 | **Ratified**: 2026-02-10 | **Last Amended**: 2026-02-26
+**Version**: 2.2.0 | **Ratified**: 2026-02-10 | **Last Amended**: 2026-02-28

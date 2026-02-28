@@ -1,0 +1,92 @@
+[
+  {
+    "id": "ES-001",
+    "severity": "CRITICAL",
+    "category": "security",
+    "title": "Credential Leakage to Untrusted Agent Process",
+    "artifacts": ["spec.md", "src/config.rs"],
+    "detail": "The specification and `config.rs` indicate that sensitive credentials (SLACK_BOT_TOKEN, SLACK_APP_TOKEN) are loaded into the server's environment. The ACP spawner uses `tokio::process::Command` to launch the agent. By default, child processes inherit the parent's environment variables. This means the untrusted agent process will have full access to the Slack bot tokens, allowing it to impersonate the server, read all messages, and perform unauthorized actions on the Slack workspace.",
+    "recommendation": "Explicitly clear the environment of the child process using `Command::env_clear()` and allowlisting only safe variables (e.g., PATH, RUST_LOG). Do NOT pass the parent's environment to the agent."
+  },
+  {
+    "id": "ES-002",
+    "severity": "HIGH",
+    "category": "security",
+    "title": "Potential Command Injection via Session Prompt",
+    "artifacts": ["spec.md", "SCENARIOS.md"],
+    "detail": "Scenario S018 describes starting a session with `/intercom session-start \"prompt\"`. If the `host_cli` configuration allows passing arguments, and the initial prompt is passed as a command-line argument to the agent executable (instead of via stdin), this creates a command injection vulnerability. A malicious prompt (e.g., `\"; rm -rf /\"`) could be executed by the shell if the `host_cli` is a script or shell wrapper.",
+    "recommendation": "Mandate in the specification that the initial prompt MUST be sent via the ACP stream (stdin) as a `prompt/send` message immediately after connection, and NEVER as a command-line argument. Validate `host_cli_args` in `config.toml` to ensure they are static."
+  },
+  {
+    "id": "ES-003",
+    "severity": "HIGH",
+    "category": "authorization",
+    "title": "Cross-Session Interference by Authorized Users",
+    "artifacts": ["spec.md", "contracts/agent-driver.md"],
+    "detail": "While the spec mentions that sessions are bound to an owner (IV. Security Boundary Enforcement), there is no explicit requirement in the `AgentDriver` contract or User Story 6 (Multi-Session Routing) to verify that the actor resolving a clearance or sending a prompt is the session owner. In a channel with multiple authorized users (e.g., a team channel), User B could approve a critical file deletion for User A's session, bypassing the intended single-owner security model.",
+    "recommendation": "Update the `AgentDriver` contract and `SCENARIOS.md` to require that all session-modifying actions (resolve_clearance, interrupt, send_prompt) verify that the Slack user ID of the actor matches the `owner_user_id` of the session. Reject actions from non-owners."
+  },
+  {
+    "id": "ES-004",
+    "severity": "MEDIUM",
+    "category": "resource",
+    "title": "Orphaned Agent Processes (Zombie Processes)",
+    "artifacts": ["plan.md", "SCENARIOS.md"],
+    "detail": "The plan relies on `tokio::process::Command`'s `kill_on_drop(true)` for process cleanup (S021, S025). However, this only kills the direct child process. If the agent spawns its own subprocesses (e.g., a shell script launching the actual agent), or if the server crashes hard (panic/OOM), `kill_on_drop` may not trigger or may leave grandchild processes running. This can lead to resource exhaustion over time.",
+    "recommendation": "Implement process group termination (Unix) or Job Objects (Windows) to ensure the entire process tree is terminated when the session ends or the server shuts down."
+  },
+  {
+    "id": "ES-005",
+    "severity": "MEDIUM",
+    "category": "dos",
+    "title": "ACP Stream Rate Limiting (DoS)",
+    "artifacts": ["contracts/acp-stream.md"],
+    "detail": "The ACP stream contract specifies a max line length of 1MB (S057), but does not specify a rate limit for incoming messages. A malicious or buggy agent could flood the server with valid 1KB status updates at 10,000 messages per second, saturating the server's CPU and memory (buffering `AgentEvent`s in the mpsc channel) and potentially hitting Slack API rate limits if those updates are forwarded.",
+    "recommendation": "Implement a token-bucket rate limiter on the ACP reader task (e.g., max 10 messages/sec). If the agent exceeds this, throttle or terminate the session."
+  },
+  {
+    "id": "ES-006",
+    "severity": "MEDIUM",
+    "category": "recovery",
+    "title": "Stall Detection Reset on Server Restart",
+    "artifacts": ["spec.md", "src/config.rs"],
+    "detail": "Stall detection relies on in-memory timers (FR-022). If the server restarts, these timers are lost. A session that was near stalling (or already stalled) will have its timer reset to zero on restart. If the agent remains silent, it will take another full `inactivity_threshold` period to be detected. This delays recovery for stalled sessions.",
+    "recommendation": "Persist the `last_activity_at` timestamp in the `session` table. On server startup, initialize the stall detector's timers based on `now - session.last_activity_at` to accurately resume monitoring."
+  },
+  {
+    "id": "ES-007",
+    "severity": "LOW",
+    "category": "edge_case",
+    "title": "Startup Race Condition (Event before Session Commit)",
+    "artifacts": ["plan.md"],
+    "detail": "The plan implies spawning the process and then managing the session. If the agent process starts and immediately writes to stdout (e.g., `heartbeat` or `status/update`) before the `session_manager` has committed the new session record to the database or registered it in the `AppState`, the reader task might dispatch an `AgentEvent` that fails lookup in the core loop.",
+    "recommendation": "Ensure the session record is committed to the DB and registered in the driver map *before* the ACP reader task is started or allowed to emit events."
+  },
+  {
+    "id": "ES-008",
+    "severity": "MEDIUM",
+    "category": "integrity",
+    "title": "Partial Write Corruption on Crash",
+    "artifacts": ["contracts/acp-stream.md"],
+    "detail": "The ACP stream uses NDJSON. If the server crashes while writing a large message (e.g., a prompt) to the agent's stdin, the agent receives a partial line. The contract handles *read* fragmentation, but not *write* atomicity or recovery. The agent will likely discard the partial line, meaning it misses the instruction/approval, leading to a state mismatch (Server thinks 'Approved', Agent waits).",
+    "recommendation": "Add a strictly increasing sequence number to outbound messages. On reconnection/restart, the agent (or server) can check the last received sequence number to detect gaps, though full recovery requires a more complex protocol. Minimally, log the write failure so the operator knows the state is inconsistent."
+  },
+  {
+    "id": "ES-009",
+    "severity": "LOW",
+    "category": "edge_case",
+    "title": "Workspace Mapping Hot-Reload Race",
+    "artifacts": ["contracts/workspace-mapping.md"],
+    "detail": "Scenario S034 states active sessions are unaffected by config reload. However, if a reload happens *exactly* when a new session is being created (between `resolving` the channel and `creating` the session record), there's a race. If the mapping is removed, the session might be created with a channel ID that is no longer valid or mapped.",
+    "recommendation": "Use a read lock on the workspace configuration during the entire session creation transaction to ensure consistency."
+  },
+  {
+    "id": "ES-010",
+    "severity": "HIGH",
+    "category": "security",
+    "title": "Unbounded `host_cli` Execution",
+    "artifacts": ["spec.md", "src/config.rs"],
+    "detail": "The `host_cli` setting in `config.toml` allows executing any binary. If an attacker gains write access to `config.toml` (e.g., via a separate vulnerability or misconfiguration), they can change `host_cli` to a malicious script. When the operator runs `/intercom session-start`, the server executes the malware with the server's privileges (and potentially tokens, see ES-001).",
+    "recommendation": "While `config.toml` is trusted, adding an allowlist of permitted binaries or strict path validation (must be in system PATH or specific directory) reduces the blast radius. At minimum, log a CRITICAL warning on startup if `host_cli` points to a non-standard location."
+  }
+]

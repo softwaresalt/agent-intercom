@@ -50,6 +50,9 @@ Use `broadcast` (non-blocking) and `ping` (progress snapshots) throughout the ph
 | After test suite run | `ping` | — | Include `progress_snapshot` with per-task `done`/`in_progress`/`pending` |
 | Gate check result | `broadcast` | `success` or `error` | `[GATE] {gate_name}: PASS` or `FAIL — {details}` |
 | Architectural decision | `broadcast` | `info` | `[ADR] {title} — {one-line rationale}` |
+| Adversarial review complete | `broadcast` | `info` | `[REVIEW] Adversarial code review complete — {critical} critical, {high} high, {medium} medium, {low} low findings` |
+| Adversarial fix applied | `broadcast` | `info` | `[FIX] {finding_id}: {file_path}` — include unified diff in body |
+| Adversarial fixes complete | `broadcast` | `success` | `[REVIEW] Fixes applied — {applied} fixes, {deferred} deferred, compilation {status}` |
 | Phase complete | `broadcast` | `success` | `[BUILD] Phase {N} complete — {tasks_done}/{tasks_total} tasks, commit {short_hash}` |
 
 Post the first `broadcast` of each phase as a new top-level message and capture the returned `ts` value. Use that `ts` as the `thread_ts` parameter for all subsequent messages in the same phase to keep them grouped in a single Slack thread.
@@ -249,9 +252,141 @@ Execute tasks in dependency order following TDD discipline:
    * For parallel tasks `[P]`, continue with successful tasks and report failed ones.
    * Provide clear error messages with context for debugging.
    * If implementation cannot proceed, report the blocker and suggest next steps.
-4. Track architectural decisions made during implementation for recording in Step 6.
+4. Track architectural decisions made during implementation for recording in Step 8.
 
-### Step 4: Test Phase (Mandatory Gate)
+### Step 4: Adversarial Code Review (Mandatory Gate)
+
+This step is a mandatory quality gate. After all tasks in the phase have been built in Step 3, two independent adversarial code reviewers analyze the implementation for correctness, security, and constitution compliance before the code proceeds to testing.
+
+1. **Collect phase artifacts**: Gather the list of all files created or modified during Step 3. For each file, capture the current content and the unified diff representing changes made during this phase.
+
+2. **Dispatch adversarial reviewers**: Launch two adversarial code review subagents in parallel using `runSubagent`, each configured with a different model and a distinct review focus. Both receive the identical set of file contents, diffs, the project constitution (`.github/instructions/constitution.instructions.md`), and the phase's task list from `specs/${input:spec-name}/tasks.md`.
+
+   Each reviewer produces a structured findings list. Limit each reviewer to 20 findings maximum to keep synthesis tractable.
+
+   #### A. Reviewer — Code Correctness and Security (Gemini 3.1 Pro Preview)
+
+   Invoke `runSubagent` with `model: "gemini-3.1-pro-preview"` and the following prompt:
+
+   ```text
+   You are an adversarial code reviewer focused on correctness, security,
+   and edge-case handling in a Rust codebase.
+
+   Analyze the provided source files and diffs from this build phase alongside
+   the project constitution. Produce structured findings for:
+
+   1. Logic errors, off-by-one mistakes, or incorrect control flow.
+   2. Security vulnerabilities — path traversal, injection, unauthorized access,
+      missing input validation.
+   3. Error handling gaps — unwrap/expect usage, missing error propagation,
+      swallowed errors.
+   4. Edge cases not covered — empty inputs, boundary values, concurrent access,
+      resource exhaustion.
+   5. Constitution violations — unsafe code, missing doc comments, incorrect
+      error handling patterns.
+   6. Missing or inadequate test coverage for new code paths.
+
+   For each finding, produce a table row with columns:
+   ID (prefix CS), Severity (CRITICAL/HIGH/MEDIUM/LOW),
+   File, Line(s), Summary, Recommended Fix.
+
+   After the findings table, include:
+   - A summary paragraph with your overall assessment of code quality.
+   - A count of findings by severity level.
+
+   Limit output to 20 findings. Prioritize by severity.
+   ```
+
+   When constructing the `runSubagent` prompt parameter, concatenate the reviewer prompt text above with the full content of each modified file, the corresponding diffs, and the constitution.
+
+   #### B. Reviewer — Technical Quality and Architecture (GPT-5.3 Codex)
+
+   Invoke `runSubagent` with `model: "gpt-5.3-codex"` and the following prompt:
+
+   ```text
+   You are an adversarial code reviewer focused on technical quality,
+   architectural consistency, and performance in a Rust codebase.
+
+   Analyze the provided source files and diffs from this build phase alongside
+   the project constitution. Produce structured findings for:
+
+   1. Architectural violations — code that breaks module boundaries, bypasses
+      the repository layer, or introduces circular dependencies.
+   2. Performance concerns — unnecessary allocations, blocking operations in
+      async contexts, missing concurrency primitives.
+   3. API design issues — inconsistent naming, leaky abstractions, missing
+      pub(crate) visibility restrictions.
+   4. Code duplication — repeated logic that should be extracted into shared
+      functions or traits.
+   5. Clippy and idiomatic Rust violations — non-idiomatic patterns that
+      clippy pedantic would flag.
+   6. Test quality — tests that don't assert meaningful behavior, missing
+      negative test cases, brittle test assumptions.
+
+   For each finding, produce a table row with columns:
+   ID (prefix TQ), Severity (CRITICAL/HIGH/MEDIUM/LOW),
+   File, Line(s), Summary, Recommended Fix.
+
+   After the findings table, include:
+   - A summary paragraph with your overall assessment of code quality.
+   - A count of findings by severity level.
+
+   Limit output to 20 findings. Prioritize by severity.
+   ```
+
+   When constructing the `runSubagent` prompt parameter, concatenate the reviewer prompt text above with the full content of each modified file, the corresponding diffs, and the constitution.
+
+3. **Synthesize findings**: After both reviewers return, merge their findings into a unified report:
+   * **Agreement elevation**: Findings identified by both reviewers are elevated in confidence. When reviewers assign different severities, adopt the higher severity.
+   * **Deduplication**: Merge findings referencing the same file and line range with the same issue. Retain the strongest reasoning and most actionable recommendation.
+   * **Severity normalization**:
+     * *Critical*: Constitution violations, security vulnerabilities, data loss risks.
+     * *High*: Logic errors, missing error handling, architectural violations agreed by both reviewers.
+     * *Medium*: Performance concerns, code duplication, test quality issues, or findings identified by only one reviewer with strong justification.
+     * *Low*: Style improvements, minor naming inconsistencies, or single-reviewer findings without corroboration.
+   * **Consensus tagging**: Tag each finding as *agreed* (2/2 reviewers) or *single* (1/2).
+   * Limit the unified findings list to 30 entries.
+
+4. **Report findings**: Produce a summary of the adversarial review results including:
+   * A reviewer summary table (model, focus area, findings count).
+   * The unified findings table (ID, Severity, File, Lines, Summary, Recommended Fix, Consensus).
+   * A metrics summary: total findings pre-deduplication, post-synthesis, agreement rate.
+
+5. **When agent-intercom is active**: `broadcast` the review summary at `info` level: `[REVIEW] Adversarial code review complete — {critical} critical, {high} high, {medium} medium, {low} low findings`.
+
+If the review produces zero critical or high findings, proceed directly to Step 6. Otherwise, proceed to Step 5 to apply fixes before testing.
+
+### Step 5: Apply Adversarial Review Fixes (Mandatory Gate)
+
+This step applies fixes from the adversarial code review in Step 4. It is mandatory when the review produced critical or high severity findings. Skip to Step 6 only when the review found zero critical or high findings.
+
+1. **Severity-gated remediation**:
+   * **Critical and High**: Apply the recommended fix directly to the affected source file. These fixes are mandatory and non-negotiable.
+   * **Medium**: Apply the recommended fix. If the fix conflicts with the phase's design intent, document the reasoning for deferral in the review report.
+   * **Low**: Record as suggestions in the review report. Do not apply unless the fix is trivial and risk-free.
+
+2. **Apply fixes iteratively**: For each finding with an actionable recommendation:
+   * Read the affected source file.
+   * Apply the recommended code change.
+   * **When agent-intercom is active**: write fixes directly and `broadcast` at `info` level with `[FIX] {finding_id}: {file_path}` and include the unified diff.
+   * Run `cargo check` after each fix to verify compilation is maintained.
+   * If a fix introduces a compilation error, diagnose and adjust the fix before proceeding.
+
+3. **Verification pass**: After all fixes are applied:
+   * Run `cargo check` to confirm the project still compiles.
+   * Run `cargo test` to confirm no regressions were introduced.
+   * If new test failures appear, diagnose whether the fix or the test is incorrect and resolve.
+   * If the verification pass reveals new issues at critical or high severity, apply those fixes immediately (maximum two correction cycles to prevent infinite loops).
+
+4. **Log remediation**: Record all applied fixes in the session's review log:
+   * Finding ID, file path, description of the change, severity, and consensus tag.
+   * Note any findings that were deferred with justification.
+
+5. **When agent-intercom is active**: `broadcast` the remediation result at `success` level: `[REVIEW] Fixes applied — {applied} fixes, {deferred} deferred, compilation {status}`.
+
+Proceed to Step 6 after all fixes are applied and the verification pass succeeds.
+
+### Step 6: Test Phase (Mandatory Gate)
 
 This step is a hard gate. The phase is not complete until all tests pass **and** both `cargo clippy` and `cargo fmt` exit cleanly. Do not skip lint or format checks under any circumstances, including context pressure or time constraints.
 Run the full test suite and iterate until all checks pass:
@@ -272,9 +407,9 @@ Run the full test suite and iterate until all checks pass:
 9. `broadcast` the gate result: `[GATE] Test phase: PASS` at `success` level, or `FAIL — {summary}` at `error` level.
 10. Report final results: test suite counts, pass rates, clippy exit code, fmt exit code, and any notable findings.
 
-All three checks (`cargo test`, `cargo clippy`, `cargo fmt --check`) must exit 0 before proceeding to Step 5. Return to Step 3 if test failures reveal missing implementation work. Continue iterating between Step 3 and Step 4 until build, test, lint, and format all pass cleanly.
+All three checks (`cargo test`, `cargo clippy`, `cargo fmt --check`) must exit 0 before proceeding to Step 7. Return to Step 3 if test failures reveal missing implementation work. Continue iterating between Step 3 and Step 6 until build, test, lint, and format all pass cleanly.
 
-### Step 5: Constitution Validation
+### Step 7: Constitution Validation
 
 Re-check the constitution after implementation is complete:
 
@@ -286,10 +421,10 @@ Re-check the constitution after implementation is complete:
 * Verify all Slack message posting routes through the rate-limited message queue.
 * Verify all file path operations validate against the workspace root via `starts_with()`.
 * Verify test coverage aligns with the 80% target from the constitution.
-* If any remediation changes were made during this step, write them directly (when agent-intercom is active, route only destructive operations through the approval workflow) and re-run the Step 4 gate checks (`cargo test`, `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`, `cargo fmt --all -- --check`) to confirm the fixes did not introduce new lint or format violations. All three must exit 0 before proceeding.
+* If any remediation changes were made during this step, write them directly (when agent-intercom is active, route only destructive operations through the approval workflow) and re-run the Step 6 gate checks (`cargo test`, `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`, `cargo fmt --all -- --check`) to confirm the fixes did not introduce new lint or format violations. All three must exit 0 before proceeding.
 * `broadcast` the constitution validation result: `[GATE] Constitution: PASS` at `success` level, or `FAIL — {violations}` at `error` level.
 
-### Step 6: Record Architectural Decisions
+### Step 8: Record Architectural Decisions
 
 For each significant decision made during the build phase:
 
@@ -305,7 +440,7 @@ For each significant decision made during the build phase:
 * **When agent-intercom is active**: call `broadcast` at `info` level for each ADR created: `[ADR] {NNNN}-{short-title} — {one-line rationale}`.
 * Skip this step if no significant architectural decisions were made during the phase.
 
-### Step 7: Record Session Memory (Mandatory Gate)
+### Step 9: Record Session Memory (Mandatory Gate)
 
 This step is a hard gate. The phase is not complete until the memory file exists on disk. Do not skip this step under any circumstances, including context pressure or time constraints.
 Persist the full session details to `.copilot-tracking/memory/` following the project's session memory requirements:
@@ -321,18 +456,18 @@ Persist the full session details to `.copilot-tracking/memory/` following the pr
 * After writing the file, verify it exists by reading it back. If the file is missing or empty, halt and retry.
 * **When agent-intercom is active**: call `broadcast` at `info` level: `[MEMORY] Session recorded: {memory_file_path}`.
 
-### Step 8: Pre-Commit Verification and Stage
+### Step 10: Pre-Commit Verification and Stage
 
 1. Run `cargo fmt --all -- --check` to confirm formatting is clean. If it fails, run `cargo fmt --all` to auto-fix, then re-run the check.
 2. Run `cargo clippy --all-targets -- -D warnings -D clippy::pedantic` to confirm lint compliance. If it fails, fix violations and re-run until clean.
 3. Run `cargo test` to confirm all tests still pass. If any test fails, fix and re-run.
 4. If any fixes were applied in steps 1–3, repeat all three checks from step 1 to ensure no cascading violations. All three commands must exit 0 before proceeding.
 5. Review all changes made during the phase to ensure they align with the completed tasks and constitution.
-6. Review the ADRs created in Step 6 for clarity and completeness.
+6. Review the ADRs created in Step 8 for clarity and completeness.
 7. Review all steps to ensure that no steps have been missed and address any missing steps in the sequence before proceeding.
 8. Review the session memory file for completeness and accuracy.
 
-### Step 9: Stage, Commit, and Sync
+### Step 11: Stage, Commit, and Sync
 
 Finalize all changes with a Git commit:
 
@@ -347,13 +482,13 @@ Finalize all changes with a Git commit:
 5. Run `git push` to sync the commit to the remote repository.
 6. Report the commit hash and a summary of changes committed.
 
-### Step 10: Compact Context (Mandatory Gate)
+### Step 12: Compact Context (Mandatory Gate)
 This step is a hard gate. The phase is not complete until context compaction has run and a checkpoint file exists. Do not skip this step, even if context space appears sufficient. When running in full-spec loop mode, the orchestrator verifies checkpoint existence before advancing to the next phase.
 1. Run the `compact-context` skill (located at `.github/skills/compact-context/SKILL.md`).
 2. Follow all steps defined in that skill: gather session state, write checkpoint, report, and compact.
 3. Verify a checkpoint file was created in `.copilot-tracking/checkpoints/` during this execution. If missing, retry the compact-context skill.
 ### Phase Completion Signal
-After Step 10 completes, the phase is fully done. Report the following completion signal for the orchestrator to consume:
+After Step 12 completes, the phase is fully done. Report the following completion signal for the orchestrator to consume:
 * **Phase**: `{phase-number}` — `{phase title}`
 * **Status**: COMPLETE
 * **Memory file**: `.copilot-tracking/memory/{YYYY-MM-DD}/{spec-name}-phase-{N}-memory.md`

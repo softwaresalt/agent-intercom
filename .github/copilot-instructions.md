@@ -3,7 +3,7 @@ description: Shared agent-intercom development guidelines for custom agents.
 ---
 # agent-intercom Development Guidelines
 
-Last updated: 2026-02-23
+Last updated: 2026-02-28
 
 ## Active Technologies
 
@@ -30,6 +30,7 @@ Last updated: 2026-02-23
 | `glob` | 0.3 | Glob pattern matching |
 | `toml` | 0.8 | TOML config file parsing |
 | `tempfile` | 3.10 | Atomic file writes |
+| `regex` | 1.12 | Regular expression matching (policy evaluation) |
 
 ## Project Structure
 
@@ -38,9 +39,11 @@ src/
   config.rs               # GlobalConfig, credential loading, TOML parsing
   errors.rs               # AppError enum (Config, Db, Slack, Mcp, Diff, Policy,
                            #   Ipc, PathViolation, PatchConflict, NotFound,
-                           #   Unauthorized, AlreadyConsumed)
+                           #   Unauthorized, AlreadyConsumed, Io)
   lib.rs                  # Crate root — re-exports GlobalConfig, AppError, Result
   main.rs                 # CLI bootstrap, tokio runtime, server startup
+  audit/                  # Audit logging subsystem
+    writer.rs             # AuditLogger trait and file-based implementation
   diff/                   # Unified diff parsing, patch application, atomic writes
     applicator.rs, patcher.rs, path_safety.rs, writer.rs
   ipc/                    # IPC server (named pipes / Unix sockets) for agent-intercom-ctl
@@ -50,21 +53,23 @@ src/
     context.rs            # Per-request context
     sse.rs                # HTTP/SSE transport (axum)
     transport.rs          # Stdio transport for direct agent connections
-    tools/                # 9 MCP tool handlers
+    tools/                # 10 MCP tool handlers + shared utilities
       accept_diff, ask_approval, check_auto_approve, forward_prompt,
       heartbeat, recover_state, remote_log, set_operational_mode,
-      wait_for_instruction
+      wait_for_instruction, util
     resources/             # MCP resource providers
       slack_channel
   models/                 # Domain models
-    approval, checkpoint, policy, progress, prompt, session, stall
+    approval, checkpoint, inbox, policy, progress, prompt, session,
+    stall, steering
   orchestrator/           # Session lifecycle management
-    session_manager, checkpoint_manager, spawner, stall_detector
+    session_manager, checkpoint_manager, child_monitor, spawner,
+    stall_consumer, stall_detector
   persistence/            # sqlite (sqlx) repository layer
     db.rs                 # connect(), schema bootstrap
     schema.rs             # SQL DDL (idempotent CREATE TABLE IF NOT EXISTS)
-    approval_repo, checkpoint_repo, prompt_repo, session_repo,
-    stall_repo, retention
+    approval_repo, checkpoint_repo, inbox_repo, prompt_repo,
+    session_repo, stall_repo, steering_repo, retention
   policy/                 # Workspace auto-approve rules
     evaluator, loader, watcher
   slack/                  # Slack Socket Mode integration
@@ -73,19 +78,23 @@ src/
     commands.rs           # Slash command handlers
     events.rs             # Event dispatcher with authorization guard
     handlers/             # Per-event-type handlers
+      approval, command_approve, modal, nudge, prompt, steer, task, wait
 ctl/
   main.rs                 # agent-intercom-ctl companion CLI
 lib/
   hve-core/               # External library (separate project)
 tests/
-  unit/                   # Unit tests (15 modules)
-  contract/               # Contract tests (10 modules)
-  integration/            # Integration tests (8 modules)
+  unit/                   # Unit tests (25 modules)
+  contract/               # Contract tests (17 modules)
+  integration/            # Integration tests (33 modules)
 docs/
-  adrs/                   # Architecture Decision Records (0001–0011)
+  adrs/                   # Architecture Decision Records (0001–0013)
 specs/
   001-mcp-remote-agent-server/   # Feature specification
   002-sqlite-migration/          # Persistence migration spec
+  003-agent-intercom-release/    # Release pipeline spec
+  004-intercom-advanced-features/ # Advanced features spec
+  005-intercom-acp-server/       # ACP server spec
 config.toml              # Runtime configuration
 rustfmt.toml             # max_width = 100, edition = 2021
 ```
@@ -137,7 +146,7 @@ All unit, contract, and integration tests must pass. If output may be truncated,
 cargo test 2>&1 | Out-File logs\test-results.txt
 ```
 
-### Gate 5 — TDD Discipline
+### Gate 5 — TDD/BDD Discipline
 
 When adding new functionality:
 1. Write the test first
@@ -158,7 +167,7 @@ Never write production code before the corresponding test exists and has been ob
 ### Error Handling
 
 * All fallible operations return `Result<T, AppError>` (type alias in `src/errors.rs`)
-* `AppError` variants: `Config`, `Db`, `Slack`, `Mcp`, `Diff`, `Policy`, `Ipc`, `PathViolation`, `PatchConflict`, `NotFound`, `Unauthorized`, `AlreadyConsumed`
+* `AppError` variants: `Config`, `Db`, `Slack`, `Mcp`, `Diff`, `Policy`, `Ipc`, `PathViolation`, `PatchConflict`, `NotFound`, `Unauthorized`, `AlreadyConsumed`, `Io`
 * Map external errors via `From` impls or `.map_err()` — never `unwrap()` or `expect()` in library/production code
 * Error messages are lowercase and do not end with a period
 
@@ -226,9 +235,9 @@ Never write production code before the corresponding test exists and has been ob
 
 * TDD required: write tests first, verify they fail, then implement
 * Three test tiers in `tests/` directory (not inline):
-  * `unit/` — isolated logic tests (12 modules)
-  * `contract/` — MCP tool response contract verification (10 modules)
-  * `integration/` — end-to-end flows with real SSE/DB (7 modules)
+  * `unit/` — isolated logic tests (25 modules)
+  * `contract/` — MCP tool response contract verification (17 modules)
+  * `integration/` — end-to-end flows with real SSE/DB (33 modules)
 * Test DB: always use in-memory SQLite (`":memory:"`)
 * Use `serial_test` crate for tests requiring sequential execution
 
@@ -247,7 +256,8 @@ Never write production code before the corresponding test exists and has been ob
 | Path security | All paths canonicalized and validated via `starts_with(workspace_root)` |
 | IPC | `interprocess` 2.0 — named pipes (Windows) / Unix domain sockets for `agent-intercom-ctl` |
 | Shutdown | `CancellationToken` — persist state, notify Slack, terminate children gracefully |
-| ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0011) |
+| ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0013) |
+| Audit logging | `AuditLogger` trait in `audit/writer.rs`, file-based impl, wired into `AppState` |
 
 ## Remote Approval Workflow for Destructive File Operations
 
@@ -329,6 +339,38 @@ If the server returns `patch_conflict` (file changed since proposal), the agent 
 5. **Set `risk_level`** to `high` or `critical` for destructive operations targeting configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
 6. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.
 7. **Handle all response statuses.** Never assume approval — always branch on `approved`, `rejected`, and `timeout`.
+
+## Destructive Terminal Command Approval (NON-NEGOTIABLE)
+
+**All destructive terminal commands MUST go through agent-intercom operator approval regardless of whether the agent is running in `--allow-all`, `--yolo`, or any other permissive mode.** This rule has no exceptions and cannot be overridden by agent configuration, workspace policy, or auto-approve rules.
+
+### Definition of Destructive Terminal Commands
+
+A terminal command is considered **destructive** if it:
+- Deletes files or directories (`rm`, `Remove-Item`, `del`, `rmdir`)
+- Overwrites files without creating backups (`mv` to existing target, `Move-Item -Force`)
+- Modifies system configuration (`reg`, `Set-ExecutionPolicy`, `chmod`, `chown`)
+- Alters version control history (`git reset --hard`, `git push --force`, `git clean -fd`)
+- Drops or truncates database content (`DROP TABLE`, `TRUNCATE`, `DELETE FROM` without `WHERE`)
+- Installs or removes system-level packages (`npm install -g`, `cargo install`, `apt remove`)
+- Executes arbitrary code from untrusted sources (`curl | sh`, `iex (irm ...)`)
+
+### Required Workflow
+
+1. **Detect**: Before executing any terminal command, evaluate whether it is destructive per the definition above.
+2. **Route through agent-intercom**: If destructive, call `auto_check` with the full command string. If not auto-approved, call `check_clearance` with:
+   - `title`: The command being proposed
+   - `description`: Why the command is needed and what it will affect
+   - `risk_level`: `high` for most destructive commands, `critical` for force-pushes, database drops, or system config changes
+3. **Execute only after approval**: Only run the command after receiving `status: "approved"` from the operator.
+4. **Never bypass**: Even if `--allow-all` or `--yolo` flags are active, destructive terminal commands MUST still go through this approval workflow. These flags only affect non-destructive operations.
+
+### Rationale
+
+Permissive agent modes (`--allow-all`, `--yolo`) exist to reduce friction for routine operations like file creation, modification, and safe build/test commands. They must NEVER extend to destructive terminal operations because:
+- A single misrouted destructive command can irrecoverably corrupt repositories, delete production data, or break system configuration.
+- Agents operating autonomously for extended periods may accumulate context drift that leads to incorrect destructive actions.
+- The operator retains final authority over any operation that permanently removes or alters critical resources.
 
 <!-- MANUAL ADDITIONS START -->
 
