@@ -1,19 +1,15 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 1.1.0 → 2.0.0
-Bump rationale: MAJOR — binary rename (monocoque-agent-rc → agent-intercom +
-  monocoque-ctl → agent-intercom-ctl) + rmcp SDK upgrade 0.5 → 0.13
-  (transport protocol changed from SSE to Streamable HTTP)
+Version change: 2.0.0 → 2.1.0
+Bump rationale: MINOR — new Principle VII (CLI Workspace Containment)
+  added to enforce cwd-only filesystem access for Copilot CLI mode
 
-Modified principles:
-  - II. MCP Protocol Fidelity — updated rmcp version and custom notification prefix
-  - VI. Single-Binary Simplicity — updated binary names
+New principles:
+  - VII. CLI Workspace Containment (NON-NEGOTIABLE) — forbids file
+    writes/deletes outside the current working directory in CLI mode
 
-Modified sections:
-  - Technical Constraints — rmcp version, feature name, transport
-  - Governance — updated project name reference
-
+Modified sections: (none)
 Removed sections: (none)
 
 Templates requiring updates:
@@ -23,7 +19,9 @@ Templates requiring updates:
   - .specify/templates/checklist-template.md ✅ no changes required
   - .specify/templates/agent-file-template.md ✅ no changes required
 
-Amendment: v2.0.0 ratified post-merge of 003-agent-intercom-release
+Amendment: v2.1.0 ratified on 004-intercom-advanced-features branch
+
+Previous amendment: v2.0.0 ratified post-merge of 003-agent-intercom-release
 (branch: 003-agent-intercom-release, commit: b6f5898)
 -->
 
@@ -125,6 +123,26 @@ dependency increases build time, attack surface, and maintenance
 burden. The single-binary model ensures deployment is a single
 file copy.
 
+### VII. CLI Workspace Containment (NON-NEGOTIABLE)
+
+When GitHub Copilot operates in CLI mode, it MUST NOT create,
+modify, or delete any file or directory outside the current
+working directory tree. This applies to all tool invocations
+including `create_file`, `replace_string_in_file`,
+`multi_replace_string_in_file`, `run_in_terminal`, and any
+operation that touches the filesystem. Paths that resolve above
+or outside the cwd — whether via absolute paths, `..` traversal,
+symlinks, or environment variable expansion — MUST be refused.
+The only exception is reading files explicitly provided by the
+user as context.
+
+**Rationale**: CLI agents run with the operator's full filesystem
+permissions and no interactive approval UI. A single misrouted
+write can corrupt unrelated repositories, overwrite system
+configuration, or destroy data in sibling directories. Strict
+cwd containment is the last line of defense when no human is
+watching.
+
 ## Technical Constraints
 
 - **Language**: Rust stable, edition 2021
@@ -186,4 +204,4 @@ checks MUST verify compliance with these principles.
   principle violated, the justification, and the simpler
   alternative that was rejected.
 
-**Version**: 2.0.0 | **Ratified**: 2026-02-10 | **Last Amended**: 2026-02-23
+**Version**: 2.1.0 | **Ratified**: 2026-02-10 | **Last Amended**: 2026-02-26

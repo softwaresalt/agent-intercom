@@ -176,6 +176,22 @@ Never write production code before the corresponding test exists and has been ob
 - Use `tokio::task::spawn_blocking` for CPU-bound or blocking I/O.
 - Use `tokio_util::sync::CancellationToken` for graceful shutdown coordination.
 
+### Session Lifecycle Internals
+
+The MCP handler (`src/mcp/handler.rs`) uses `on_initialized` to manage session creation:
+
+- **Case 1 — Spawned agent:** The transport URL contains `?session_id=<id>`. The handler looks up the pre-created session and binds to it. No stale cleanup runs.
+- **Case 2 — Primary agent (direct connection):** No `session_id` parameter. The handler terminates all existing `agent:local` Active sessions (stale cleanup), then creates a new session with `owner_user_id = "agent:local"`.
+
+Key implementation details:
+
+- `session_db_id` is stored in a `OnceLock<i64>` on the handler. It is set once during `on_initialized` and read by every tool handler to identify the current session. It is never overwritten.
+- The `Drop` impl on the handler sets the session status to `Terminated` by spawning a blocking task on the Tokio runtime. If the runtime is unavailable (process exit, test teardown), the stale is cleaned up on the next `on_initialized`.
+- `LOCAL_AGENT_OWNER` is a `pub(crate)` constant (`"agent:local"`) used as the owner for all primary agent sessions.
+- `ActiveChildren` (`Arc<Mutex<HashMap<String, Child>>>`) tracks spawned agent processes for cleanup on server shutdown.
+
+These details are relevant when writing tests that exercise session transitions. Tests using `AppState` must provide `active_children: Arc::default()` and handle the case where `session_db_id` may not be set if `on_initialized` was not called.
+
 ## Testing
 
 Three test tiers live under `tests/`:

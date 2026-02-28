@@ -11,7 +11,9 @@ use tracing::{info, info_span, Instrument};
 
 use crate::mcp::handler::IntercomServer;
 use crate::models::progress::{validate_snapshot, ProgressItem};
+use crate::models::session::Session;
 use crate::persistence::session_repo::SessionRepo;
+use crate::persistence::steering_repo::SteeringRepo;
 use crate::slack::client::SlackMessage;
 
 /// Input parameters per mcp-tools.json contract.
@@ -21,6 +23,17 @@ struct HeartbeatInput {
     status_message: Option<String>,
     /// Optional structured progress snapshot (replaces previous when present).
     progress_snapshot: Option<Vec<ProgressItem>>,
+}
+
+/// Select the most-recently-updated session from a list of active sessions.
+///
+/// When multiple stale sessions coexist (e.g., leftover from a prior disconnect
+/// that was not yet cleaned up), pick the one with the latest `updated_at`
+/// rather than erroring.  Returns `None` when the list is empty.
+#[must_use]
+pub fn pick_primary_session(mut sessions: Vec<Session>) -> Option<Session> {
+    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    sessions.into_iter().next()
 }
 
 /// Handle the `heartbeat` tool call.
@@ -53,58 +66,17 @@ pub async fn handle(
             rmcp::ErrorData::internal_error(format!("failed to query active sessions: {err}"), None)
         })?;
 
-        // Avoid arbitrarily selecting an active session when multiple exist.
-        let mut iter = sessions.into_iter();
-        let first = iter.next();
-        let second = iter.next();
-        let session = match (first, second) {
-            (None, _) => {
-                return Err(rmcp::ErrorData::internal_error(
-                    "no active session found",
-                    None,
-                ));
-            }
-            (Some(sess), None) => sess,
-            (Some(_), Some(_)) => {
-                return Err(rmcp::ErrorData::internal_error(
-                    "multiple active sessions found; heartbeat requires an unambiguous session",
-                    None,
-                ));
-            }
-        };
+        // ── Select primary session (T071 fallback) ───────────
+        // Sort by `updated_at DESC` and pick the most-recently-active session.
+        // This handles stale-session scenarios where prior disconnects have not
+        // yet been cleaned up, making ping resilient to multiple active sessions.
+        let session = pick_primary_session(sessions)
+            .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
 
         let stall_enabled = state.config.stall.enabled;
 
-        // ── Validate snapshot if provided ────────────────────
-        if let Some(ref snapshot) = input.progress_snapshot {
-            validate_snapshot(snapshot).map_err(|err| {
-                rmcp::ErrorData::invalid_params(format!("invalid progress snapshot: {err}"), None)
-            })?;
-        }
-
-        // ── Update session progress if snapshot provided ─────
-        if input.progress_snapshot.is_some() {
-            session_repo
-                .update_progress_snapshot(&session.id, input.progress_snapshot.clone())
-                .await
-                .map_err(|err| {
-                    rmcp::ErrorData::internal_error(
-                        format!("failed to update progress snapshot: {err}"),
-                        None,
-                    )
-                })?;
-        }
-
-        // ── Update last activity ─────────────────────────────
-        session_repo
-            .update_last_activity(&session.id, Some("heartbeat".into()))
-            .await
-            .map_err(|err| {
-                rmcp::ErrorData::internal_error(
-                    format!("failed to update session activity: {err}"),
-                    None,
-                )
-            })?;
+        // ── Update session snapshot and activity ──────────────
+        update_session_progress(&session_repo, &session.id, &input).await?;
 
         // ── Reset stall timer via shared state ───────────────
         if let Some(ref detectors) = state.stall_detectors {
@@ -122,9 +94,14 @@ pub async fn handle(
             }
         }
 
+        // ── Fetch and deliver pending steering messages ──────
+        let steering_repo = SteeringRepo::new(Arc::clone(&state.db));
+        let steering_texts = fetch_and_consume_steering(&steering_repo, &session.id).await?;
+
         info!(
             session_id = %session.id,
             stall_enabled,
+            steering_count = steering_texts.len(),
             "heartbeat acknowledged"
         );
 
@@ -133,6 +110,7 @@ pub async fn handle(
             "acknowledged": true,
             "session_id": session.id,
             "stall_detection_enabled": stall_enabled,
+            "pending_steering": steering_texts,
         });
 
         Ok(CallToolResult::success(vec![rmcp::model::Content::json(
@@ -147,6 +125,59 @@ pub async fn handle(
     }
     .instrument(span)
     .await
+}
+
+/// Validate the progress snapshot (if present) and update session persistence.
+async fn update_session_progress(
+    session_repo: &SessionRepo,
+    session_id: &str,
+    input: &HeartbeatInput,
+) -> Result<(), rmcp::ErrorData> {
+    if let Some(ref snapshot) = input.progress_snapshot {
+        validate_snapshot(snapshot).map_err(|err| {
+            rmcp::ErrorData::invalid_params(format!("invalid progress snapshot: {err}"), None)
+        })?;
+        session_repo
+            .update_progress_snapshot(session_id, Some(snapshot.clone()))
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to update progress snapshot: {err}"),
+                    None,
+                )
+            })?;
+    }
+    session_repo
+        .update_last_activity(session_id, Some("heartbeat".into()))
+        .await
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(
+                format!("failed to update session activity: {err}"),
+                None,
+            )
+        })
+}
+
+/// Fetch all unconsumed steering messages for the session and mark them consumed.
+///
+/// Returns a `Vec<String>` of message texts in insertion order.
+async fn fetch_and_consume_steering(
+    repo: &SteeringRepo,
+    session_id: &str,
+) -> Result<Vec<String>, rmcp::ErrorData> {
+    let pending = repo.fetch_unconsumed(session_id).await.map_err(|err| {
+        rmcp::ErrorData::internal_error(format!("failed to fetch steering messages: {err}"), None)
+    })?;
+    let texts: Vec<String> = pending.iter().map(|m| m.message.clone()).collect();
+    for msg in &pending {
+        repo.mark_consumed(&msg.id).await.map_err(|err| {
+            rmcp::ErrorData::internal_error(
+                format!("failed to mark steering message consumed: {err}"),
+                None,
+            )
+        })?;
+    }
+    Ok(texts)
 }
 
 /// Forward a heartbeat status message to the Slack channel, if configured.

@@ -131,12 +131,27 @@ pub async fn handle_interaction(
                 // Replace buttons once before dispatching any actions.
                 // This prevents concurrent taps from triggering the
                 // handler a second time.
-                replace_buttons_with_processing(
-                    block_event.channel.as_ref(),
-                    block_event.message.as_ref(),
-                    app,
-                )
-                .await;
+                //
+                // Exception: actions that open a Slack modal must NOT
+                // preemptively lock the buttons. If the operator dismisses
+                // the modal without submitting, the original buttons must
+                // remain clickable (FR-017). The ViewSubmission handler
+                // replaces the buttons with a final status once the modal
+                // is submitted.
+                let opens_modal = actions.iter().any(|a| {
+                    matches!(
+                        a.action_id.to_string().as_str(),
+                        "wait_resume_instruct" | "prompt_refine" | "approve_reject"
+                    )
+                });
+                if !opens_modal {
+                    replace_buttons_with_processing(
+                        block_event.channel.as_ref(),
+                        block_event.message.as_ref(),
+                        app,
+                    )
+                    .await;
+                }
 
                 for action in actions {
                     let action_id = action.action_id.to_string();
@@ -147,6 +162,7 @@ pub async fn handle_interaction(
                         if let Err(err) = handlers::approval::handle_approval_action(
                             action,
                             &user_id,
+                            &block_event.trigger_id,
                             block_event.channel.as_ref(),
                             block_event.message.as_ref(),
                             app,
@@ -193,6 +209,18 @@ pub async fn handle_interaction(
                         {
                             warn!(%err, action_id, "wait action failed");
                         }
+                    } else if action_id.starts_with("auto_approve_") {
+                        if let Err(err) = handlers::command_approve::handle_auto_approve_action(
+                            action,
+                            &user_id,
+                            block_event.channel.as_ref(),
+                            block_event.message.as_ref(),
+                            app,
+                        )
+                        .await
+                        {
+                            warn!(%err, action_id, "auto-approve action failed");
+                        }
                     } else {
                         warn!(action_id, "unknown action_id prefix");
                     }
@@ -215,6 +243,38 @@ pub async fn handle_interaction(
 
             if let Err(err) = handlers::modal::handle_view_submission(view_event, app).await {
                 warn!(%err, "view submission handler failed");
+            }
+        }
+        SlackInteractionEvent::ViewClosed(view_event) => {
+            let user_id = view_event.user.id.to_string();
+
+            let Some(ref app) = app_state else {
+                return Ok(());
+            };
+
+            if !is_authorized(&user_id, app) {
+                return Ok(());
+            }
+
+            // Extract the callback_id so we can clean up any cached modal context.
+            let callback_id = match &view_event.view.view {
+                slack_morphism::prelude::SlackView::Modal(modal) => modal
+                    .callback_id
+                    .as_ref()
+                    .map(std::string::ToString::to_string)
+                    .unwrap_or_default(),
+                slack_morphism::prelude::SlackView::Home(_) => String::new(),
+            };
+
+            if callback_id.is_empty() {
+                info!(user_id, "modal closed (no callback_id)");
+            } else {
+                let mut ctx = app.pending_modal_contexts.lock().await;
+                let removed = ctx.remove(&callback_id).is_some();
+                info!(
+                    user_id,
+                    callback_id, removed, "modal dismissed without submission"
+                );
             }
         }
         _ => {

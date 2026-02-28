@@ -1,9 +1,9 @@
 //! Modal submission handler for instruction text input.
 //!
 //! Handles `ViewSubmission` events from Slack modals opened by the
-//! `wait_resume_instruct` and `prompt_refine` button actions. Extracts
-//! the typed instruction text and resolves the corresponding pending
-//! oneshot channel.
+//! `wait_resume_instruct`, `prompt_refine`, and `approve_reject` button
+//! actions. Extracts the typed instruction text and resolves the
+//! corresponding pending oneshot channel.
 
 use std::sync::Arc;
 
@@ -13,8 +13,10 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::{AppState, PromptResponse, WaitResponse};
+use crate::mcp::handler::{AppState, ApprovalResponse, PromptResponse, WaitResponse};
+use crate::models::approval::ApprovalStatus;
 use crate::models::prompt::PromptDecision;
+use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::slack::blocks;
 
@@ -84,6 +86,9 @@ pub async fn handle_view_submission(
     match source {
         "wait_instruct" => resolve_wait(entity_id, &instruction, &user_id, state).await,
         "prompt_refine" => resolve_prompt(entity_id, &instruction, &user_id, state).await,
+        "approval_reject" => {
+            resolve_approval_reject(entity_id, &instruction, &user_id, state).await
+        }
         _ => Err(format!("unknown modal source: {source}")),
     }
 }
@@ -170,6 +175,68 @@ async fn resolve_prompt(
     update_original_message(
         &callback_id,
         &format!("\u{270f}\u{fe0f} *Refine* selected by <@{user_id}>"),
+        state,
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Finalise a pending approval rejection with the operator's typed reason.
+///
+/// Called from [`handle_view_submission`] when the `approval_reject:<request_id>`
+/// modal is submitted. Updates the DB, resolves the oneshot, and replaces
+/// the approval message with a static ❌ status line (FR-022).
+async fn resolve_approval_reject(
+    request_id: &str,
+    reason: &str,
+    user_id: &str,
+    state: &Arc<AppState>,
+) -> Result<(), String> {
+    let callback_id = format!("approval_reject:{request_id}");
+
+    // Update DB record with Rejected status.
+    let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+    approval_repo
+        .update_status(request_id, ApprovalStatus::Rejected)
+        .await
+        .map_err(|err| format!("failed to update approval status: {err}"))?;
+
+    info!(
+        request_id,
+        user_id,
+        reason_len = reason.len(),
+        "approval rejected via modal"
+    );
+
+    // Resolve the oneshot channel so the agent receives the rejection.
+    {
+        let mut pending = state.pending_approvals.lock().await;
+        if let Some(tx) = pending.remove(request_id) {
+            let response = ApprovalResponse {
+                status: "rejected".to_owned(),
+                reason: Some(reason.to_owned()),
+            };
+            if tx.send(response).is_err() {
+                warn!(request_id, "approval oneshot receiver already dropped");
+            }
+        } else {
+            warn!(
+                request_id,
+                "no pending approval oneshot found (may have timed out)"
+            );
+        }
+    }
+
+    // FR-022: Replace the interactive buttons with a permanent status line.
+    let reason_display = if reason.is_empty() {
+        "no reason given".to_owned()
+    } else {
+        reason.to_owned()
+    };
+    update_original_message(
+        &callback_id,
+        &format!("\u{274c} *Rejected* by <@{user_id}>: {reason_display}"),
         state,
     )
     .await;

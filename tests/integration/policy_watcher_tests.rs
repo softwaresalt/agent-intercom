@@ -33,7 +33,7 @@ async fn poll_until<F>(
     pred: F,
 ) -> bool
 where
-    F: Fn(&agent_intercom::models::policy::WorkspacePolicy) -> bool,
+    F: Fn(&agent_intercom::models::policy::CompiledWorkspacePolicy) -> bool,
 {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     while tokio::time::Instant::now() < deadline {
@@ -62,9 +62,13 @@ async fn register_loads_initial_policy() {
     watcher.register(root).await.expect("register");
 
     let policy = watcher.get_policy(root).await;
-    assert!(policy.enabled, "initial policy should have enabled=true");
+    assert!(
+        policy.raw.enabled,
+        "initial policy should have enabled=true"
+    );
     assert!(
         policy
+            .raw
             .auto_approve_commands
             .contains(&"cargo test".to_owned()),
         "initial policy should include 'cargo test' command"
@@ -85,13 +89,16 @@ async fn policy_file_modification_detected() {
 
     // Confirm initial state.
     let initial = watcher.get_policy(root).await;
-    assert!(!initial.enabled, "initial policy should have enabled=false");
+    assert!(
+        !initial.raw.enabled,
+        "initial policy should have enabled=false"
+    );
 
     // Modify the file.
     write_policy_file(root, r#"{"enabled": true}"#);
 
     // Poll until the hot-reload fires (up to 2 s).
-    let updated = poll_until(&watcher, root, 2_000, |p| p.enabled).await;
+    let updated = poll_until(&watcher, root, 2_000, |p| p.raw.enabled).await;
     assert!(
         updated,
         "policy should have been hot-reloaded to enabled=true within 2 s"
@@ -112,14 +119,17 @@ async fn policy_file_deletion_falls_back_to_deny_all() {
 
     // Confirm enabled initially.
     let initial = watcher.get_policy(root).await;
-    assert!(initial.enabled, "initial policy should have enabled=true");
+    assert!(
+        initial.raw.enabled,
+        "initial policy should have enabled=true"
+    );
 
     // Delete the policy file.
     let policy_path = root.join(".intercom").join("settings.json");
     std::fs::remove_file(&policy_path).expect("remove settings.json");
 
     // Poll until the deny-all default is reflected (up to 2 s).
-    let fell_back = poll_until(&watcher, root, 2_000, |p| !p.enabled).await;
+    let fell_back = poll_until(&watcher, root, 2_000, |p| !p.raw.enabled).await;
     assert!(
         fell_back,
         "policy should have fallen back to deny-all within 2 s after file deletion"
@@ -145,7 +155,7 @@ async fn malformed_policy_file_uses_deny_all() {
     // PolicyLoader falls back to deny-all on parse errors — no polling needed.
     let policy = watcher.get_policy(root).await;
     assert!(
-        !policy.enabled,
+        !policy.raw.enabled,
         "malformed policy file should result in deny-all (enabled=false)"
     );
 }
@@ -179,7 +189,7 @@ async fn unregister_stops_watching() {
     // not the enabled:true from the file.
     let policy = watcher.get_policy(root).await;
     assert!(
-        !policy.enabled,
+        !policy.raw.enabled,
         "after unregister, get_policy should return deny-all default, not the updated file value"
     );
 }
@@ -202,11 +212,11 @@ async fn multiple_workspaces_independent_policies() {
 
     // Confirm both start as disabled.
     assert!(
-        !watcher.get_policy(root1).await.enabled,
+        !watcher.get_policy(root1).await.raw.enabled,
         "ws1 initial: disabled"
     );
     assert!(
-        !watcher.get_policy(root2).await.enabled,
+        !watcher.get_policy(root2).await.raw.enabled,
         "ws2 initial: disabled"
     );
 
@@ -214,7 +224,7 @@ async fn multiple_workspaces_independent_policies() {
     write_policy_file(root1, r#"{"enabled": true}"#);
 
     // Poll until workspace 1 hot-reloads (up to 2 s).
-    let ws1_updated = poll_until(&watcher, root1, 2_000, |p| p.enabled).await;
+    let ws1_updated = poll_until(&watcher, root1, 2_000, |p| p.raw.enabled).await;
     assert!(
         ws1_updated,
         "workspace 1 policy should have updated to enabled=true"
@@ -223,7 +233,7 @@ async fn multiple_workspaces_independent_policies() {
     // Workspace 2 must remain unchanged.
     let ws2 = watcher.get_policy(root2).await;
     assert!(
-        !ws2.enabled,
+        !ws2.raw.enabled,
         "workspace 2 policy should still be disabled after modifying workspace 1"
     );
 }

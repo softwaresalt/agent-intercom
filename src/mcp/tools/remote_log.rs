@@ -11,6 +11,7 @@ use rmcp::model::CallToolResult;
 use slack_morphism::prelude::{SlackChannelId, SlackTs};
 use tracing::{info, info_span, warn, Instrument};
 
+use crate::config::SlackDetailLevel;
 use crate::mcp::handler::IntercomServer;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
@@ -40,6 +41,7 @@ const VALID_LEVELS: &[&str] = &["info", "success", "warning", "error"];
 /// # Errors
 ///
 /// Returns `rmcp::ErrorData` on validation or infrastructure failures.
+#[allow(clippy::too_many_lines)] // Detail level filter + session update + Slack post cannot be shortened further.
 pub async fn handle(
     context: ToolCallContext<'_, IntercomServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
@@ -80,6 +82,30 @@ pub async fn handle(
             .into_iter()
             .next()
             .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
+
+        // ── Detail level filter (T065) ───────────────────────
+        let detail_str = match state.config.slack_detail_level {
+            SlackDetailLevel::Minimal => "minimal",
+            SlackDetailLevel::Verbose => "verbose",
+            SlackDetailLevel::Standard => "standard",
+        };
+        if !blocks::message_visible_at_level(detail_str, &input.level) {
+            info!(
+                level = %input.level,
+                detail_level = ?state.config.slack_detail_level,
+                "remote_log suppressed by detail level filter"
+            );
+            let response = serde_json::json!({ "posted": false, "ts": "" });
+            return Ok(CallToolResult::success(vec![rmcp::model::Content::json(
+                response,
+            )
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to serialize remote_log response: {err}"),
+                    None,
+                )
+            })?]));
+        }
 
         // ── Post to Slack ────────────────────────────────────
         let (posted, ts) = if let Some(ref slack) = state.slack {

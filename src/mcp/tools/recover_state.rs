@@ -13,6 +13,7 @@ use crate::mcp::handler::{AppState, IntercomServer};
 use crate::models::session::Session;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::checkpoint_repo::CheckpointRepo;
+use crate::persistence::inbox_repo::InboxRepo;
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
 
@@ -34,6 +35,10 @@ pub async fn handle(
     context: ToolCallContext<'_, IntercomServer>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let state = Arc::clone(context.service.state());
+    // Derive the channel from the per-connection context (query param override
+    // or global config fallback) rather than reading the global config directly.
+    // This ensures inbox tasks are scoped to the correct workspace channel (C14).
+    let channel_id = context.service.effective_channel_id().map(str::to_owned);
     let args: serde_json::Map<String, serde_json::Value> = context.arguments.unwrap_or_default();
 
     let input: RecoverStateInput = serde_json::from_value(serde_json::Value::Object(args))
@@ -57,11 +62,14 @@ pub async fn handle(
 
         let Some(session) = session else {
             info!("no interrupted session found — clean state");
-            return json_result(serde_json::json!({ "status": "clean" }));
+            let mut clean_response = serde_json::json!({ "status": "clean" });
+            let pending_tasks = fetch_inbox_tasks(&state, channel_id.as_deref()).await?;
+            clean_response["pending_tasks"] = serde_json::json!(pending_tasks);
+            return json_result(clean_response);
         };
 
         // ── Collect pending data and build response ──────────
-        let response = build_recovered_response(&state, &session).await?;
+        let response = build_recovered_response(&state, &session, channel_id.as_deref()).await?;
 
         let pending_count = response
             .get("pending_requests")
@@ -104,6 +112,7 @@ async fn resolve_session(
 async fn build_recovered_response(
     state: &AppState,
     session: &Session,
+    channel_id: Option<&str>,
 ) -> Result<serde_json::Value, rmcp::ErrorData> {
     let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
     let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
@@ -184,7 +193,59 @@ async fn build_recovered_response(
         response["progress_snapshot"] = snap;
     }
 
+    // ── Pending inbox tasks ──────────────────────────────
+    let pending_tasks = fetch_inbox_tasks(state, channel_id).await?;
+    response["pending_tasks"] = serde_json::json!(pending_tasks);
+
     Ok(response)
+}
+
+/// Fetch unconsumed inbox tasks for the given channel and mark them consumed
+/// in a batch after building the response. Returns a JSON-ready array of task
+/// objects.
+///
+/// Tasks are returned even if the batch `mark_consumed` call fails partway
+/// through — it is better to deliver tasks (risking re-delivery on next
+/// cold-start) than to lose them.
+async fn fetch_inbox_tasks(
+    state: &AppState,
+    channel_id: Option<&str>,
+) -> Result<Vec<serde_json::Value>, rmcp::ErrorData> {
+    let inbox_repo = InboxRepo::new(Arc::clone(&state.db));
+
+    let items = inbox_repo
+        .fetch_unconsumed_by_channel(channel_id)
+        .await
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(format!("failed to query inbox tasks: {err}"), None)
+        })?;
+
+    // Build the response first, then batch-consume. If consumption fails
+    // partway through, the tasks are still returned to the agent (C9).
+    let tasks: Vec<serde_json::Value> = items
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "task_id": item.id,
+                "message": item.message,
+                "source": item.source,
+                "created_at": item.created_at.to_rfc3339(),
+            })
+        })
+        .collect();
+
+    // Mark all fetched items consumed after building the response.
+    for item in &items {
+        if let Err(err) = inbox_repo.mark_consumed(&item.id).await {
+            tracing::warn!(
+                task_id = %item.id,
+                %err,
+                "failed to mark inbox task consumed (task was still returned to agent)"
+            );
+        }
+    }
+
+    Ok(tasks)
 }
 
 /// Wrap a JSON value into a successful `CallToolResult`.

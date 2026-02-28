@@ -1,10 +1,11 @@
 ---
-description: "Structured HITL test scenarios for the agent-intercom approval workflow."
+description: "Structured HITL test scenarios for the agent-intercom approval workflow and advanced features."
 ---
 
 # HITL Test Scenarios
 
-Each scenario tests a specific aspect of the Slack-mediated approval workflow.
+Each scenario tests a specific aspect of the Slack-mediated approval workflow
+and the advanced features introduced in the 004-intercom-advanced-features branch.
 The operator's expected action is stated in **bold**.
 
 ---
@@ -16,8 +17,9 @@ The operator's expected action is stated in **bold**.
 **Steps:**
 1. Call `ping` with `status_message: "HITL test: connectivity check"`
 2. Verify response contains `acknowledged: true`
+3. Verify the response contains a `pending_steering` field (array — may be empty)
 
-**Expected:** `acknowledged: true` returned, status message posted to Slack channel.
+**Expected:** `acknowledged: true` returned, status message posted to Slack channel. The `pending_steering` field is present (empty array is acceptable at this stage).
 
 **Known failure modes:**
 - `"multiple active sessions found"` — Restart the server or close duplicate MCP connections. Record as FAIL and continue; this error does not mean the server is down, so subsequent scenarios may still pass.
@@ -46,7 +48,7 @@ The operator's expected action is stated in **bold**.
 
 ## Scenario 3: Auto-Approve Policy Check
 
-**Purpose:** Baseline the workspace's auto-approve configuration.
+**Purpose:** Baseline the workspace's auto-approve configuration. Validates that `auto_check` reads from the in-memory policy cache (FR-020).
 
 **Steps:**
 1. Call `auto_check` with `tool_name: "check_diff"`, `context: { "file_path": "logs/hitl-test-output.txt", "risk_level": "low" }`
@@ -54,13 +56,13 @@ The operator's expected action is stated in **bold**.
 3. Call `auto_check` with `tool_name: "check_diff"`, `context: { "file_path": "src/main.rs", "risk_level": "critical" }`
 4. Record whether `auto_approved` is `true` or `false`
 
-**Expected:** Results depend on workspace policy. Record both values — this establishes the baseline. Typically, `logs/` paths may be auto-approved while `src/` paths with critical risk are not.
+**Expected:** Results depend on workspace policy. Record both values — this establishes the baseline. Typically, `logs/` paths may be auto-approved while `src/` paths with critical risk are not. Responses should return rapidly (policy is pre-compiled in cache, not loaded from disk per-call).
 
 ---
 
 ## Scenario 4: Approval — Happy Path (Approve)
 
-**Purpose:** Full approval round-trip. Operator sees Block Kit message, taps Approve, diff is applied.
+**Purpose:** Full approval round-trip. Operator sees Block Kit message with diff **and original file attachment when applicable** (FR-046/FR-047), taps Approve, diff is applied.
 
 **Steps:**
 1. Call `check_clearance` with:
@@ -75,7 +77,7 @@ The operator's expected action is stated in **bold**.
 5. Verify response `status` is `"applied"`
 6. Verify the file `tests/fixtures/hitl-test-file.txt` exists on disk (use terminal: `Test-Path tests/fixtures/hitl-test-file.txt`)
 
-**Expected:** Approved, file written to `tests/fixtures/hitl-test-file.txt`.
+**Expected:** Approved, file written to `tests/fixtures/hitl-test-file.txt`. Since this is a **new file**, no original file attachment should be present — only the diff/content (FR-047).
 
 **Error resilience:** `check_clearance` is a blocking call. If the server is unresponsive or the operator does not respond, this call will hang. If no response is received within a reasonable time, record as FAIL/TIMEOUT and continue to the next scenario.
 
@@ -83,6 +85,7 @@ The operator's expected action is stated in **bold**.
 - [ ] Block Kit message appeared with title, diff preview, and Approve/Reject buttons
 - [ ] Buttons were replaced with approved status after clicking Approve
 - [ ] High risk level was visually indicated
+- [ ] No original file attachment was shown (this is a new file — FR-047)
 
 ---
 
@@ -111,43 +114,49 @@ The operator's expected action is stated in **bold**.
 
 ---
 
-## Scenario 6: Forward Prompt — Operator Question
+## Scenario 6: Forward Prompt — Operator Question (Modal Capture)
 
-**Purpose:** Test bidirectional communication. Agent asks operator a question, operator responds.
+**Purpose:** Test bidirectional communication with **real modal instruction capture** (FR-015, FR-016). When the operator presses a response button, a Slack modal opens for typed input, and the agent receives the exact typed text — not a placeholder.
 
 **Steps:**
 1. Call `transmit` with:
    - `prompt_text`: `"HITL TEST: What is your favorite color? (Reply with any answer to validate the prompt flow.)"`
-2. **Operator action: Reply with any answer in Slack**
-3. Verify the response contains the operator's answer text (non-empty string)
+2. **Operator action: Press the reply button in Slack. A modal dialog should open with a text input field. Type an answer (e.g., "blue") and submit the modal.**
+3. Verify the response contains the operator's **exact typed text** (e.g., `"blue"`) — NOT a placeholder like `"(instruction via Slack)"`
+4. Verify the response `decision` field is present
 
-**Expected:** Operator's reply text is returned to the agent.
+**Expected:** Operator's actual typed text is returned to the agent via the modal capture flow.
 
 **Error resilience:** `transmit` is a blocking call. If the server is unresponsive or the operator does not reply, this call will hang indefinitely. If no response is received within a reasonable time, record as FAIL/TIMEOUT and continue to the next scenario.
 
 **Operator validates:**
-- [ ] Question appeared in Slack with a reply mechanism
+- [ ] A Slack modal dialog opened when pressing the reply button
+- [ ] Modal had a text input field for typing a response
+- [ ] After submitting the modal, the buttons were replaced with a final status line
 - [ ] Reply was straightforward to submit
 
 ---
 
-## Scenario 7: Wait for Instruction — Operator-Initiated
+## Scenario 7: Wait for Instruction — Modal Capture
 
-**Purpose:** Test the passive wait mode where the agent blocks until the operator sends a command.
+**Purpose:** Test the passive wait mode with **real modal instruction capture** (FR-015, FR-016). The operator presses "Resume with Instructions", types text in the Slack modal, submits, and the agent receives the exact typed text.
 
 **Steps:**
-1. Call `broadcast` with `message: "[TEST] About to call standby. Please send any message in Slack within 60 seconds."`, `level: "info"`
+1. Call `broadcast` with `message: "[TEST] About to call standby. Please press 'Resume with Instructions' in Slack within 60 seconds and type your instruction in the modal."`, `level: "info"`
 2. Call `standby` with `message: "HITL TEST: Agent is waiting for your instruction."`, `timeout_seconds: 120`
-3. **Operator action: Send any message or command in the Slack channel**
-4. Verify the response contains the operator's instruction text
+3. **Operator action: Press "Resume with Instructions" in Slack. A modal dialog opens. Type an instruction (e.g., "focus on error handling") and submit the modal.**
+4. Verify the response contains the operator's **exact typed instruction** — NOT a placeholder like `"(instruction via Slack)"`
+5. Verify the response `status` is `"resumed"` and `instruction` field contains the typed text
 
-**Expected:** Operator's message is returned as the instruction.
+**Expected:** Operator's actual typed instruction is returned to the agent.
 
 **Error resilience:** `standby` is a blocking call with a `timeout_seconds` parameter. If the operator does not respond within the timeout, the call should return a timeout response. If the MCP server itself is unresponsive and the call hangs beyond the timeout, record as FAIL/TIMEOUT and continue to the next scenario.
 
 **Operator validates:**
-- [ ] Waiting status message appeared in Slack
-- [ ] Sending a message resolved the wait
+- [ ] Waiting status message appeared in Slack with a "Resume with Instructions" button
+- [ ] Clicking the button opened a Slack modal with a text input field
+- [ ] After submitting the modal, the agent resumed
+- [ ] The original message's buttons were replaced with a final status line
 
 ---
 
@@ -171,15 +180,16 @@ The operator's expected action is stated in **bold**.
 
 ---
 
-## Scenario 9: State Recovery
+## Scenario 9: State Recovery with Task Inbox
 
-**Purpose:** Verify `reboot` returns meaningful session state.
+**Purpose:** Verify `reboot` returns meaningful session state **including any pending task inbox items** (FR-013). This validates the task inbox delivery at session startup.
 
 **Steps:**
 1. Call `reboot` with no arguments
 2. Verify response contains structured state data (e.g., `status: "clean"` or session details)
+3. Verify the response schema includes a `pending_tasks` field (array — may be empty if no tasks were queued)
 
-**Expected:** Response contains valid JSON with a `status` field.
+**Expected:** Response contains valid JSON with a `status` field and a `pending_tasks` field. If the inbox is empty, the array is empty or the field is absent.
 
 ---
 
@@ -202,32 +212,205 @@ The operator's expected action is stated in **bold**.
 
 **Expected:** First apply succeeds, second apply fails with a clear error.
 
+**Operator validates:**
+- [ ] Approval message appeared with Approve/Reject buttons
+- [ ] Buttons were replaced with approved status after clicking Approve
+
 ---
 
-## Scenario 11: Critical Risk Visual Indicator
+## Scenario 11: Critical Risk Visual Indicator + File Attachment
 
-**Purpose:** Verify that `risk_level: "critical"` renders differently in Slack.
+**Purpose:** Verify that `risk_level: "critical"` renders differently in Slack, **and** that the original file content is attached alongside the diff for existing files (FR-046).
 
 **Steps:**
 1. Call `check_clearance` with:
    - `title`: `"HITL Test: Critical risk visual check"`
-   - `diff`: `"+# CRITICAL CHANGE — this is a visual test\n"`
-   - `file_path`: `"persistence/schema.rs"`
-   - `description`: `"HITL TEST: Please APPROVE. Verify that this message looks visually different from low-risk proposals (red warning, danger emoji, etc.)."`
+   - `diff`: `"--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,2 +1,3 @@\n #![forbid(unsafe_code)]\n \n+// CRITICAL CHANGE - this is a visual test\n"`
+   - `file_path`: `"src/main.rs"`
+   - `description`: `"HITL TEST: Please APPROVE. Verify that this message looks visually different from low-risk proposals AND that the original file content is attached as a Slack file."`
    - `risk_level`: `"critical"`
-2. **Operator action: APPROVE after visually confirming the risk indicator**
+2. **Operator action: APPROVE after visually confirming the risk indicator and file attachment**
 3. Call `check_diff` with the returned `request_id`
+4. Verify response `status` is `"applied"` — the diff applied cleanly to `src/main.rs`
+5. Immediately revert the change: run `git restore src/main.rs` in the terminal to restore the original file
 
-**Expected:** Approved. Operator confirms critical-risk visual treatment.
+**Expected:** Approved, diff applied successfully. Operator confirms critical-risk visual treatment AND original file attachment. Revert restores original `src/main.rs`.
 
 **Operator validates:**
 - [ ] Message had distinct visual treatment for critical risk (different from Scenario 4's high risk)
-- [ ] Diff preview was rendered correctly
+- [ ] Diff preview was rendered correctly with proper unified diff format
 - [ ] Risk level was clearly communicated
+- [ ] **Original file content** (`src/main.rs`) was attached as a Slack file alongside the diff (FR-046)
 
 ---
 
-## Scenario 12: Cleanup
+## Scenario 12: Operator Steering Queue
+
+**Purpose:** Validate the full steering queue round-trip (US1, FR-001 through FR-006). An operator sends a steering message via Slack, then the agent picks it up on the next `ping`.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] About to test steering queue. Operator: please run '/intercom steer HITL-STEER-TEST-MSG' in Slack within 30 seconds."`, `level: "info"`
+2. **Operator action: In Slack, type `/intercom steer HITL-STEER-TEST-MSG` and send**
+3. Wait approximately 5 seconds for the message to be stored
+4. Call `ping` with `status_message: "HITL test: checking steering queue"`
+5. Verify the response contains `pending_steering` as a non-empty array
+6. Verify at least one entry in `pending_steering` contains the text `"HITL-STEER-TEST-MSG"`
+7. Call `ping` again with `status_message: "HITL test: verifying consumed"`
+8. Verify the second ping's `pending_steering` is empty (the message was consumed on first delivery)
+
+**Expected:** Steering message delivered via ping, marked consumed after delivery.
+
+**Operator validates:**
+- [ ] `/intercom steer` command was accepted without error
+- [ ] Steering confirmation appeared in Slack
+
+---
+
+## Scenario 13: Task Inbox Delivery
+
+**Purpose:** Validate the task inbox queuing and delivery workflow (US3, FR-010 through FR-014). An operator queues a task via Slack, and it is delivered to the agent at the next `reboot` call.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] About to test task inbox. Operator: please run '/intercom task HITL-TASK-TEST-ITEM' in Slack within 30 seconds."`, `level: "info"`
+2. **Operator action: In Slack, type `/intercom task HITL-TASK-TEST-ITEM` and send**
+3. Wait approximately 5 seconds for the item to be stored
+4. Call `reboot` with no arguments
+5. Verify the response contains a `pending_tasks` field with a non-empty array
+6. Verify at least one entry in `pending_tasks` contains the text `"HITL-TASK-TEST-ITEM"`
+
+**Expected:** Task inbox item queued via Slack and delivered in `reboot` response.
+
+**Operator validates:**
+- [ ] `/intercom task` command was accepted without error
+- [ ] Task confirmation appeared in Slack
+
+---
+
+## Scenario 14: Modal Dismiss Without Submit
+
+**Purpose:** Verify that dismissing the Slack modal without submitting does NOT resolve the agent's blocking call (FR-017). The agent should remain waiting.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] About to call standby. Operator: when the waiting message appears, press 'Resume with Instructions', then DISMISS the modal (click X or press Escape) WITHOUT submitting. Then, after dismissing, use the button again and this time SUBMIT your instruction."`, `level: "info"`
+2. Call `standby` with `message: "HITL TEST: Agent waiting — operator should dismiss modal first, then submit on retry."`, `timeout_seconds: 120`
+3. **Operator action:**
+   - **First:** Press "Resume with Instructions", then dismiss/close the modal without submitting
+   - **Then:** Press "Resume with Instructions" again, type any instruction (e.g., "dismissed first, submitted second"), and submit
+4. Verify the response contains the operator's submitted instruction text
+5. Verify `status` is `"resumed"`
+
+**Expected:** Agent remains waiting after modal dismiss (FR-017). Agent only resumes after the operator actually submits text.
+
+**Operator validates:**
+- [ ] First modal dismiss did NOT cause the agent to resume
+- [ ] Second modal submit resolved the wait
+- [ ] Agent received the text from the second submission
+
+---
+
+## Scenario 15: Approval File Attachment for Existing File
+
+**Purpose:** Dedicated test for original file attachment on existing file modifications (FR-046, FR-049). Verifies the operator sees both the diff and the original file content.
+
+**Steps:**
+1. Call `check_clearance` with:
+   - `title`: `"HITL Test: File attachment verification"`
+   - `diff`: `"--- a/Cargo.toml\n+++ b/Cargo.toml\n@@ -1,3 +1,4 @@\n [package]\n name = \"agent-intercom\"\n+# HITL test comment\n version = \"0.1.0\"\n"`
+   - `file_path`: `"Cargo.toml"`
+   - `description`: `"HITL TEST: Please REJECT this proposal. Verify that the ORIGINAL file content of Cargo.toml is attached as a Slack file alongside the diff."`
+   - `risk_level`: `"low"`
+2. **Operator action: REJECT the proposal after confirming the file attachment is present**
+3. Verify response `status` is `"rejected"`
+4. Do NOT call `check_diff` — this was intentionally rejected
+
+**Expected:** Rejection with file attachment verification. No file modified.
+
+**Operator validates:**
+- [ ] The diff was displayed (or uploaded as a snippet)
+- [ ] The original `Cargo.toml` content was uploaded as a separate Slack file attachment
+- [ ] Both attachments were clearly distinguishable (diff vs. original)
+
+---
+
+## Scenario 16: Auto-Approve Suggestion After Manual Approval
+
+**Purpose:** Verify that after the operator manually approves a command, the system offers to add the pattern to the auto-approve policy (US11, FR-036 through FR-038).
+
+**Steps:**
+1. Call `check_clearance` with:
+   - `title`: `"HITL Test: Auto-approve suggestion check"`
+   - `diff`: `"+# Auto-approve test\n"`
+   - `file_path`: `"tests/fixtures/hitl-auto-approve-test.txt"`
+   - `description`: `"HITL TEST: Please APPROVE. After approving, check if a 'Add to auto-approve?' button appears in Slack."`
+   - `risk_level`: `"low"`
+2. **Operator action: APPROVE the proposal**
+3. Call `check_diff` with the returned `request_id`
+4. Verify `status` is `"applied"`
+5. **Operator action: Observe whether an "Add to auto-approve?" button or suggestion appears in Slack after the approval is recorded**
+6. If the suggestion button appears, **press "No thanks"** (to avoid modifying the workspace policy during tests)
+
+**Expected:** Approval succeeds. After the operator approves, the system should offer (via Slack button) to add a matching pattern to `.intercom/settings.json`. The operator declines to keep the policy unchanged.
+
+**Note:** The auto-approve suggestion may only appear for terminal command approvals, not file-change approvals. If the suggestion does not appear for a file-change approval, record as PASS with a note that US11 targets command approvals specifically. The key validation is that the suggestion infrastructure is wired and functional.
+
+**Operator validates:**
+- [ ] After approving, an "Add to auto-approve?" button or follow-up message appeared (if applicable to this approval type)
+- [ ] If the button appeared, pressing "No thanks" dismissed the suggestion without policy changes
+
+---
+
+## Scenario 17: Context Detail Levels Observation
+
+**Purpose:** Verify that the server's `slack_detail_level` configuration affects the verbosity of Slack status messages (FR-033, FR-035). Note: this scenario validates observable behavior — the detail level is a server config setting, so the agent cannot change it at runtime. The operator compares message verbosity with prior scenarios.
+
+**Steps:**
+1. Call `broadcast` with `message: "HITL test: detail level observation — this is a status message. The detail level is controlled by the server's slack_detail_level config setting."`, `level: "info"`
+2. Call `broadcast` with `message: "HITL test: a second info-level message for comparison."`, `level: "info"`
+3. Record the current detail level behavior based on observed Slack formatting
+4. Verify calls return successfully
+
+**Expected:** Messages appear in Slack at the configured detail level. If "minimal" — terse messages. If "standard" (default) — normal detail. If "verbose" — full metadata. Approval requests and error messages should always show full detail regardless of the detail level setting (FR-035).
+
+**Operator validates:**
+- [ ] Messages appeared with formatting consistent with the configured detail level
+- [ ] Messages were not overly verbose or truncated relative to the server's setting
+
+---
+
+## Scenario 18: Audit Log Verification
+
+**Purpose:** Verify that tool calls and operator interactions during this HITL suite are recorded in the structured audit log (FR-023 through FR-028b).
+
+**Steps:**
+1. Use terminal to check if the audit log directory exists: `Test-Path .intercom/logs`
+2. If the directory exists, list audit log files: `Get-ChildItem .intercom/logs/audit-*.jsonl -ErrorAction SilentlyContinue`
+3. If an audit file for today's date exists, read the last 10 lines: `Get-Content .intercom/logs/audit-{today}.jsonl -Tail 10`
+4. Verify each line is valid JSON containing fields: `timestamp`, `session_id`, `event_type`
+5. Look for at least one entry with `event_type: "tool_call"` (from the many tool calls in this suite)
+6. Look for at least one entry with `event_type` of `"approval"` or `"rejection"` (from Scenarios 4, 5, 10, 11, 15)
+
+**Expected:** Audit log directory exists (auto-created per FR-027). Today's JSONL file contains structured entries for tool calls and approval/rejection decisions made during this suite. Each line is a valid JSON object.
+
+**Note:** If audit logging is disabled in the server config, record this scenario as SKIP with a note that audit logging was not enabled.
+
+---
+
+## Scenario 19: Stall Detection Notification (Observational)
+
+**Purpose:** Confirm the stall detector infrastructure is active (US8, FR-028 through FR-030). This is an observational check — we do NOT simulate an actual stall during the HITL test, but we verify the stall detector is running and would fire.
+
+**Steps:**
+1. Call `ping` with `status_message: "HITL test: stall detector active check"`
+2. Verify the ping successfully resets the heartbeat timer (no stall notification should appear)
+3. Call `broadcast` with `message: "[TEST] Stall detector check passed — ping successfully resets heartbeat. If the agent were to stop calling ping for the threshold period, a Slack notification would be sent to the operator."`, `level: "info"`
+
+**Expected:** No stall notification appeared (because we are actively pinging). The stall detector's presence is confirmed by the fact that the session is marked active and monitored.
+
+**Note:** To fully test stall detection, the operator would need to disconnect the agent and wait for the configured threshold. This is outside the scope of routine HITL testing. Record as PASS if ping succeeds and no spurious stall notifications fire.
+
+---
+
+## Scenario 20: Cleanup
 
 **Purpose:** Remove test artifacts created during the suite.
 
@@ -246,3 +429,82 @@ The operator's expected action is stated in **bold**.
 **Expected:** All test artifacts cleaned up.
 
 **Note:** If no files were created (all prior approval scenarios were rejected or failed), skip this scenario and mark as PASS (nothing to clean).
+
+---
+
+## Scenario 21: Terminal Command Gate — Operator Approval + Auto-Approve
+
+**Purpose:** Verify the terminal command approval gate in `auto_check` (`kind: "terminal_command"`). When a real shell command is not already in the auto-approve policy, the server posts a Slack approval prompt and blocks until the operator responds. This tests actual destructive terminal commands — not MCP tool names.
+
+**Prerequisites:**
+- `.intercom/settings.json` must NOT already contain a regex matching `"DEL /F /Q tests\\fixtures\\hitl-scratch.txt"` in `auto_approve_commands`.
+  If it does, temporarily remove the entry before running this scenario.
+
+**Steps:**
+1. Call `auto_check` with:
+   - `tool_name`: `"DEL /F /Q tests\\fixtures\\hitl-scratch.txt"`
+   - `kind`: `"terminal_command"`
+   - `context`: `{ "risk_level": "low" }`
+2. Wait for the Slack message to appear (the call blocks until the operator responds)
+3. **Operator action: Observe the Slack message. Confirm:**
+   - It shows 🔐 "Terminal command approval requested"
+   - The command `DEL /F /Q tests\fixtures\hitl-scratch.txt` is displayed in a code fence
+   - There are Approve / Reject buttons
+4. **Operator action: Press APPROVE**
+5. Verify the `auto_check` response:
+   - `auto_approved` is `true`
+   - `matched_rule` is `"operator:approved"`
+6. **Operator action: Observe whether an "Add to auto-approve?" suggestion appears in Slack**
+7. **Operator action: Press "Add to auto-approve?"** (to test the round-trip)
+8. Use the terminal to verify `.intercom/settings.json` now includes a pattern matching `DEL` (or a matching regex) in `auto_approve_commands`
+9. Call `auto_check` again with the same arguments:
+   - `tool_name`: `"DEL /F /Q tests\\fixtures\\hitl-scratch.txt"`
+   - `kind`: `"terminal_command"`
+10. Verify the second call returns **immediately** (no Slack prompt) with `auto_approved: true` (policy hit)
+
+**Expected:** First call blocks for operator approval, returns `auto_approved: true` after acceptance. Auto-approve suggestion appears and operator adds the pattern. Second call resolves instantly from policy without Slack interaction.
+
+**Cleanup:** After the scenario, remove the auto-approve entry for `DEL` from `.intercom/settings.json` to avoid polluting the workspace policy.
+
+**Operator validates:**
+- [ ] Slack message appeared with code fence showing the DEL command
+- [ ] Approve / Reject buttons were present
+- [ ] Response after approval: `auto_approved: true`, `matched_rule: "operator:approved"`
+- [ ] "Add to auto-approve?" suggestion appeared after approval
+- [ ] `.intercom/settings.json` was updated with the command pattern
+- [ ] Second `auto_check` call returned immediately without a Slack prompt
+
+---
+
+## Scenario 22: Terminal Command Gate — Operator Rejection + Backward Compatibility
+
+**Purpose:** Verify that the operator can reject a destructive terminal command request (returning `auto_approved: false`), and that omitting `kind` or using a non-terminal kind still returns immediately without Slack interaction (backward compatibility). Uses real shell commands, not MCP tool names.
+
+**Steps:**
+1. Call `auto_check` with:
+   - `tool_name`: `"rmdir /S /Q .intercom\\backups"`
+   - `kind`: `"terminal_command"`
+   - `context`: `{ "risk_level": "high" }`
+2. Wait for the Slack message to appear (the call blocks until the operator responds)
+3. **Operator action: Observe the Slack message and confirm the destructive command is shown in a code fence**
+4. **Operator action: Press REJECT**
+5. Verify the `auto_check` response:
+   - `auto_approved` is `false`
+   - `matched_rule` is `null` (or absent)
+6. Verify no "Add to auto-approve?" suggestion appears in Slack after the rejection
+7. Call `auto_check` **without** the `kind` field:
+   - `tool_name`: `"rmdir /S /Q .intercom\\backups"` (same command, no kind)
+8. Verify this call returns **immediately** with `auto_approved: false` (non-blocking policy check — no Slack interaction)
+9. Call `auto_check` with `kind: "file_operation"`:
+   - `tool_name`: `"DEL src\\main.rs"`
+   - `kind`: `"file_operation"`
+10. Verify this call also returns **immediately** without Slack interaction (non-terminal kinds bypass the command gate)
+
+**Expected:** Rejection returns `auto_approved: false` with no auto-approve suggestion. Calls without `kind` or with non-terminal kinds are non-blocking and return from policy evaluation immediately.
+
+**Operator validates:**
+- [ ] Slack approval message appeared for the `terminal_command` call showing the rmdir command and rejection was processed correctly
+- [ ] Response after rejection: `auto_approved: false`, `matched_rule: null`
+- [ ] No "Add to auto-approve?" suggestion appeared after rejection
+- [ ] Call without `kind` returned immediately (no Slack prompt)
+- [ ] Call with `kind: "file_operation"` returned immediately (no Slack prompt)

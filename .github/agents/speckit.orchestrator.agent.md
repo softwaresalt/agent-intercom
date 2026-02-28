@@ -1,14 +1,13 @@
-````chatagent
 ---
 description: Orchestrates the spec-kit feature specification lifecycle from specify through analysis, compacting context between stages, then hands off to build-orchestrator for implementation.
+tools: [vscode/getProjectSetupInfo, vscode/runCommand, vscode/askQuestions, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/runTask, execute/createAndRunTask, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/problems, read/readFile, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, agent-intercom/*, todo]
+maturity: stable
 handoffs:
   - label: Build the Feature
     agent: build-orchestrator
     prompt: "feature: {specName}; phase: 1; mode: full"
     send: false
-tools: [vscode/getProjectSetupInfo, vscode/runCommand, vscode/askQuestions, execute, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, todo]
-maturity: stable
-argument-hint: "Describe the feature you want to specify"
+model: Claude Opus 4.6 (copilot)
 ---
 
 # Spec-Kit Orchestrator
@@ -77,4 +76,3 @@ When the pipeline completes, end your response with:
 > - **Build the feature** — invoke the build-orchestrator to implement tasks phase by phase
 > - **Create GitHub issues** — run `/speckit.taskstoissues` to create trackable issues
 > - **Review artifacts** — manually inspect the generated spec, plan, scenarios, and tasks
-````

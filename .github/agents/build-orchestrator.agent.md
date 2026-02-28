@@ -1,7 +1,8 @@
 ---
 description: Orchestrates feature phase builds by delegating to the build-feature skill with task-type-aware constraint injection
-tools: [vscode/getProjectSetupInfo, vscode/installExtension, vscode/newWorkspace, vscode/openSimpleBrowser, vscode/runCommand, vscode/askQuestions, vscode/vscodeAPI, vscode/extensions, execute, read/getNotebookSummary, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, microsoft-docs/microsoft_code_sample_search, microsoft-docs/microsoft_docs_fetch, microsoft-docs/microsoft_docs_search, tavily/tavily_crawl, tavily/tavily_extract, tavily/tavily_map, tavily/tavily_research, tavily/tavily_search, azure-mcp/search, context7/query-docs, context7/resolve-library-id, ms-windows-ai-studio.windows-ai-studio/aitk_get_ai_model_guidance, ms-windows-ai-studio.windows-ai-studio/aitk_get_agent_model_code_sample, ms-windows-ai-studio.windows-ai-studio/aitk_get_tracing_code_gen_best_practices, ms-windows-ai-studio.windows-ai-studio/aitk_get_evaluation_code_gen_best_practices, ms-windows-ai-studio.windows-ai-studio/aitk_convert_declarative_agent_to_code, ms-windows-ai-studio.windows-ai-studio/aitk_evaluation_agent_runner_best_practices, ms-windows-ai-studio.windows-ai-studio/aitk_evaluation_planner, ms-windows-ai-studio.windows-ai-studio/aitk_get_custom_evaluator_guidance, ms-windows-ai-studio.windows-ai-studio/check_panel_open, ms-windows-ai-studio.windows-ai-studio/get_table_schema, ms-windows-ai-studio.windows-ai-studio/data_analysis_best_practice, ms-windows-ai-studio.windows-ai-studio/read_rows, ms-windows-ai-studio.windows-ai-studio/read_cell, ms-windows-ai-studio.windows-ai-studio/export_panel_data, ms-windows-ai-studio.windows-ai-studio/get_trend_data, ms-windows-ai-studio.windows-ai-studio/aitk_list_foundry_models, ms-windows-ai-studio.windows-ai-studio/aitk_agent_as_server, ms-windows-ai-studio.windows-ai-studio/aitk_add_agent_debug, ms-windows-ai-studio.windows-ai-studio/aitk_gen_windows_ml_web_demo, todo]
+tools: [vscode, execute, read, agent, edit, search, web, 'microsoft-docs/*', 'agent-intercom/*', 'context7/*', 'tavily/*', todo, memory, ms-vscode.vscode-websearchforcopilot/websearch]
 maturity: stable
+model: Claude Sonnet 4.6 (copilot)
 ---
 
 # Build Orchestrator
@@ -18,7 +19,7 @@ You are the build orchestrator for the t-mem codebase. Your role is to coordinat
 
 ## Remote Operator Integration (agent-intercom)
 
-The build orchestrator integrates with the agent-intercom MCP server to provide remote visibility and approval control over the build process. When agent-intercom is active, the orchestrator broadcasts its reasoning, progress, and decisions to the operator's Slack channel and routes all file modifications through the remote approval workflow.
+The build orchestrator integrates with the agent-intercom MCP server to provide remote visibility and approval control over the build process. When agent-intercom is active, the orchestrator broadcasts its reasoning, progress, and decisions to the operator's Slack channel and routes destructive file operations (deletion, directory removal) through the remote approval workflow.
 
 ### Availability
 
@@ -78,7 +79,7 @@ Read and follow the build-feature skill at `.github/skills/build-feature/SKILL.m
 
 * Context loading and constitution gates
 * Iterative TDD build-test cycles with task-type-aware constraint injection
-* **Remote approval workflow for all file modifications** (when agent-intercom is active)
+* **Remote approval workflow for destructive file operations** (when agent-intercom is active)
 * **Status broadcasting at task and gate level** (when agent-intercom is active)
 * Constitution validation after implementation
 * ADR recording, session memory, and git commit

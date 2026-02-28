@@ -57,6 +57,18 @@ enum Command {
         /// Target mode: remote, local, or hybrid.
         mode: String,
     },
+
+    /// Queue a steering message for the active agent session.
+    Steer {
+        /// Message text to send to the agent.
+        instruction: String,
+    },
+
+    /// Queue a task work item for delivery at the next agent cold-start.
+    Task {
+        /// Task description or instruction text.
+        instruction: String,
+    },
 }
 
 fn main() {
@@ -83,6 +95,12 @@ fn main() {
         }
         Command::Mode { mode } => {
             serde_json::json!({ "command": "mode", "mode": mode })
+        }
+        Command::Steer { instruction } => {
+            serde_json::json!({ "command": "steer", "instruction": instruction })
+        }
+        Command::Task { instruction } => {
+            serde_json::json!({ "command": "task", "instruction": instruction })
         }
     };
 

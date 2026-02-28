@@ -1,4 +1,3 @@
-````chatagent
 ---
 description: Generates a comprehensive Behavioral Matrix (SCENARIOS.md) detailing permutations, edge cases, and expected outcomes based on the Spec and Plan.
 handoffs: 
@@ -81,4 +80,3 @@ When you have successfully saved `SCENARIOS.md`, you MUST explicitly prompt the 
 End your response with this exact message:
 > **Behavioral Matrix Generated.** We have defined the strict outcomes required for this feature. Your next step is to break this down into actionable implementation tasks.
 > Please run: `/speckit.tasks`
-````

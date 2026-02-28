@@ -10,15 +10,19 @@ use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
+use agent_intercom::audit::writer::JsonlAuditWriter;
+use agent_intercom::audit::AuditLogger;
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
 use agent_intercom::mcp::{sse, transport};
+use agent_intercom::orchestrator::{child_monitor, stall_consumer};
 use agent_intercom::persistence::{db, retention};
+use agent_intercom::policy::watcher::PolicyWatcher;
 use agent_intercom::slack::client::{SlackRuntime, SlackService};
 use agent_intercom::{AppError, Result};
 
@@ -149,6 +153,37 @@ async fn run(args: Cli) -> Result<()> {
     // Generate a random IPC auth token for this server instance.
     let ipc_auth_token = Some(uuid::Uuid::new_v4().to_string());
 
+    // ── Initialize audit logger ─────────────────────────
+    let audit_log_dir = config.default_workspace_root.join(".intercom/logs");
+    let audit_logger: Option<Arc<dyn AuditLogger>> = match JsonlAuditWriter::new(audit_log_dir) {
+        Ok(writer) => Some(Arc::new(writer)),
+        Err(err) => {
+            warn!(%err, "failed to initialize audit logger, continuing without audit logging");
+            None
+        }
+    };
+
+    // ── Initialize policy watcher ────────────────────────
+    // The watcher loads the initial policy from `.intercom/settings.json`,
+    // sets up a `notify` file watcher on that directory, and hot-reloads the
+    // in-memory cache whenever the file changes.  `AppState.policy_cache` is
+    // the SAME `Arc` owned by the watcher so all hot-reload events are
+    // immediately visible to `check_auto_approve` without any additional
+    // invalidation logic.
+    let policy_watcher = PolicyWatcher::new();
+    if let Err(err) = policy_watcher
+        .register(&config.default_workspace_root)
+        .await
+    {
+        warn!(%err, "policy watcher registration failed — falling back to on-demand loads");
+    } else {
+        info!("policy watcher registered for default workspace root");
+    }
+    let policy_cache = policy_watcher.cache().clone();
+
+    // ── Create stall event channel ──────────────────────
+    let (stall_tx, stall_rx) = tokio::sync::mpsc::channel(256);
+
     let state = Arc::new(AppState {
         config: Arc::clone(&config),
         db,
@@ -159,10 +194,50 @@ async fn run(args: Cli) -> Result<()> {
         pending_modal_contexts: Arc::default(),
         stall_detectors: Some(StallDetectors::default()),
         ipc_auth_token,
+        policy_cache,
+        audit_logger,
+        active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
+        stall_event_tx: Some(stall_tx),
     });
+
+    // Keep the watcher alive for the server's lifetime — dropping it stops the
+    // notify watcher and the hot-reload stops working.
+    let _policy_watcher = policy_watcher;
 
     // ── Check for interrupted sessions from prior crash (T082) ──
     check_interrupted_on_startup(&state).await;
+
+    // ── Spawn stall event consumer ──────────────────────
+    let _stall_consumer_handle = if let Some(ref slack) = state.slack {
+        let default_channel = state.config.slack.channel_id.clone();
+        Some(stall_consumer::spawn_stall_event_consumer(
+            stall_rx,
+            Arc::clone(slack),
+            default_channel,
+            ct.clone(),
+        ))
+    } else {
+        info!("stall event consumer not started (no slack service)");
+        // Drop the receiver so senders fail fast.
+        drop(stall_rx);
+        None
+    };
+
+    // ── Spawn child process monitor ─────────────────────
+    let _child_monitor_handle = if let Some(ref slack) = state.slack {
+        let default_channel = state.config.slack.channel_id.clone();
+        Some(child_monitor::spawn_child_monitor(
+            Arc::clone(&state.active_children),
+            Arc::clone(slack),
+            default_channel,
+            Arc::clone(&state.db),
+            ct.clone(),
+        ))
+    } else {
+        info!("child process monitor not started (no slack service)");
+        None
+    };
 
     // ── Wire socket mode with the live AppState (T093/T094 fix) ────
     // Start socket mode AFTER AppState is built so the interaction
@@ -202,12 +277,31 @@ async fn run(args: Cli) -> Result<()> {
         let sse_ct = ct.clone();
         let sse_state = Arc::clone(&state);
         let sse_shutdown_ct = ct.clone();
-        Some(tokio::spawn(async move {
-            if let Err(err) = sse::serve_http(sse_state, sse_ct).await {
-                error!(%err, "http transport failed — initiating shutdown");
-                sse_shutdown_ct.cancel();
+        // Attempt to bind BEFORE spawning. A bind failure means the port is
+        // already in use (e.g., second instance). Exit cleanly rather than
+        // leaving Slack and stdio running with no HTTP front-end.
+        match sse::bind_http(&state).await {
+            Ok(listener) => Some(tokio::spawn(async move {
+                if let Err(err) = sse::serve_with_listener(listener, sse_state, sse_ct).await {
+                    error!(%err, "http transport failed — initiating shutdown");
+                    sse_shutdown_ct.cancel();
+                }
+            })),
+            Err(err) => {
+                error!(
+                    %err,
+                    "failed to bind HTTP transport — shutting down and exiting"
+                );
+                // Abort Slack runtime so the process can exit cleanly.
+                if let Some(ref rt) = slack_runtime {
+                    if let Some(ref socket) = rt.socket_task {
+                        socket.abort();
+                    }
+                    rt.queue_task.abort();
+                }
+                std::process::exit(1);
             }
-        }))
+        }
     } else {
         info!("SSE transport disabled (--transport stdio)");
         None
@@ -245,6 +339,13 @@ async fn run(args: Cli) -> Result<()> {
 /// Maximum time to wait for graceful shutdown before force-exiting.
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Brief delay to let the Slack outgoing queue drain before aborting the task (T072).
+///
+/// This ensures any messages enqueued during `graceful_shutdown` (such as the
+/// shutdown notification) have time to be posted, regardless of whether a Slack
+/// channel is configured.
+const QUEUE_DRAIN_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Run the graceful shutdown sequence with a timeout.
 ///
 /// Persists interrupted state, aborts Slack runtime tasks, and waits for
@@ -263,7 +364,12 @@ async fn shutdown_with_timeout(
             error!(%err, "error during graceful shutdown persistence");
         }
 
-        // 2. Abort Slack runtime tasks (they have no cancellation token).
+        // 2. Unconditional queue drain (T072): let the outgoing Slack message
+        //    queue flush any enqueued messages (e.g. shutdown notification)
+        //    before the background worker task is aborted.
+        tokio::time::sleep(QUEUE_DRAIN_DELAY).await;
+
+        // 3. Abort Slack runtime tasks (they have no cancellation token).
         if let Some(ref rt) = slack_runtime {
             if let Some(ref socket) = rt.socket_task {
                 socket.abort();
@@ -376,8 +482,6 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
             if let Err(err) = slack.enqueue(msg).await {
                 error!(%err, "failed to post shutdown notification to slack");
             }
-            // Brief sleep to let the queue drain.
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     }
 

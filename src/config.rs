@@ -33,6 +33,14 @@ pub struct SlackConfig {
     /// Slack workspace team ID (populated at runtime).
     #[serde(skip)]
     pub team_id: String,
+    /// File extensions that should be uploaded to Slack as markdown-fenced
+    /// `.md` files so that Slack renders them as text instead of "Binary".
+    ///
+    /// Keys are bare extensions (without leading dot, e.g. `rs`, `toml`);
+    /// values are the markdown code-fence language label (e.g. `rust`, `toml`).
+    /// Files whose extension is NOT in this map are uploaded as plain `.txt`.
+    #[serde(default)]
+    pub markdown_upload_extensions: HashMap<String, String>,
 }
 
 impl std::fmt::Debug for SlackConfig {
@@ -42,7 +50,24 @@ impl std::fmt::Debug for SlackConfig {
             .field("app_token", &"[REDACTED]")
             .field("bot_token", &"[REDACTED]")
             .field("team_id", &self.team_id)
+            .field(
+                "markdown_upload_extensions",
+                &self.markdown_upload_extensions,
+            )
             .finish()
+    }
+}
+
+impl SlackConfig {
+    /// Look up the markdown code-fence language label for a file path.
+    ///
+    /// Returns `Some("rust")` for a path ending in `.rs` when `rs = "rust"`
+    /// is present in `[slack.markdown_upload_extensions]`.  Returns `None`
+    /// when the extension is absent from the map (the file should be
+    /// uploaded as plain `.txt` instead).
+    pub fn markdown_fence_label(&self, file_path: &str) -> Option<&str> {
+        let ext = Path::new(file_path).extension()?.to_str()?;
+        self.markdown_upload_extensions.get(ext).map(String::as_str)
     }
 }
 
@@ -150,6 +175,23 @@ fn default_db_path() -> PathBuf {
     PathBuf::from("data/agent-rc.db")
 }
 
+/// Verbosity level for Slack status messages.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SlackDetailLevel {
+    /// Minimal output — errors and key events only.
+    Minimal,
+    /// Standard output — normal operational messages (default).
+    #[default]
+    Standard,
+    /// Verbose output — all events including auto-approved actions.
+    Verbose,
+}
+
+fn default_slack_detail_level() -> SlackDetailLevel {
+    SlackDetailLevel::Standard
+}
+
 /// Global configuration parsed from `config.toml`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -195,6 +237,11 @@ pub struct GlobalConfig {
     /// Database configuration.
     #[serde(default)]
     pub database: DatabaseConfig,
+    /// Verbosity level for Slack status messages.
+    ///
+    /// Controls how much detail is posted to Slack during agent sessions.
+    #[serde(default = "default_slack_detail_level")]
+    pub slack_detail_level: SlackDetailLevel,
 }
 
 impl GlobalConfig {

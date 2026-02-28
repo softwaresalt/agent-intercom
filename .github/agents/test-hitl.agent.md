@@ -1,6 +1,6 @@
 ---
 description: "Human-in-the-loop integration test agent. Executes structured test scenarios against a live agent-intercom server with real Slack integration and reports results."
-tools: [execute/getTerminalOutput, execute/runInTerminal, read/problems, read/readFile, edit/createFile, edit/editFiles, search/fileSearch, search/listDirectory, search/textSearch, agent-intercom/*, todo]
+tools: [vscode/extensions, vscode/getProjectSetupInfo, vscode/installExtension, vscode/newWorkspace, vscode/openSimpleBrowser, vscode/runCommand, vscode/askQuestions, vscode/vscodeAPI, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/runTask, execute/createAndRunTask, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, read/getNotebookSummary, read/problems, read/readFile, read/readNotebookCellOutput, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, search/searchSubagent, web/fetch, agent-intercom/broadcast, agent-intercom/check_clearance, agent-intercom/check_diff, agent-intercom/ping, agent-intercom/reboot, agent-intercom/standby, agent-intercom/switch_freq, agent-intercom/transmit, agent-intercom/auto_check, todo, memory]
 model: Claude Sonnet 4.6
 ---
 
@@ -27,11 +27,11 @@ Read and follow the complete workflow defined in the skill file at `.github/skil
 5. **Wait for operator responses.** Do not timeout or skip. The operator is actively monitoring Slack.
 6. If a scenario expects rejection, include the instruction in the `description` field: "HITL TEST: Please REJECT this proposal."
 7. If a scenario expects approval, include the instruction in the `description` field: "HITL TEST: Please APPROVE this proposal."
-8. Never write files directly. Always use the approval workflow (`auto_check` → `check_clearance` → `check_diff`).
+8. Write files directly for creation and modification. Use the approval workflow (`auto_check` → `check_clearance` → `check_diff`) only for destructive operations (file deletion, directory removal).
 9. One file per approval. One command per terminal call.
 10. After all scenarios complete, produce a summary table with pass/fail status for each.
 11. Use actual parameter names from the MCP tool contracts:
-    - `auto_check`: `tool_name` (string, required), `context` (object, optional)
+    - `auto_check`: `tool_name` (string, required), `context` (object, optional), `kind` (string: `terminal_command`|`file_operation`, optional — when `terminal_command` and the command is not policy-approved, blocks until the operator approves or rejects via Slack)
     - `check_clearance`: `title` (string, required), `diff` (string, required), `file_path` (string, required), `description` (string, optional), `risk_level` (string: low|high|critical, default: low)
     - `check_diff`: `request_id` (string, required), `force` (boolean, optional, default: false)
     - `transmit`: `prompt_text` (string, required), `prompt_type` (string: continuation|clarification|error_recovery|resource_warning, default: continuation), `elapsed_seconds` (integer, optional), `actions_taken` (integer, optional)

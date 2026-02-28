@@ -96,6 +96,8 @@ agent-intercom-ctl resume "focus on writing tests next"
 
 **Effect:** Resolves the `standby` oneshot with `decision: "resume"` and the optional instruction text.
 
+> **Important:** This command resumes the `standby` MCP tool (wakes a waiting agent). It does not resume a _paused_ session. Session pause/resume are managed via Slack slash commands (`/intercom session-pause`, `/intercom session-resume`) and only change the database status flag — they do not affect the agent's transport connection or process. See the [User Guide — Session Concepts](user-guide.md#session-concepts) for details.
+
 ---
 
 ### `mode`

@@ -195,6 +195,19 @@ pub async fn handle(
         let is_unified_diff =
             approval.diff_content.starts_with("--- ") || approval.diff_content.starts_with("diff ");
 
+        // Guard: reject non-unified content for existing non-empty files.
+        // write_full_file is intentional only for new/empty file creation.
+        if !is_unified_diff {
+            let existing_size = validated_path.metadata().map(|m| m.len()).unwrap_or(0);
+            if existing_size > 0 {
+                return Ok(error_result(
+                    "invalid_diff",
+                    "diff content does not appear to be a unified diff (missing '--- ' header); \
+                     submit a properly-formatted unified diff for existing files",
+                ));
+            }
+        }
+
         let write_result = if is_unified_diff {
             apply_patch(&validated_path, &approval.diff_content, &workspace_root)
         } else {

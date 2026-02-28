@@ -13,9 +13,9 @@ use slack_morphism::prelude::{
     SlackApiFilesGetUploadUrlExternalRequest, SlackApiToken, SlackApiTokenType, SlackApiTokenValue,
     SlackApiViewsOpenRequest, SlackBlock, SlackChannelId, SlackClient,
     SlackClientEventsListenerEnvironment, SlackClientHyperHttpsConnector, SlackClientSession,
-    SlackClientSocketModeConfig, SlackClientSocketModeListener, SlackHistoryMessage,
-    SlackMessageContent, SlackSocketModeListenerCallbacks, SlackTeamId, SlackTriggerId, SlackTs,
-    SlackView,
+    SlackClientSocketModeConfig, SlackClientSocketModeListener, SlackFileSnippetType,
+    SlackHistoryMessage, SlackMessageContent, SlackSocketModeListenerCallbacks, SlackTeamId,
+    SlackTriggerId, SlackTs, SlackView,
 };
 use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::{error, info, warn};
@@ -384,36 +384,49 @@ impl SlackService {
         Ok(())
     }
 
-    /// Upload a file to a Slack channel using the external upload flow.
+    /// Upload a file to a Slack channel using the V2 external upload flow.
+    ///
+    /// `snippet_type` is forwarded to `files.getUploadURLExternal` so Slack
+    /// pre-classifies the file before the content scanner runs.  Pass the
+    /// markdown language name (e.g. `"rust"`, `"toml"`, `"text"`) to tell
+    /// Slack how to render the file inline.  `None` leaves classification
+    /// to Slack's content scanner.
     ///
     /// # Errors
     ///
-    /// Returns `AppError::Slack` if the upload fails.
+    /// Returns `AppError::Slack` if any step of the upload fails.
     pub async fn upload_file(
         &self,
         channel: SlackChannelId,
         filename: &str,
         content: &str,
         thread_ts: Option<SlackTs>,
+        snippet_type: Option<&str>,
     ) -> Result<()> {
         let session = self.http_session();
 
-        // Step 1: Get upload URL.
-        let url_request =
+        // Step 1: Get upload URL, pre-declaring the snippet type so Slack
+        // classifies the file before the binary content scanner runs.
+        let mut url_request =
             SlackApiFilesGetUploadUrlExternalRequest::new(filename.into(), content.len());
+        url_request.snippet_type = snippet_type.map(|s| SlackFileSnippetType(s.into()));
         let url_response = session
             .get_upload_url_external(&url_request)
             .await
             .map_err(|err| AppError::Slack(format!("failed to get upload url: {err}")))?;
 
-        // Step 2: Upload content to the URL.
+        // Step 2: Upload content via POST with text/plain so Slack stores it
+        // as readable text rather than an opaque binary blob.
         let http_client = reqwest::Client::new();
         http_client
             .post(url_response.upload_url.0.to_string())
+            .header("Content-Type", "text/plain; charset=utf-8")
             .body(content.to_owned())
             .send()
             .await
-            .map_err(|err| AppError::Slack(format!("failed to upload file: {err}")))?;
+            .map_err(|err| AppError::Slack(format!("failed to send file upload request: {err}")))?
+            .error_for_status()
+            .map_err(|err| AppError::Slack(format!("failed to upload file (http {err})")))?;
 
         // Step 3: Complete the upload.
         let file_ref = SlackApiFilesComplete {

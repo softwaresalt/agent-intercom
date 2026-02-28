@@ -63,6 +63,11 @@ async fn stall_detector_reset_works() {
         pending_modal_contexts: Arc::default(),
         stall_detectors: Some(Arc::clone(&detectors)),
         ipc_auth_token: None,
+        policy_cache: Arc::default(),
+        audit_logger: None,
+        active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
+        stall_event_tx: None,
     });
 
     let session = create_active_session(&state.db, root).await;
@@ -335,6 +340,11 @@ async fn ipc_auth_some_means_enabled() {
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: Some("test-secret-token".into()),
+        policy_cache: Arc::default(),
+        audit_logger: None,
+        active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
+        stall_event_tx: None,
     });
 
     assert_eq!(state.ipc_auth_token.as_deref(), Some("test-secret-token"));

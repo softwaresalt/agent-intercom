@@ -114,7 +114,89 @@ pub fn diff_section(diff: &str) -> SlackBlock {
     )
 }
 
-/// T063 — Build a success section for a `check_diff` apply notification.
+/// Format a stall alert notification message (T060 / T061 — S058, S060).
+///
+/// Returns a plain-text Markdown string suitable for posting to Slack when an
+/// agent session has been idle past the inactivity threshold.  The message
+/// includes the session ID, idle duration, and actionable recovery steps.
+#[must_use]
+pub fn stall_alert_message(session_id: &str, idle_seconds: u64) -> String {
+    let idle_display = if idle_seconds >= 60 {
+        format!("{} min", idle_seconds / 60)
+    } else {
+        format!("{idle_seconds}s")
+    };
+    format!(
+        "⚠️ *Agent stalled* — session `{session_id}` has been idle for {idle_display}.\n\
+         \n\
+         *Recovery options:*\n\
+         • Nudge agent via the buttons below\n\
+         • Resume manually: `agent-intercom-ctl resume {session_id}`\n\
+         • Check status: `agent-intercom-ctl status`\n\
+         • Spawn a new agent: `agent-intercom-ctl spawn`"
+    )
+}
+
+/// Build a stall alert message block list with recovery action buttons (T060 / T061).
+///
+/// Intended for posting directly to Slack when `StallEvent::Stalled` fires.
+#[must_use]
+pub fn stall_alert_blocks(session_id: &str, idle_seconds: u64) -> Vec<SlackBlock> {
+    vec![
+        severity_section("warning", &stall_alert_message(session_id, idle_seconds)),
+        nudge_buttons(session_id),
+    ]
+}
+
+/// T063 — Build an "Add to auto-approve?" action button for manual approval suggestions.
+///
+/// Intended for posting after an operator manually approves a command, giving
+/// them a one-click shortcut to persist the pattern to the workspace policy.
+#[must_use]
+pub fn auto_approve_suggestion_button(command: &str) -> SlackBlock {
+    action_buttons(
+        &format!("auto_approve_{}", command.len()),
+        &[
+            ("auto_approve_add", "Add to auto-approve?", command),
+            ("auto_approve_dismiss", "No thanks", command),
+        ],
+    )
+}
+
+/// Build terminal command approval blocks.
+///
+/// Presents the command in a code fence with Approve / Reject buttons.
+/// Used by the blocking `check_auto_approve` flow when `kind` is `"terminal_command"`
+/// and the command is not already covered by the workspace auto-approve policy.
+#[must_use]
+pub fn command_approval_blocks(command: &str, request_id: &str) -> Vec<SlackBlock> {
+    vec![
+        text_section(&format!(
+            "\u{1f510} *Terminal command approval requested*\n```\n{command}\n```"
+        )),
+        approval_buttons(request_id),
+    ]
+}
+
+/// Determine whether a Slack message at `severity` should be posted at `detail_level`.
+///
+/// | `detail_level` | visible severities |
+/// |---|---|
+/// | `"minimal"` | `"warning"`, `"error"` only |
+/// | `"standard"` (default) | all standard severities |
+/// | `"verbose"` | all messages |
+/// | unknown | treated as `"standard"` |
+#[must_use]
+pub fn message_visible_at_level(detail_level: &str, severity: &str) -> bool {
+    if detail_level == "minimal" {
+        matches!(severity, "warning" | "error")
+    } else {
+        // "standard", "verbose", and unknown values all show every severity.
+        true
+    }
+}
+
+/// T063 — Build a `check_diff` apply notification.
 ///
 /// Used by `accept_diff` after a successful patch application.
 #[must_use]
@@ -150,6 +232,47 @@ pub fn diff_force_warning_section(file_path: &str) -> SlackBlock {
             "Force-applying diff to `{file_path}` \u{2014} file content has diverged since proposal"
         ),
     )
+}
+
+/// Build blocks for a threaded snippet review reply.
+///
+/// Each entry in `snippets` is `(label, language, content)`.  The content
+/// is truncated at `max_chars` if it would exceed Slack's 3,000-character
+/// per-block limit.  Returns a flat `Vec<SlackBlock>` suitable for a
+/// `SlackMessage` payload — one header + code-block section per snippet,
+/// separated by dividers.
+#[must_use]
+pub fn code_snippet_blocks(snippets: &[(&str, &str, &str)]) -> Vec<SlackBlock> {
+    const MAX_CHARS: usize = 2_600;
+
+    let mut blocks: Vec<SlackBlock> = vec![text_section(
+        "\u{1f4dd} *Code snippets for review*\n_Curated by the agent \u{2014} most relevant sections_",
+    )];
+
+    for &(label, language, content) in snippets {
+        let truncated;
+        let body = if content.len() > MAX_CHARS {
+            truncated = format!(
+                "{}\n\u{2026} _(truncated \u{2014} {} chars omitted)_",
+                &content[..MAX_CHARS],
+                content.len() - MAX_CHARS,
+            );
+            truncated.as_str()
+        } else {
+            content
+        };
+        let fence = if language.is_empty() {
+            format!("*{label}*\n```\n{body}\n```")
+        } else {
+            format!("*{label}*\n```{language}\n{body}\n```")
+        };
+        blocks.push(SlackBlock::Divider(
+            slack_morphism::prelude::SlackDividerBlock::new(),
+        ));
+        blocks.push(text_section(&fence));
+    }
+
+    blocks
 }
 
 /// Build a Slack modal view for collecting operator instructions.

@@ -32,8 +32,9 @@
 #     }
 #   }
 
-# Absolute path to your primary Git workspace root.
-# The MCP agent will operate within this directory.
+# **Absolute path** (NOT relative path) to your primary Git workspace root.
+# The MCP agent will operate within this directory as a default backup.
+# You will likely have more than one workspace/cwd, so you can use any real directory as default.
 default_workspace_root = "/path/to/your/workspace"
 
 # Port for the HTTP/SSE MCP transport endpoint.
@@ -48,13 +49,19 @@ ipc_name = "agent-intercom"
 max_concurrent_sessions = 3
 
 # Shell command that starts the AI coding agent.
-# For GitHub Copilot CLI: "copilot" with ["--stdio"]
+# For GitHub Copilot CLI: "copilot" with ["--sse"]
 # For Claude CLI:         "claude"  with ["--stdio"]
-host_cli = "claude"
-host_cli_args = ["--stdio"]
+host_cli = "copilot"
+host_cli_args = ["--sse"]
 
 # How many days to retain session data before automatic purge.
 retention_days = 30
+
+# Slack message verbosity: minimal, standard, or verbose.
+# minimal  — only errors and warnings
+# standard — normal operational messages (default)
+# verbose  — all events including auto-approved actions
+slack_detail_level = "standard"
 
 [database]
 # Path to the SQLite database file (relative to the config.toml location).

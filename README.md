@@ -8,7 +8,7 @@ When an AI agent (GitHub Copilot, Claude, Cursor) wants to modify your code, age
 
 ```mermaid
 flowchart LR
-    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/SSE)&nbsp;"| Server["agent-<br/>intercom"]
+    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/HTTP)&nbsp;"| Server["agent-<br/>intercom"]
     Server <-->|"&nbsp;Socket&nbsp;<br/>&nbsp;Mode&nbsp;"| Slack["Slack<br/>Channel"]
     Server <-->|"&nbsp;IPC&nbsp;"| Ctl["agent-intercom-ctl<br/>(local CLI)"]
 ```
@@ -78,14 +78,14 @@ Edit `config.toml`:
 ```toml
 default_workspace_root = "/path/to/your/project"
 http_port = 3000
-host_cli = "/path/to/copilot"
-host_cli_args = ["--stdio"]
+host_cli = "copilot"
+host_cli_args = ["--sse"]
 
 [database]
 path = "data/agent-intercom.db"
 
 [slack]
-channel_id = "{your-slack-channel-id}"
+# Credentials from env vars or OS keychain — see docs/configuration.md
 ```
 
 ### 4. Run
@@ -120,6 +120,7 @@ Add to `.vscode/mcp.json`:
 |---|---|
 | [Setup Guide](docs/setup-guide.md) | Installation, Slack app creation, configuration, and first run |
 | [User Guide](docs/user-guide.md) | All features, MCP tools, Slack commands, CLI usage, and policies |
+| [Configuration Reference](docs/configuration.md) | Comprehensive `config.toml` breakdown with all settings and defaults |
 | [CLI Reference](docs/cli-reference.md) | Complete `agent-intercom-ctl` subcommand reference |
 | [Developer Guide](docs/developer-guide.md) | Build instructions, testing, project structure, and contribution workflow |
 | [Migration Guide](docs/migration-guide.md) | Transition steps from an earlier installation |
@@ -131,7 +132,7 @@ Add to `.vscode/mcp.json`:
 |---|---|---|
 | `check_clearance` | Yes | Submit a code proposal for operator approval via Slack |
 | `check_diff` | No | Apply an approved diff to the filesystem |
-| `auto_check` | No | Query the workspace auto-approve policy |
+| `auto_check` | Varies | Query auto-approve policy; blocks for terminal commands needing approval |
 | `transmit` | Yes | Forward a continuation prompt to the operator |
 | `standby` | Yes | Place the agent in standby until the operator responds |
 | `ping` | No | Liveness signal; resets stall detection timer |
@@ -153,6 +154,8 @@ Add to `.vscode/mcp.json`:
 /intercom session-restore <ckpt_id>     Restore a checkpoint
 /intercom list-files [path] [--depth N] Browse workspace files
 /intercom show-file <path> [--lines]    View file contents
+/intercom steer <message>               Send steering message to agent
+/intercom task <message>                Queue a task for agent cold-start
 ```
 
 ## Local CLI
@@ -170,7 +173,7 @@ agent-intercom-ctl mode remote|local|hybrid       # Switch mode
 | Component | Technology |
 |---|---|
 | Language | Rust (stable, edition 2021) |
-| MCP SDK | rmcp 0.5 |
+| MCP SDK | rmcp 0.13 |
 | HTTP | axum 0.8 |
 | Slack | slack-morphism 2.17 (Socket Mode) |
 | Database | SQLite via sqlx 0.8 |

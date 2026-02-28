@@ -134,7 +134,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ### 1.3 `auto_check`
 
-**Purpose:** Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate. **Non-blocking.**
+**Purpose:** Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate. Behavior depends on the `kind` parameter: file operations return immediately, while terminal commands that are not auto-approved **block** until the operator responds.
 
 **Input Parameters:**
 
@@ -142,6 +142,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 |---|---|---|---|---|
 | `tool_name` | `string` | **Yes** | — | Name of the tool or command to check |
 | `context` | `object` | No | `null` | Additional metadata for fine-grained evaluation |
+| `kind` | `string` | No | `null` | Operation kind. Enum: `"file_operation"`, `"terminal_command"`. When `"terminal_command"` and the command is not auto-approved, the tool blocks and posts a Slack approval prompt. |
 
 **Context Object:**
 
@@ -159,14 +160,19 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 }
 ```
 
-**Matched Rule Format:** `"command:<name>"`, `"tool:<name>"`, or `"file_pattern:<write|read>:<glob>"`.
+**Matched Rule Format:** `"command:<name>"`, `"tool:<name>"`, `"file_pattern:<write|read>:<glob>"`, or `"operator:approved"` (when a terminal command was manually approved by the operator).
 
 **Behavior:**
 
 1. Resolves the active session's `workspace_root`.
 2. Loads the workspace policy from `.intercom/settings.json`.
 3. Evaluates the policy (see [Policy System](#10-policy-system) for evaluation order).
-4. Returns immediately with the result.
+4. **If `kind = "terminal_command"` and the policy denies the command:**
+   - Posts an approval prompt to Slack with the command text.
+   - Blocks until the operator clicks Accept or Reject, or the approval timeout elapses.
+   - On approval, returns `auto_approved: true` with `matched_rule: "operator:approved"` and offers to add an auto-approve pattern.
+   - On rejection or timeout, returns `auto_approved: false`.
+5. For all other cases, returns immediately with the policy evaluation result.
 
 ---
 
@@ -247,13 +253,13 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ### 1.6 `reboot`
 
-**Purpose:** Retrieve the last known state from persistent storage on startup. Called by the agent to check for interrupted sessions or pending requests. **Non-blocking.**
+**Purpose:** Retrieve the last known state from persistent storage on startup. Called by the agent to check for interrupted sessions or pending requests. This is the primary mechanism for carrying context across agent sessions. **Non-blocking.**
 
 **Input Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `session_id` | `string` | No | `null` | Specific session to recover. When omitted, auto-finds the most recently interrupted session. |
+| `session_id` | `string` | No | `null` | Specific session to recover. When omitted, auto-finds the most recently **interrupted** session only. To recover a terminated session from a prior day, the session ID must be provided explicitly. |
 
 **Response (clean):**
 
@@ -282,11 +288,28 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
   },
   "progress_snapshot": [
     { "label": "<string>", "status": "done" | "in_progress" | "pending" }
+  ],
+  "pending_tasks": [
+    {
+      "task_id": "<uuid>",
+      "message": "<string>",
+      "source": "<string>",
+      "created_at": "<ISO 8601>"
+    }
   ]
 }
 ```
 
-Fields `pending_requests`, `last_checkpoint`, and `progress_snapshot` are omitted when empty/absent.
+Fields `pending_requests`, `last_checkpoint`, `progress_snapshot`, and `pending_tasks` are omitted when empty/absent.
+
+**Session ID resolution behavior:**
+
+| `session_id` provided | Resolution |
+|---|---|
+| Yes | Looks up that exact session regardless of status (may be `Terminated`, `Interrupted`, or `Active`). Returns its checkpoints, progress snapshot, and pending items. |
+| No | Queries only for sessions with `status = 'interrupted'`. Normal disconnections set status to `Terminated`, so this auto-discovery path only finds sessions from a server crash or graceful shutdown. |
+
+**Cross-session context recovery:** Agents from a new session can pass a previous session's ID to retrieve its progress snapshot, last checkpoint, and any pending inbox tasks. This is the intended workflow for resuming work across days — the operator obtains the old session ID via `/intercom sessions` or `/intercom session-checkpoints` and provides it to the agent.
 
 ---
 
@@ -479,7 +502,7 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 2. Creates a `Session` record.
 3. Spawns the host CLI process with environment variables:
    - `INTERCOM_WORKSPACE_ROOT` — resolved workspace path
-   - `INTERCOM_SSE_URL` — HTTP endpoint for the spawned agent
+   - `INTERCOM_MCP_URL` — `/mcp?session_id=<id>` URL for the spawned agent
    - `INTERCOM_SESSION_ID` — session UUID
 4. Activates the session upon successful process start.
 5. Posts confirmation to Slack with session ID and workspace.
@@ -488,25 +511,37 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 
 ### 3.4 `session-pause [session_id]`
 
-**Description:** Pause a running session. Defaults to the caller's most recently active session if `session_id` is omitted.
+**Description:** Pause a running session by setting its database status to `Paused`. While paused, subsequent tool calls from the agent are rejected. The MCP transport connection remains open — the agent is connected but idle.
 
-**Authorization:** Must be the session owner.
+**Default target:** Caller's most recently active session if `session_id` is omitted.
+
+**Authorization:** Must be the session owner. Primary agent sessions (owned by `agent:local`) cannot be paused from Slack — only spawned sessions (owned by a Slack user ID) are accessible.
+
+**Important:** This is a database flag change only. It does not suspend the agent process, disconnect the transport, or save any state. The agent may continue attempting tool calls (which will fail) until it detects the paused state.
 
 ---
 
 ### 3.5 `session-resume [session_id]`
 
-**Description:** Resume a paused session. Defaults to the caller's most recently active session if `session_id` is omitted.
+**Description:** Resume a paused session by setting its database status back to `Active`. Tool calls from the agent work again.
+
+**Default target:** Caller's most recently active session if `session_id` is omitted.
 
 **Authorization:** Must be the session owner.
+
+**Limitation: This command cannot resume sessions across agent restarts.** `session-resume` changes a database flag. It does not re-establish a transport connection or re-attach an agent process. If the agent has disconnected (IDE closed, process exited), the session is already `Terminated` and `session-resume` has no effect. To carry context from a terminated session to a new one, use checkpoints and the `reboot` MCP tool.
 
 ---
 
 ### 3.6 `session-clear [session_id]`
 
-**Description:** Terminate and clean up a session. Kills the child process with a 5-second grace period, then force-kills if needed. Defaults to the caller's most recently active session if `session_id` is omitted.
+**Description:** Terminate and clean up a session. For spawned sessions, kills the child process with a 5-second grace period, then force-kills if needed. For primary agent sessions, marks the database record as `Terminated` (the agent's next tool call discovers the termination).
+
+**Default target:** Caller's most recently active session if `session_id` is omitted.
 
 **Authorization:** Must be the session owner.
+
+**Warning:** If only one session is active and you omit the `session_id`, this command targets it regardless of type. Verify the target session with `/intercom sessions` first.
 
 ---
 
@@ -531,7 +566,7 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 
 ### 3.8 `session-restore <checkpoint_id>`
 
-**Description:** Restore a previously created checkpoint. Warns about any files that have diverged since the checkpoint was created.
+**Description:** Load a previously created checkpoint and report file divergences to Slack. This is an **operator diagnostic tool** — it shows you (in Slack) which workspace files have changed since the checkpoint was taken.
 
 **Parameters:**
 
@@ -546,6 +581,8 @@ All commands are invoked via `/intercom <command>`. Every command enforces autho
 | `Modified` | File content has changed since checkpoint |
 | `Deleted` | File existed at checkpoint time but is now missing |
 | `Added` | File was added after the checkpoint |
+
+**Important:** This command does **not** deliver context to the running agent. The divergence report is posted to Slack for the operator only. To give the agent the checkpoint's session context (progress snapshot, pending items), the agent must call the `reboot` MCP tool with the old session's ID.
 
 ---
 
@@ -784,9 +821,7 @@ The main configuration file is parsed into `GlobalConfig`. Path: specified via `
 
 #### `[slack]`
 
-| Field | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `channel_id` | `string` | **Yes** | — | Default Slack channel ID where notifications are posted |
+Slack credentials are loaded at runtime from the OS keychain or environment variables — not from `config.toml`. There is no `channel_id` field in the config file; channels are set per-workspace via the MCP URL query parameter (see [Per-Workspace Channel Override](#63-per-workspace-channel-override)).
 
 **Note:** Slack tokens (`app_token`, `bot_token`, `team_id`) are **not** in config.toml. They are loaded at runtime (see Credentials below).
 
@@ -852,7 +887,7 @@ Each VS Code workspace can target a different Slack channel by appending a `chan
 }
 ```
 
-When omitted, the global `slack.channel_id` is used.
+There is no global channel fallback. Every workspace must supply its own `channel_id` to receive Slack notifications.
 
 ### 6.4 Example config.toml
 
@@ -869,7 +904,8 @@ retention_days = 30
 path = "data/agent-intercom.db"
 
 [slack]
-channel_id = "C0AFXFQP1TJ"
+# No fields here — credentials come from environment variables or OS keychain.
+# Per-workspace channels are set via the MCP URL query parameter.
 
 [timeouts]
 approval_seconds = 3600
@@ -1115,7 +1151,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | `bool` | `false` | Master switch for auto-approve |
-| `commands` | `Vec<String>` | `[]` | Shell commands that bypass approval (glob wildcards) |
+| `auto_approve_commands` | `Vec<String>` | `[]` | Regex patterns for terminal commands that bypass approval. Serialized as `"chat.tools.terminal.autoApprove"` in JSON (aliases: `"auto_approve_commands"`, `"commands"`). |
 | `tools` | `Vec<String>` | `[]` | MCP tool names that bypass approval |
 | `file_patterns` | `FilePatterns` | `{}` | File pattern rules |
 | `risk_level_threshold` | `RiskLevel` | `Low` | Maximum risk level for auto-approve |
@@ -1141,22 +1177,23 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 **Connection:** The primary agent connects directly — no HTTP involved.
 
-### 9.2 HTTP/SSE Transport
+### 9.2 HTTP Transport (Streamable HTTP)
 
-**Purpose:** Enables multiple concurrent agent connections via HTTP with Server-Sent Events.
+**Purpose:** Enables multiple concurrent agent connections via Streamable HTTP.
 
 **Endpoints:**
 
 | Path | Method | Description |
 |---|---|---|
-| `/sse` | GET | SSE connection endpoint. Accepts optional `channel_id` query parameter. |
-| `/message` | POST | MCP message endpoint for SSE-connected clients |
+| `/mcp` | POST | Streamable HTTP MCP endpoint (rmcp `StreamableHttpService`) |
+| `/health` | GET | Liveness probe (returns `"ok"`) |
+| `/sse` | GET | Legacy tombstone — returns `410 Gone` |
 
 **Binding:** `127.0.0.1:{http_port}` (default port 3000).
 
-**Per-Session Channel Override:** Each SSE connection extracts `channel_id` from the query string (`/sse?channel_id=C_WORKSPACE`). A connection semaphore serializes SSE establishment to prevent race conditions on the channel_id inbox.
+**Per-Session Channel Override:** Each HTTP connection extracts `channel_id` and optional `session_id` from the query string (`/mcp?channel_id=C_WORKSPACE&session_id=<uuid>`).
 
-**Concurrency:** Each inbound SSE connection creates a fresh `AgentRcServer` instance sharing the same `AppState`.
+**Concurrency:** Each inbound connection creates a fresh `IntercomServer` instance sharing the same `AppState`.
 
 ### 9.3 Shared Application State (`AppState`)
 
@@ -1168,8 +1205,14 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 | `pending_approvals` | `Arc<Mutex<HashMap<String, oneshot::Sender<ApprovalResponse>>>>` | Pending approval oneshots keyed by `request_id` |
 | `pending_prompts` | `Arc<Mutex<HashMap<String, oneshot::Sender<PromptResponse>>>>` | Pending prompt oneshots keyed by `prompt_id` |
 | `pending_waits` | `Arc<Mutex<HashMap<String, oneshot::Sender<WaitResponse>>>>` | Pending wait oneshots keyed by `session_id` |
+| `pending_command_approvals` | `Arc<Mutex<HashMap<String, String>>>` | Pending terminal command approvals (request_id → session_id) |
+| `pending_modal_contexts` | `Arc<Mutex<HashMap<String, (String, String)>>>` | Context for Slack modal submissions (trigger_id → (session_id, request_id)) |
 | `stall_detectors` | `Option<Arc<Mutex<HashMap<String, StallDetectorHandle>>>>` | Per-session stall detectors keyed by `session_id` |
 | `ipc_auth_token` | `Option<String>` | Shared secret for IPC authentication (random UUID per instance) |
+| `policy_cache` | `Arc<RwLock<HashMap<PathBuf, CompiledWorkspacePolicy>>>` | Compiled workspace policies keyed by workspace root |
+| `audit_logger` | `Option<Arc<dyn AuditLogger>>` | Structured audit log writer (JSONL to `.intercom/logs/`) |
+| `active_children` | `Arc<Mutex<HashMap<String, Child>>>` | Spawned agent child processes keyed by session_id |
+| `stall_event_tx` | `Option<mpsc::Sender<StallEvent>>` | Channel for stall detector events to the stall consumer |
 
 ### 9.4 Oneshot Response Types
 
@@ -1192,7 +1235,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 ```json
 {
   "enabled": true,
-  "commands": ["status"],
+  "chat.tools.terminal.autoApprove": ["^cargo (build|test|check)"],
   "tools": ["heartbeat", "remote_log"],
   "file_patterns": {
     "write": ["**/*.md", "docs/**"],
@@ -1221,7 +1264,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 1. **Disabled** → deny all
 2. **Risk level threshold** → deny if requested risk exceeds threshold. `critical` risk is **never** auto-approved regardless of threshold.
-3. **Command matching** → approve if `tool_name` matches any regex in workspace `auto_approve_commands` (ADR-0012: global allowlist gate removed)
+3. **Command matching** → approve if `tool_name` matches any regex in workspace `auto_approve_commands` (serialized as `"chat.tools.terminal.autoApprove"` in JSON; ADR-0012: global allowlist gate removed)
 4. **Tool matching** → approve if `tool_name` is in workspace `tools` list
 5. **File pattern matching** → approve if `context.file_path` matches any write/read glob pattern
 6. **No match** → deny
@@ -1254,10 +1297,29 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 | Function | Description |
 |---|---|
-| `pause_session(id, repo)` | Sets session status to `Paused` |
-| `resume_session(id, repo)` | Sets session status to `Active` |
+| `pause_session(id, repo)` | Sets session status to `Paused` (DB flag only) |
+| `resume_session(id, repo)` | Sets session status to `Active` (DB flag only) |
 | `terminate_session(id, repo, child)` | Terminates session: 5-second grace period for child process, then force-kill. Sets status to `Terminated`. |
 | `resolve_session(id?, user, repo)` | Resolves session by ID or most recently active for user. Validates ownership. |
+
+**Session ownership model:**
+
+| Owner value | Session type | Created by |
+|---|---|---|
+| `agent:local` | Primary agent session | Auto-created by `on_initialized` when an agent connects via MCP (VS Code, Copilot CLI) |
+| Slack user ID (e.g., `U0AEWPEKEQK`) | Spawned session | Created by `spawn_session()` when operator runs `/intercom session-start` |
+
+`resolve_session` checks `session.owner_user_id != user_id` and returns `Unauthorized` on mismatch. This means Slack operators cannot manage primary agent sessions (owned by `agent:local`) and the primary agent cannot manage spawned sessions (owned by a Slack user).
+
+**Session status transitions:**
+
+```
+Created → Active → Paused → Active → ...
+                 ↘ Terminated (disconnect, session-clear, or stale cleanup)
+                 ↘ Interrupted (server shutdown)
+```
+
+*Note:* `pause_session` and `resume_session` are database flag changes only. They do not affect the transport connection, suspend the agent process, or trigger any notification to the agent. The agent discovers the paused state when its next tool call is rejected.
 
 ### 11.2 Spawner
 
@@ -1274,12 +1336,14 @@ Background hourly task purges data older than `retention_days` (default 30). Run
    - Arguments: `host_cli_args` + `prompt`
    - Environment variables:
      - `INTERCOM_WORKSPACE_ROOT` — resolved workspace path
-     - `INTERCOM_SSE_URL` — SSE endpoint URL
+     - `INTERCOM_MCP_URL` — `/mcp?session_id=<id>` URL for the spawned agent
      - `INTERCOM_SESSION_ID` — session UUID
    - Working directory: workspace path
    - stdin: null, stdout: piped, stderr: piped
    - `kill_on_drop(true)`
 7. Activates the session after successful spawn.
+
+> **Known limitation:** The spawned CLI process receives `INTERCOM_MCP_URL` as an environment variable, but the VS Code Copilot CLI reads MCP server URLs from `.vscode/mcp.json` in the workspace — it does not consume the environment variable. This means the spawned agent connects as a new primary connection (Case 2 in §14.2) rather than associating with the pre-created session. The session is still created and the agent still connects; session_id association is the gap.
 
 **Function:** `verify_session_owner(session, user_id)` — Returns `Unauthorized` error if user is not the owner.
 
@@ -1402,11 +1466,25 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 10. Generate random IPC auth token (UUID).
 11. Check for interrupted sessions from prior crash (posts recovery summary to Slack).
 12. Start stdio transport (primary agent connection).
-13. Start HTTP/SSE transport.
+13. Start HTTP transport (Streamable HTTP on `/mcp`).
 14. Log "MCP server ready".
 15. Wait for shutdown signal (Ctrl+C or SIGTERM).
 
-### 14.2 Graceful Shutdown
+### 14.2 Agent Connection Lifecycle
+
+When an agent connects via MCP, the server's `on_initialized` handler runs:
+
+**Case 1 — Spawned agent (pre-created session):**
+The connection carries a `session_id` parameter (set by the spawner). The handler looks up the existing session record and logs the association. No new session is created.
+
+**Case 2 — Primary agent (direct connection):**
+All previously active sessions owned by `agent:local` are terminated (stale cleanup). A new session is created with `owner_user_id = "agent:local"` and status `Active`.
+
+**Stale cleanup rationale:** IDE window reloads, reconnections, and multi-panel configurations can leave orphaned session records. Terminating all stale `agent:local` sessions on each new connection ensures clean state. Spawned sessions (owned by real Slack user IDs) are never affected by stale cleanup.
+
+**Disconnection:** When the transport closes (IDE closed, agent process exited, network drop), the server's `Drop` handler sets the session status to `Terminated` in the database. This is a best-effort async operation — if the Tokio runtime is unavailable (e.g., already shut down), stale cleanup on the next `on_initialized` handles it.
+
+### 14.3 Graceful Shutdown
 
 On shutdown signal:
 
@@ -1418,13 +1496,15 @@ On shutdown signal:
 6. Brief sleep (500ms) to let the Slack queue drain.
 7. Wait for stdio, SSE, and retention task handles to complete.
 
-### 14.3 Startup Recovery
+### 14.4 Startup Recovery
 
-On startup, the server checks for interrupted sessions from a prior crash:
+On startup after a crash or graceful shutdown, the server:
 
 1. Queries all sessions with status `Interrupted`.
 2. Counts pending approvals and prompts across those sessions.
 3. Posts recovery summary to Slack: "🔄 Server restarted. Found N interrupted session(s) with N pending approval(s) and N pending prompt(s). Agents can use `recover_state` to resume."
+
+> **Note on auto-discovery:** The `reboot` MCP tool (when called without a `session_id`) only finds sessions with `status = 'interrupted'`. Sessions terminated by normal disconnection have `status = 'terminated'` and are not auto-discovered. To recover context from a normally terminated session, the agent must pass the specific `session_id` to `reboot`.
 
 ---
 
@@ -1510,7 +1590,7 @@ Located in `docs/adrs/`:
 | `keyring` | 3 | OS keychain credential access |
 | `notify` | 6.1 | Filesystem watcher for policy hot-reload |
 | `reqwest` | 0.13.2 | HTTP client (rustls, no default features) |
-| `rmcp` | 0.5 | MCP SDK (server, transport-sse-server, transport-io features) |
+| `rmcp` | 0.13 | MCP SDK (server, transport-streamable-http-server, transport-io features) |
 | `serde` | 1.0 | Serialization (derive feature) |
 | `serde_json` | 1.0 | JSON serialization |
 | `sha2` | 0.10 | SHA-256 file integrity hashing |

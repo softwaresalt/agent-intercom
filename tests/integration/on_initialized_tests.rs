@@ -51,6 +51,11 @@ async fn on_initialized_direct_connection_creates_session() {
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
+        policy_cache: Arc::default(),
+        audit_logger: None,
+        active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
+        stall_event_tx: None,
     });
 
     // Direct connection: no session_id_override, no channel_id_override.
@@ -221,6 +226,11 @@ async fn server_constructors_correct_overrides() {
         pending_modal_contexts: Arc::default(),
         stall_detectors: None,
         ipc_auth_token: None,
+        policy_cache: Arc::default(),
+        audit_logger: None,
+        active_children: Arc::default(),
+        pending_command_approvals: Arc::default(),
+        stall_event_tx: None,
     });
 
     // new() — no overrides.

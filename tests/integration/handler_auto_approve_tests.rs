@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use agent_intercom::models::policy::WorkspacePolicy;
+use agent_intercom::models::policy::CompiledWorkspacePolicy;
 use agent_intercom::persistence::session_repo::SessionRepo;
 use agent_intercom::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
 use agent_intercom::policy::loader::PolicyLoader;
@@ -30,14 +30,14 @@ async fn auto_approve_missing_policy_denies_all() {
     let policy = PolicyLoader::load(&workspace_root).expect("load policy");
 
     // Default (deny-all) policy.
-    assert!(!policy.enabled, "missing policy should not be enabled");
+    assert!(!policy.raw.enabled, "missing policy should not be enabled");
 }
 
 // ── Auto-approve: disabled policy → deny-all ─────────────────
 
 #[tokio::test]
 async fn auto_approve_disabled_policy_denies() {
-    let policy = WorkspacePolicy::default();
+    let policy = CompiledWorkspacePolicy::deny_all();
 
     let result = PolicyEvaluator::check("any_tool", &None, &policy);
     assert!(!result.auto_approved);
@@ -68,7 +68,7 @@ async fn auto_approve_matching_tool_approved() {
     .expect("write policy");
 
     let policy = PolicyLoader::load(root).expect("load policy");
-    assert!(policy.enabled);
+    assert!(policy.raw.enabled);
 
     let result = PolicyEvaluator::check("heartbeat", &None, &policy);
     assert!(result.auto_approved, "heartbeat should be auto-approved");
@@ -191,7 +191,7 @@ async fn auto_approve_malformed_policy_denies_all() {
 
     let policy = PolicyLoader::load(root).expect("load policy");
     assert!(
-        !policy.enabled,
+        !policy.raw.enabled,
         "malformed policy should degrade to deny-all"
     );
 }

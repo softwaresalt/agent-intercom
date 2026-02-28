@@ -3,7 +3,7 @@ description: Perform a non-destructive cross-artifact consistency and quality an
 handoffs: 
   - label: Build the Feature
     agent: build-orchestrator
-    prompt: feature: {specName}; phase: {phaseNumber}; mode: (single|full)
+    prompt: feature {specName}; phase {phaseNumber}; mode (single|full)
     send: false
 ---
 

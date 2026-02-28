@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use rmcp::handler::server::{
     tool::{ToolCallContext, ToolRoute, ToolRouter},
@@ -15,13 +16,17 @@ use rmcp::model::{
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use sqlx::SqlitePool;
+use tokio::process::Child;
 use tokio::sync::{oneshot, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{info, info_span, warn};
 
+use crate::audit::{AuditEntry, AuditEventType, AuditLogger};
 use crate::config::GlobalConfig;
 use crate::models::session::{Session, SessionMode, SessionStatus};
-use crate::orchestrator::stall_detector::StallDetectorHandle;
+use crate::orchestrator::stall_detector::{StallDetector, StallDetectorHandle, StallEvent};
 use crate::persistence::session_repo::SessionRepo;
+use crate::policy::watcher::PolicyCache;
 use crate::slack::client::SlackService;
 
 /// Response payload delivered through a pending approval oneshot channel.
@@ -60,6 +65,15 @@ pub type PendingPrompts = Arc<Mutex<HashMap<String, oneshot::Sender<PromptRespon
 /// Thread-safe map of pending wait-for-instruction `oneshot` senders keyed by `session_id`.
 pub type PendingWaits = Arc<Mutex<HashMap<String, oneshot::Sender<WaitResponse>>>>;
 
+/// Thread-safe map of pending terminal-command approval `request_id`s to their original
+/// command strings.
+///
+/// Populated by the `check_auto_approve` tool when `kind = "terminal_command"` and the
+/// command is not in the workspace auto-approve policy. The approval handler reads this
+/// map to distinguish command approvals (no DB record) from diff approvals (DB record
+/// exists) and to supply the command string for the auto-approve suggestion UI.
+pub type PendingCommandApprovals = Arc<Mutex<HashMap<String, String>>>;
+
 /// Thread-safe map of per-session stall detector handles keyed by `session_id`.
 pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 
@@ -71,6 +85,11 @@ pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 /// these later to replace the "⏳ Processing…" indicator with a final status
 /// line (FR-022).
 pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
+
+/// Live child processes spawned by the `/intercom session-start` slash command,
+/// keyed by `session_id`. Keeping them here prevents `kill_on_drop` from
+/// terminating the process the moment `spawn_session` returns.
+pub type ActiveChildren = Arc<Mutex<HashMap<String, Child>>>;
 
 /// Shared application state accessible by all MCP tool handlers.
 pub struct AppState {
@@ -86,12 +105,26 @@ pub struct AppState {
     pub pending_prompts: PendingPrompts,
     /// Pending wait-for-instruction senders keyed by `session_id`.
     pub pending_waits: PendingWaits,
+    /// Pending terminal-command approval `request_id`s → original command strings.
+    ///
+    /// Keyed by `request_id`; used by the Slack approval handler to identify
+    /// command approvals and skip the DB approval record path.
+    pub pending_command_approvals: PendingCommandApprovals,
     /// Cached modal message contexts for FR-022 button replacement.
     pub pending_modal_contexts: PendingModalContexts,
     /// Per-session stall detector handles keyed by `session_id`.
     pub stall_detectors: Option<StallDetectors>,
     /// Shared secret for IPC authentication (`None` disables auth).
     pub ipc_auth_token: Option<String>,
+    /// Shared workspace policy cache for hot-reload.
+    pub policy_cache: PolicyCache,
+    /// Audit log writer (absent if audit logging is disabled).
+    pub audit_logger: Option<Arc<dyn AuditLogger>>,
+    /// Live child processes spawned by session-start, keyed by `session_id`.
+    pub active_children: ActiveChildren,
+    /// Shared sender for stall events. Each per-session stall detector
+    /// clones from this to emit events into the single consumer task.
+    pub stall_event_tx: Option<tokio::sync::mpsc::Sender<StallEvent>>,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.
@@ -108,6 +141,13 @@ pub struct IntercomServer {
     channel_id_override: Option<String>,
     /// Pre-existing session ID supplied by the spawner via SSE query parameter.
     session_id_override: Option<String>,
+    /// DB session ID recorded by `on_initialized` (Case 2 — direct connections only).
+    ///
+    /// Set exactly once after the auto-created session is activated.  `Drop`
+    /// reads this to mark the session `Terminated` when the transport closes.
+    /// `Arc` allows the value to be cloned into the async future returned by
+    /// `on_initialized` without requiring `&mut self`.
+    session_db_id: Arc<OnceLock<String>>,
 }
 
 impl IntercomServer {
@@ -118,6 +158,7 @@ impl IntercomServer {
             state,
             channel_id_override: None,
             session_id_override: None,
+            session_db_id: Arc::new(OnceLock::new()),
         }
     }
 
@@ -128,6 +169,7 @@ impl IntercomServer {
             state,
             channel_id_override: channel_id,
             session_id_override: None,
+            session_db_id: Arc::new(OnceLock::new()),
         }
     }
 
@@ -145,7 +187,19 @@ impl IntercomServer {
             state,
             channel_id_override: channel_id,
             session_id_override: session_id,
+            session_db_id: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Store the DB session ID that was created by `on_initialized`.
+    ///
+    /// **For testing only.** Injects the session ID that `on_initialized` would
+    /// normally record after auto-creating a direct-connection session.  This
+    /// lets integration tests drive the `Drop`-based cleanup path without
+    /// needing a live MCP transport.
+    pub fn set_session_id_for_testing(&self, session_id: String) {
+        // Ignore the error if already set (idempotent for tests).
+        let _ = self.session_db_id.set(session_id);
     }
 
     /// Return the effective Slack channel ID for this session, if one is
@@ -302,14 +356,27 @@ impl IntercomServer {
                 name: "auto_check".into(),
                 description: Some(
                     "Query the workspace auto-approve policy to determine whether an \
-                     operation can bypass the remote approval gate."
+                     operation can bypass the remote approval gate. When kind is \
+                     'terminal_command' and the command is not already auto-approved, \
+                     blocks and posts a Slack approval prompt to the operator."
                         .into(),
                 ),
                 input_schema: Self::schema(serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "tool_name": { "type": "string" },
-                        "context": { "type": "object" }
+                        "tool_name": {
+                            "type": "string",
+                            "description": "Name of the tool or shell command to check"
+                        },
+                        "kind": {
+                            "type": "string",
+                            "description": "Operation kind: 'terminal_command' for shell commands (triggers blocking Slack gate when not auto-approved), 'file_operation' for file changes, or omit for standard non-blocking policy check",
+                            "enum": ["terminal_command", "file_operation"]
+                        },
+                        "context": {
+                            "type": "object",
+                            "description": "Optional metadata for fine-grained evaluation (e.g. file_path, risk_level)"
+                        }
                     },
                     "required": ["tool_name"]
                 })),
@@ -453,6 +520,30 @@ impl IntercomServer {
     }
 }
 
+/// Spawn a per-session stall detector and insert its handle into the shared map.
+///
+/// No-op if stall detection is disabled in the global configuration or if no
+/// stall event channel is present in `state`.
+async fn spawn_stall_detector_for_session(state: &AppState, session_id: &str) {
+    if !state.config.stall.enabled {
+        return;
+    }
+    if let (Some(ref detectors), Some(ref tx)) = (&state.stall_detectors, &state.stall_event_tx) {
+        let session_cancel = CancellationToken::new();
+        let detector = StallDetector::new(
+            session_id.to_owned(),
+            Duration::from_secs(state.config.stall.inactivity_threshold_seconds),
+            Duration::from_secs(state.config.stall.escalation_threshold_seconds),
+            state.config.stall.max_retries,
+            tx.clone(),
+            session_cancel,
+        );
+        let handle = detector.spawn();
+        detectors.lock().await.insert(session_id.to_owned(), handle);
+        info!(session_id, "stall detector spawned");
+    }
+}
+
 impl ServerHandler for IntercomServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -478,6 +569,7 @@ impl ServerHandler for IntercomServer {
     /// 2. **Direct connection** (Copilot Chat, Cursor, stdio, etc.): no prior
     ///    session exists, so we auto-create and activate one using the configured
     ///    `default_workspace_root`.
+    #[allow(clippy::too_many_lines)]
     fn on_initialized(
         &self,
         _context: NotificationContext<RoleServer>,
@@ -485,6 +577,7 @@ impl ServerHandler for IntercomServer {
         let state = Arc::clone(&self.state);
         let session_id_override = self.session_id_override.clone();
         let is_remote = self.channel_id_override.is_some();
+        let session_db_id = Arc::clone(&self.session_db_id);
 
         async move {
             let session_repo = SessionRepo::new(Arc::clone(&state.db));
@@ -498,6 +591,8 @@ impl ServerHandler for IntercomServer {
                             status = ?session.status,
                             "spawned agent connected to pre-created session"
                         );
+                        // Spawn a per-session stall detector for the spawned agent (FR-028).
+                        spawn_stall_detector_for_session(&state, &session.id).await;
                     }
                     Ok(None) => {
                         warn!(session_id = %sid, "pre-created session not found in database");
@@ -574,6 +669,24 @@ impl ServerHandler for IntercomServer {
                                 mode = ?mode,
                                 "auto-created session activated on direct connection"
                             );
+                            // Record the session ID so Drop can terminate it
+                            // when the transport closes (T045/T046).
+                            if session_db_id.set(created.id.clone()).is_err() {
+                                warn!(
+                                    session_id = %created.id,
+                                    "session_db_id was already set (unexpected)"
+                                );
+                            }
+                            // Audit-log session start (T061).
+                            if let Some(ref logger) = state.audit_logger {
+                                let entry = AuditEntry::new(AuditEventType::SessionStart)
+                                    .with_session(created.id.clone());
+                                if let Err(err) = logger.log_entry(entry) {
+                                    warn!(%err, "audit log write failed (session start)");
+                                }
+                            }
+                            // Spawn a per-session stall detector for direct connections (FR-028).
+                            spawn_stall_detector_for_session(&state, &created.id).await;
                         }
                         Err(err) => {
                             warn!(
@@ -602,12 +715,21 @@ impl ServerHandler for IntercomServer {
 
         // Reset stall timer on every tool call (T053).
         let state = Arc::clone(&self.state);
+        let audit_logger = self.state.audit_logger.clone();
+        let session_id = self.session_db_id.get().cloned();
+        // For spawned agents session_db_id is never set; fall back to the
+        // pre-assigned session_id_override so the correct detector is reset.
+        let effective_session_id = self
+            .session_id_override
+            .clone()
+            .or_else(|| session_id.clone());
 
         async move {
-            // Reset stall detector for all active sessions on any tool call.
-            if let Some(ref detectors) = state.stall_detectors {
-                let guards = detectors.lock().await;
-                for handle in guards.values() {
+            // Reset stall detector only for the calling session (T053).
+            if let (Some(ref detectors), Some(ref sid)) =
+                (&state.stall_detectors, &effective_session_id)
+            {
+                if let Some(handle) = detectors.lock().await.get(sid.as_str()) {
                     handle.reset();
                 }
             }
@@ -616,11 +738,26 @@ impl ServerHandler for IntercomServer {
                 .call(ToolCallContext::new(self, request, context))
                 .await;
 
-            // Reset again after tool completion.
-            if let Some(ref detectors) = state.stall_detectors {
-                let guards = detectors.lock().await;
-                for handle in guards.values() {
+            // Reset again after tool completion to avoid false stall triggers.
+            if let (Some(ref detectors), Some(ref sid)) =
+                (&state.stall_detectors, &effective_session_id)
+            {
+                if let Some(handle) = detectors.lock().await.get(sid.as_str()) {
                     handle.reset();
+                }
+            }
+
+            // Audit-log every tool call (T058).
+            if let Some(ref logger) = audit_logger {
+                let summary = if result.is_ok() { "ok" } else { "error" };
+                let mut entry = AuditEntry::new(AuditEventType::ToolCall)
+                    .with_tool(tool_name.clone())
+                    .with_result(summary.to_owned());
+                if let Some(ref sid) = effective_session_id {
+                    entry = entry.with_session(sid.clone());
+                }
+                if let Err(err) = logger.log_entry(entry) {
+                    warn!(%err, "audit log write failed (tool call)");
                 }
             }
 
@@ -686,6 +823,79 @@ impl ServerHandler for IntercomServer {
                 .map_err(|err| {
                     rmcp::ErrorData::internal_error(format!("resource read failed: {err}"), None)
                 })
+        }
+    }
+}
+
+impl Drop for IntercomServer {
+    /// Mark the associated DB session as `Terminated` when the MCP transport closes.
+    ///
+    /// This hook fires when rmcp disposes of the `IntercomServer` instance after
+    /// the SSE stream or stdio connection drops.  Because `Drop` is synchronous
+    /// and the DB write is async, the cleanup is submitted to the current Tokio
+    /// runtime via [`tokio::runtime::Handle::try_current`].  If no runtime is
+    /// available (e.g. during unit tests that do not use a runtime), the cleanup
+    /// is silently skipped — sessions will be reclaimed by the stale-session
+    /// sweep in the next `on_initialized` call.
+    ///
+    /// Only direct-connection sessions (Case 2 of `on_initialized`) store an ID
+    /// in `session_db_id`.  Spawned-agent servers leave it unset, so their Drop
+    /// is always a no-op for the DB path but still cleans up the stall detector.
+    fn drop(&mut self) {
+        // ── Remove stall detector for both Case 1 and Case 2 ────────────────
+        // Case 1 (spawned): session_id_override is set; Case 2 (direct): session_db_id is set.
+        let stall_sid = self
+            .session_id_override
+            .clone()
+            .or_else(|| self.session_db_id.get().cloned());
+
+        if let Some(sid) = stall_sid {
+            let state = Arc::clone(&self.state);
+            if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                rt.spawn(async move {
+                    if let Some(ref detectors) = state.stall_detectors {
+                        if detectors.lock().await.remove(&sid).is_some() {
+                            info!(session_id = %sid, "stall detector removed on session end");
+                        }
+                    }
+                });
+            }
+        }
+
+        // ── Terminate direct-connection session in the database (Case 2) ────
+        if let Some(id) = self.session_db_id.get().cloned() {
+            let db = Arc::clone(&self.state.db);
+            let audit_logger = self.state.audit_logger.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let session_repo = SessionRepo::new(db);
+                    match session_repo
+                        .set_terminated(&id, SessionStatus::Terminated)
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(session_id = %id, "session terminated on transport disconnect");
+                        }
+                        Err(err) => {
+                            warn!(
+                                %err,
+                                session_id = %id,
+                                "failed to terminate session on disconnect"
+                            );
+                        }
+                    }
+                    // Audit-log session termination (T061).
+                    if let Some(ref logger) = audit_logger {
+                        let entry = AuditEntry::new(AuditEventType::SessionTerminate)
+                            .with_session(id.clone());
+                        if let Err(err) = logger.log_entry(entry) {
+                            warn!(%err, "audit log write failed (session terminate)");
+                        }
+                    }
+                });
+            }
+            // If no runtime is active, the stale-session sweep in the next
+            // `on_initialized` call will reclaim the session.
         }
     }
 }

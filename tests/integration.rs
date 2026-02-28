@@ -27,9 +27,14 @@ mod integration {
     mod shutdown_recovery_tests;
     mod stall_escalation_tests;
 
+    mod disconnect_tests;
+    mod inbox_flow_tests;
     mod ipc_server_tests;
     mod mcp_dispatch_tests;
     mod policy_watcher_tests;
+    mod shutdown_tests;
+    mod startup_tests;
     mod stdio_transport_tests;
+    mod steering_flow_tests;
     mod streamable_http_tests;
 }
