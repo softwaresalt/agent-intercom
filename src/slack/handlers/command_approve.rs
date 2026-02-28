@@ -252,8 +252,7 @@ fn try_insert_pattern_preserving(raw: &str, pattern: &str) -> Option<String> {
     // Build the JSON entry text.  The pattern may contain regex back-slash
     // escapes (`\s`, `\.`, …), which must be double-escaped inside a JSON
     // string.  Serialise via serde_json to guarantee correct escaping.
-    let key_json = serde_json::to_string(pattern)
-        .unwrap_or_else(|_| format!("\"{pattern}\""));
+    let key_json = serde_json::to_string(pattern).unwrap_or_else(|_| format!("\"{pattern}\""));
     let entry = format!(
         "{entry_indent}{key_json}: {{\n\
          {entry_indent}    \"approve\": true,\n\

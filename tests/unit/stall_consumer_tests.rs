@@ -4,7 +4,6 @@
 //! and produces the correct Slack messages for each event variant.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -17,7 +16,7 @@ use agent_intercom::slack::client::SlackService;
 /// (even if no events have been sent).
 #[tokio::test]
 async fn consumer_exits_on_cancel() {
-    let (tx, rx) = mpsc::channel::<StallEvent>(8);
+    let (tx, _rx) = mpsc::channel::<StallEvent>(8);
     let ct = CancellationToken::new();
 
     // SlackService requires real tokens which we don't have in unit tests.

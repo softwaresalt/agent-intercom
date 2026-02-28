@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -16,6 +15,7 @@ use agent_intercom::slack::client::SlackService;
 
 /// Verify the monitor function signature compiles with correct types.
 #[tokio::test]
+#[allow(clippy::type_complexity)]
 async fn spawn_returns_join_handle() {
     let _: fn(
         ActiveChildren,
