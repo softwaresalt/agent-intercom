@@ -128,7 +128,7 @@ These aliases are for operator convenience only. They do not affect MCP auto-app
 
 ## Workspace Auto-Approve Policy
 
-Per-workspace auto-approve rules live in `.agentrc/settings.json` inside each workspace root (not in `config.toml`). The policy file is hot-reloaded — changes take effect immediately without restarting the server.
+Per-workspace auto-approve rules live in `.intercom/settings.json` inside each workspace root (not in `config.toml`). The policy file is hot-reloaded — changes take effect immediately without restarting the server.
 
 See the [User Guide](user-guide.md) for auto-approve policy syntax and examples.
 

@@ -8,7 +8,7 @@ When an AI agent (GitHub Copilot, Claude, Cursor) wants to modify your code, age
 
 ```mermaid
 flowchart LR
-    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/SSE)&nbsp;"| Server["agent-<br/>intercom"]
+    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/HTTP)&nbsp;"| Server["agent-<br/>intercom"]
     Server <-->|"&nbsp;Socket&nbsp;<br/>&nbsp;Mode&nbsp;"| Slack["Slack<br/>Channel"]
     Server <-->|"&nbsp;IPC&nbsp;"| Ctl["agent-intercom-ctl<br/>(local CLI)"]
 ```
@@ -132,7 +132,7 @@ Add to `.vscode/mcp.json`:
 |---|---|---|
 | `check_clearance` | Yes | Submit a code proposal for operator approval via Slack |
 | `check_diff` | No | Apply an approved diff to the filesystem |
-| `auto_check` | No | Query the workspace auto-approve policy |
+| `auto_check` | Varies | Query auto-approve policy; blocks for terminal commands needing approval |
 | `transmit` | Yes | Forward a continuation prompt to the operator |
 | `standby` | Yes | Place the agent in standby until the operator responds |
 | `ping` | No | Liveness signal; resets stall detection timer |
@@ -154,6 +154,8 @@ Add to `.vscode/mcp.json`:
 /intercom session-restore <ckpt_id>     Restore a checkpoint
 /intercom list-files [path] [--depth N] Browse workspace files
 /intercom show-file <path> [--lines]    View file contents
+/intercom steer <message>               Send steering message to agent
+/intercom task <message>                Queue a task for agent cold-start
 ```
 
 ## Local CLI

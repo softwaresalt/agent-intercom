@@ -14,7 +14,7 @@ This gives you remote visibility and control over what autonomous agents do in y
 
 ```mermaid
 flowchart LR
-    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/SSE)&nbsp;"| Server["agent-<br/>intercom"]
+    Agent["AI Agent<br/>(Copilot, Claude, Cursor)"] <-->|"MCP<br/>&nbsp;(stdio/HTTP)&nbsp;"| Server["agent-<br/>intercom"]
     Server <-->|"&nbsp;Socket&nbsp;<br/>&nbsp;Mode&nbsp;"| Slack["Slack<br/>Channel"]
     Server <-->|"&nbsp;IPC&nbsp;"| Ctl["agent-intercom-ctl<br/>(local CLI)"]
 ```
@@ -70,7 +70,9 @@ Applies a previously approved diff to the filesystem. Called by the agent after 
 
 ### auto_check
 
-Queries the workspace auto-approve policy to check if an operation can skip the approval gate. Non-blocking. Returns whether the operation is auto-approved and which rule matched.
+Queries the workspace auto-approve policy to check if an operation can skip the approval gate. Returns whether the operation is auto-approved and which rule matched.
+
+When called with `kind: "terminal_command"` for a command that is not auto-approved, the tool **blocks** and posts an approval prompt to Slack. The operator can approve or reject the command. On approval, the server offers to add an auto-approve pattern for similar commands.
 
 ### transmit
 
@@ -240,6 +242,13 @@ The key distinction: Slack commands report to you in Slack. The agent receives c
 | `/intercom list-files [path] [--depth N]` | List the workspace directory tree (default depth: 3) |
 | `/intercom show-file <path> [--lines START:END]` | Display file contents with syntax highlighting |
 
+### Steering and Tasks
+
+| Command | Description |
+|---|---|
+| `/intercom steer <message>` | Send a steering message to the active agent (delivered on the next `ping`) |
+| `/intercom task <message>` | Queue a task for delivery at agent cold-start via `reboot` |
+
 ### Custom Commands
 
 Any command alias defined in `config.toml [commands]` can be invoked directly:
@@ -364,7 +373,7 @@ Each VS Code workspace can send notifications to a different Slack channel. Set 
 }
 ```
 
-When omitted, the global `slack.channel_id` from `config.toml` is used.
+When omitted, no Slack messages are posted for that workspace. There is no global channel fallback.
 
 ## Server Lifecycle
 

@@ -134,7 +134,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 
 ### 1.3 `auto_check`
 
-**Purpose:** Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate. **Non-blocking.**
+**Purpose:** Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate. Behavior depends on the `kind` parameter: file operations return immediately, while terminal commands that are not auto-approved **block** until the operator responds.
 
 **Input Parameters:**
 
@@ -142,6 +142,7 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 |---|---|---|---|---|
 | `tool_name` | `string` | **Yes** | — | Name of the tool or command to check |
 | `context` | `object` | No | `null` | Additional metadata for fine-grained evaluation |
+| `kind` | `string` | No | `null` | Operation kind. Enum: `"file_operation"`, `"terminal_command"`. When `"terminal_command"` and the command is not auto-approved, the tool blocks and posts a Slack approval prompt. |
 
 **Context Object:**
 
@@ -159,14 +160,19 @@ Nine tools are registered via `ToolRouter` / `ToolRoute::new_dyn()`. All nine to
 }
 ```
 
-**Matched Rule Format:** `"command:<name>"`, `"tool:<name>"`, or `"file_pattern:<write|read>:<glob>"`.
+**Matched Rule Format:** `"command:<name>"`, `"tool:<name>"`, `"file_pattern:<write|read>:<glob>"`, or `"operator:approved"` (when a terminal command was manually approved by the operator).
 
 **Behavior:**
 
 1. Resolves the active session's `workspace_root`.
 2. Loads the workspace policy from `.intercom/settings.json`.
 3. Evaluates the policy (see [Policy System](#10-policy-system) for evaluation order).
-4. Returns immediately with the result.
+4. **If `kind = "terminal_command"` and the policy denies the command:**
+   - Posts an approval prompt to Slack with the command text.
+   - Blocks until the operator clicks Accept or Reject, or the approval timeout elapses.
+   - On approval, returns `auto_approved: true` with `matched_rule: "operator:approved"` and offers to add an auto-approve pattern.
+   - On rejection or timeout, returns `auto_approved: false`.
+5. For all other cases, returns immediately with the policy evaluation result.
 
 ---
 
@@ -815,9 +821,7 @@ The main configuration file is parsed into `GlobalConfig`. Path: specified via `
 
 #### `[slack]`
 
-| Field | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `channel_id` | `string` | **Yes** | — | Default Slack channel ID where notifications are posted |
+Slack credentials are loaded at runtime from the OS keychain or environment variables — not from `config.toml`. There is no `channel_id` field in the config file; channels are set per-workspace via the MCP URL query parameter (see [Per-Workspace Channel Override](#63-per-workspace-channel-override)).
 
 **Note:** Slack tokens (`app_token`, `bot_token`, `team_id`) are **not** in config.toml. They are loaded at runtime (see Credentials below).
 
@@ -883,7 +887,7 @@ Each VS Code workspace can target a different Slack channel by appending a `chan
 }
 ```
 
-When omitted, the global `slack.channel_id` is used.
+There is no global channel fallback. Every workspace must supply its own `channel_id` to receive Slack notifications.
 
 ### 6.4 Example config.toml
 
@@ -900,7 +904,8 @@ retention_days = 30
 path = "data/agent-intercom.db"
 
 [slack]
-channel_id = "C0AFXFQP1TJ"
+# No fields here — credentials come from environment variables or OS keychain.
+# Per-workspace channels are set via the MCP URL query parameter.
 
 [timeouts]
 approval_seconds = 3600
@@ -1146,7 +1151,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | `bool` | `false` | Master switch for auto-approve |
-| `commands` | `Vec<String>` | `[]` | Shell commands that bypass approval (glob wildcards) |
+| `auto_approve_commands` | `Vec<String>` | `[]` | Regex patterns for terminal commands that bypass approval. Serialized as `"chat.tools.terminal.autoApprove"` in JSON (aliases: `"auto_approve_commands"`, `"commands"`). |
 | `tools` | `Vec<String>` | `[]` | MCP tool names that bypass approval |
 | `file_patterns` | `FilePatterns` | `{}` | File pattern rules |
 | `risk_level_threshold` | `RiskLevel` | `Low` | Maximum risk level for auto-approve |
@@ -1172,22 +1177,23 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 **Connection:** The primary agent connects directly — no HTTP involved.
 
-### 9.2 HTTP/SSE Transport
+### 9.2 HTTP Transport (Streamable HTTP)
 
-**Purpose:** Enables multiple concurrent agent connections via HTTP with Server-Sent Events.
+**Purpose:** Enables multiple concurrent agent connections via Streamable HTTP.
 
 **Endpoints:**
 
 | Path | Method | Description |
 |---|---|---|
-| `/sse` | GET | SSE connection endpoint. Accepts optional `channel_id` query parameter. |
-| `/message` | POST | MCP message endpoint for SSE-connected clients |
+| `/mcp` | POST | Streamable HTTP MCP endpoint (rmcp `StreamableHttpService`) |
+| `/health` | GET | Liveness probe (returns `"ok"`) |
+| `/sse` | GET | Legacy tombstone — returns `410 Gone` |
 
 **Binding:** `127.0.0.1:{http_port}` (default port 3000).
 
-**Per-Session Channel Override:** Each SSE connection extracts `channel_id` from the query string (`/sse?channel_id=C_WORKSPACE`). A connection semaphore serializes SSE establishment to prevent race conditions on the channel_id inbox.
+**Per-Session Channel Override:** Each HTTP connection extracts `channel_id` and optional `session_id` from the query string (`/mcp?channel_id=C_WORKSPACE&session_id=<uuid>`).
 
-**Concurrency:** Each inbound SSE connection creates a fresh `AgentRcServer` instance sharing the same `AppState`.
+**Concurrency:** Each inbound connection creates a fresh `IntercomServer` instance sharing the same `AppState`.
 
 ### 9.3 Shared Application State (`AppState`)
 
@@ -1199,8 +1205,14 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 | `pending_approvals` | `Arc<Mutex<HashMap<String, oneshot::Sender<ApprovalResponse>>>>` | Pending approval oneshots keyed by `request_id` |
 | `pending_prompts` | `Arc<Mutex<HashMap<String, oneshot::Sender<PromptResponse>>>>` | Pending prompt oneshots keyed by `prompt_id` |
 | `pending_waits` | `Arc<Mutex<HashMap<String, oneshot::Sender<WaitResponse>>>>` | Pending wait oneshots keyed by `session_id` |
+| `pending_command_approvals` | `Arc<Mutex<HashMap<String, String>>>` | Pending terminal command approvals (request_id → session_id) |
+| `pending_modal_contexts` | `Arc<Mutex<HashMap<String, (String, String)>>>` | Context for Slack modal submissions (trigger_id → (session_id, request_id)) |
 | `stall_detectors` | `Option<Arc<Mutex<HashMap<String, StallDetectorHandle>>>>` | Per-session stall detectors keyed by `session_id` |
 | `ipc_auth_token` | `Option<String>` | Shared secret for IPC authentication (random UUID per instance) |
+| `policy_cache` | `Arc<RwLock<HashMap<PathBuf, CompiledWorkspacePolicy>>>` | Compiled workspace policies keyed by workspace root |
+| `audit_logger` | `Option<Arc<dyn AuditLogger>>` | Structured audit log writer (JSONL to `.intercom/logs/`) |
+| `active_children` | `Arc<Mutex<HashMap<String, Child>>>` | Spawned agent child processes keyed by session_id |
+| `stall_event_tx` | `Option<mpsc::Sender<StallEvent>>` | Channel for stall detector events to the stall consumer |
 
 ### 9.4 Oneshot Response Types
 
@@ -1223,7 +1235,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 ```json
 {
   "enabled": true,
-  "commands": ["status"],
+  "chat.tools.terminal.autoApprove": ["^cargo (build|test|check)"],
   "tools": ["heartbeat", "remote_log"],
   "file_patterns": {
     "write": ["**/*.md", "docs/**"],
@@ -1252,7 +1264,7 @@ Background hourly task purges data older than `retention_days` (default 30). Run
 
 1. **Disabled** → deny all
 2. **Risk level threshold** → deny if requested risk exceeds threshold. `critical` risk is **never** auto-approved regardless of threshold.
-3. **Command matching** → approve if `tool_name` matches any regex in workspace `auto_approve_commands` (ADR-0012: global allowlist gate removed)
+3. **Command matching** → approve if `tool_name` matches any regex in workspace `auto_approve_commands` (serialized as `"chat.tools.terminal.autoApprove"` in JSON; ADR-0012: global allowlist gate removed)
 4. **Tool matching** → approve if `tool_name` is in workspace `tools` list
 5. **File pattern matching** → approve if `context.file_path` matches any write/read glob pattern
 6. **No match** → deny
@@ -1578,7 +1590,7 @@ Located in `docs/adrs/`:
 | `keyring` | 3 | OS keychain credential access |
 | `notify` | 6.1 | Filesystem watcher for policy hot-reload |
 | `reqwest` | 0.13.2 | HTTP client (rustls, no default features) |
-| `rmcp` | 0.5 | MCP SDK (server, transport-sse-server, transport-io features) |
+| `rmcp` | 0.13 | MCP SDK (server, transport-streamable-http-server, transport-io features) |
 | `serde` | 1.0 | Serialization (derive feature) |
 | `serde_json` | 1.0 | JSON serialization |
 | `sha2` | 0.10 | SHA-256 file integrity hashing |
