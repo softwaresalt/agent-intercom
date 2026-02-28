@@ -6,6 +6,7 @@ mod contract {
     mod ask_approval_tests;
     mod auto_check_contract_tests;
     mod check_auto_approve_tests;
+    mod driver_contract_tests;
     mod forward_prompt_tests;
     mod heartbeat_tests;
     mod mode_tests;

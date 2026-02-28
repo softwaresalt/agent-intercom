@@ -23,6 +23,7 @@ use tracing::{info, info_span, warn};
 
 use crate::audit::{AuditEntry, AuditEventType, AuditLogger};
 use crate::config::GlobalConfig;
+use crate::driver::AgentDriver;
 use crate::models::session::{Session, SessionMode, SessionStatus};
 use crate::orchestrator::stall_detector::{StallDetector, StallDetectorHandle, StallEvent};
 use crate::persistence::session_repo::SessionRepo;
@@ -125,6 +126,9 @@ pub struct AppState {
     /// Shared sender for stall events. Each per-session stall detector
     /// clones from this to emit events into the single consumer task.
     pub stall_event_tx: Option<tokio::sync::mpsc::Sender<StallEvent>>,
+    /// Protocol-agnostic agent driver for resolving pending clearances,
+    /// prompts, and waits via Slack handlers.
+    pub driver: Arc<dyn AgentDriver>,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.

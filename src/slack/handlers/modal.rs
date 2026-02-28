@@ -13,7 +13,7 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::{AppState, ApprovalResponse, PromptResponse, WaitResponse};
+use crate::mcp::handler::AppState;
 use crate::models::approval::ApprovalStatus;
 use crate::models::prompt::PromptDecision;
 use crate::persistence::approval_repo::ApprovalRepo;
@@ -104,20 +104,12 @@ async fn resolve_wait(
 
     // Scope the mutex guard so it is dropped before any `.await` call.
     {
-        let mut pending = state.pending_waits.lock().await;
-        if let Some(tx) = pending.remove(session_id) {
-            let response = WaitResponse {
-                status: "resumed".to_owned(),
-                instruction: Some(instruction.to_owned()),
-            };
-            if tx.send(response).is_err() {
-                warn!(session_id, "wait oneshot receiver already dropped");
-            }
-        } else {
-            warn!(
-                session_id,
-                "no pending wait oneshot found (may have timed out)"
-            );
+        if let Err(err) = state
+            .driver
+            .resolve_wait(session_id, Some(instruction.to_owned()))
+            .await
+        {
+            warn!(session_id, %err, "failed to resolve wait instruction oneshot");
         }
     }
 
@@ -154,20 +146,12 @@ async fn resolve_prompt(
 
     // Resolve the oneshot channel — scope the guard so it drops before `.await`.
     {
-        let mut pending = state.pending_prompts.lock().await;
-        if let Some(tx) = pending.remove(prompt_id) {
-            let response = PromptResponse {
-                decision: "refine".to_owned(),
-                instruction: Some(instruction.to_owned()),
-            };
-            if tx.send(response).is_err() {
-                warn!(prompt_id, "prompt oneshot receiver already dropped");
-            }
-        } else {
-            warn!(
-                prompt_id,
-                "no pending prompt oneshot found (may have timed out)"
-            );
+        if let Err(err) = state
+            .driver
+            .resolve_prompt(prompt_id, "refine", Some(instruction.to_owned()))
+            .await
+        {
+            warn!(prompt_id, %err, "failed to resolve prompt refine oneshot");
         }
     }
 
@@ -211,20 +195,12 @@ async fn resolve_approval_reject(
 
     // Resolve the oneshot channel so the agent receives the rejection.
     {
-        let mut pending = state.pending_approvals.lock().await;
-        if let Some(tx) = pending.remove(request_id) {
-            let response = ApprovalResponse {
-                status: "rejected".to_owned(),
-                reason: Some(reason.to_owned()),
-            };
-            if tx.send(response).is_err() {
-                warn!(request_id, "approval oneshot receiver already dropped");
-            }
-        } else {
-            warn!(
-                request_id,
-                "no pending approval oneshot found (may have timed out)"
-            );
+        if let Err(err) = state
+            .driver
+            .resolve_clearance(request_id, false, Some(reason.to_owned()))
+            .await
+        {
+            warn!(request_id, %err, "failed to resolve approval rejection oneshot");
         }
     }
 

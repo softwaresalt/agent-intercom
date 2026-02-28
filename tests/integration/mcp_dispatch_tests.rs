@@ -62,6 +62,7 @@ async fn spawn_test_server() -> (String, CancellationToken) {
         active_children: Arc::default(),
         pending_command_approvals: Arc::clone(&state.pending_command_approvals),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
     });
 
     let server_ct = ct.clone();

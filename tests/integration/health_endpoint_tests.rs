@@ -55,6 +55,7 @@ async fn spawn_server() -> (String, CancellationToken) {
             active_children: Arc::default(),
             pending_command_approvals: Arc::clone(&state.pending_command_approvals),
             stall_event_tx: None,
+            driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         };
         Arc::new(new_state)
     };

@@ -212,3 +212,71 @@ fn agent_event_clones_correctly() {
         panic!("clone produced wrong variant");
     }
 }
+
+// ── T024: interrupt unknown session is idempotent ─────────────────────────────
+
+/// T024 — `McpDriver::interrupt` on an unknown `session_id` must return `Ok(())`
+/// because interruption is defined as idempotent in the `AgentDriver` contract.
+#[tokio::test]
+async fn mcp_driver_interrupt_unknown_session_is_idempotent() {
+    use agent_intercom::driver::mcp_driver::McpDriver;
+
+    let driver = McpDriver::new_empty();
+    let result = driver.interrupt("session-does-not-exist").await;
+    assert!(
+        result.is_ok(),
+        "interrupt on unknown session must be Ok(())"
+    );
+}
+
+// ── T025: concurrent clearance resolution ─────────────────────────────────────
+
+/// T025 — Two concurrent `resolve_clearance` calls for different `request_id`s
+/// must both complete successfully and each deliver the correct decision.
+#[tokio::test]
+async fn mcp_driver_concurrent_clearance_resolution() {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use agent_intercom::driver::mcp_driver::McpDriver;
+    use agent_intercom::driver::AgentDriver;
+    use agent_intercom::mcp::handler::{PendingApprovals, PendingPrompts, PendingWaits};
+    use tokio::sync::{oneshot, Mutex};
+
+    // Pre-seed two entries.
+    let (tx1, rx1) = oneshot::channel();
+    let (tx2, rx2) = oneshot::channel();
+    let mut map = HashMap::new();
+    map.insert("req-concurrent-001".to_owned(), tx1);
+    map.insert("req-concurrent-002".to_owned(), tx2);
+    let pending: PendingApprovals = Arc::new(Mutex::new(map));
+    let empty_prompts: PendingPrompts = Arc::new(Mutex::new(HashMap::new()));
+    let empty_waits: PendingWaits = Arc::new(Mutex::new(HashMap::new()));
+
+    let driver = Arc::new(McpDriver::new(
+        Arc::clone(&pending),
+        empty_prompts,
+        empty_waits,
+    ));
+
+    let d1 = Arc::clone(&driver);
+    let d2 = Arc::clone(&driver);
+
+    let (r1, r2) = tokio::join!(
+        async move { d1.resolve_clearance("req-concurrent-001", true, None).await },
+        async move {
+            d2.resolve_clearance("req-concurrent-002", false, Some("reason".to_owned()))
+                .await
+        },
+    );
+
+    assert!(r1.is_ok(), "first resolve must succeed");
+    assert!(r2.is_ok(), "second resolve must succeed");
+
+    let resp1 = rx1.await.expect("rx1 must receive");
+    let resp2 = rx2.await.expect("rx2 must receive");
+
+    assert_eq!(resp1.status, "approved");
+    assert_eq!(resp2.status, "rejected");
+    assert_eq!(resp2.reason.as_deref(), Some("reason"));
+}

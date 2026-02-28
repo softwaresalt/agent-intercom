@@ -93,6 +93,7 @@ fn ipc_app_state(
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
     })
 }
 

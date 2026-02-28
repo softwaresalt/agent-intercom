@@ -65,6 +65,7 @@ async fn test_state() -> Arc<AppState> {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
     })
 }
 
@@ -158,6 +159,7 @@ default_nudge_message = "continue"
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
     });
 
     // No override, no config channel → None.

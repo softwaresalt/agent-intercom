@@ -16,6 +16,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 use agent_intercom::audit::writer::JsonlAuditWriter;
 use agent_intercom::audit::AuditLogger;
 use agent_intercom::config::GlobalConfig;
+use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
@@ -149,6 +150,14 @@ async fn run(args: Cli) -> Result<()> {
     let pending_prompts: PendingPrompts = PendingPrompts::default();
     let pending_waits: PendingWaits = PendingWaits::default();
 
+    // Build the MCP driver from clones of the pending maps so that Slack
+    // handlers and MCP tool handlers share the same in-memory channels.
+    let driver = McpDriver::new(
+        Arc::clone(&pending_approvals),
+        Arc::clone(&pending_prompts),
+        Arc::clone(&pending_waits),
+    );
+
     // Start Slack client if configured.
     // NOTE: Socket mode is wired in a second phase (below) after AppState
     // is fully constructed so that the interaction callbacks get the live
@@ -214,6 +223,7 @@ async fn run(args: Cli) -> Result<()> {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: Some(stall_tx),
+        driver: Arc::new(driver),
     });
 
     // Keep the watcher alive for the server's lifetime — dropping it stops the

@@ -222,26 +222,15 @@ pub async fn handle_approval_action(
         }
     }
 
-    // ── Resolve oneshot channel ──────────────────────────
+    // ── Resolve oneshot channel via driver ───────────────
     {
-        let mut pending = state.pending_approvals.lock().await;
-        if let Some(tx) = pending.remove(request_id) {
-            let response = ApprovalResponse {
-                status: match status {
-                    ApprovalStatus::Approved => "approved".to_owned(),
-                    ApprovalStatus::Rejected => "rejected".to_owned(),
-                    _ => "unknown".to_owned(),
-                },
-                reason: reason.clone(),
-            };
-            if tx.send(response).is_err() {
-                warn!(request_id, "oneshot receiver already dropped");
-            }
-        } else {
-            warn!(
-                request_id,
-                "no pending oneshot found (request may have timed out)"
-            );
+        let approved = matches!(status, ApprovalStatus::Approved);
+        if let Err(err) = state
+            .driver
+            .resolve_clearance(request_id, approved, reason.clone())
+            .await
+        {
+            warn!(request_id, %err, "failed to resolve clearance oneshot");
         }
     }
 

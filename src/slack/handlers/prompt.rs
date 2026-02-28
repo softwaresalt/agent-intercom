@@ -13,7 +13,7 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::{AppState, PromptResponse};
+use crate::mcp::handler::AppState;
 use crate::models::prompt::PromptDecision;
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::slack::blocks;
@@ -113,26 +113,19 @@ pub async fn handle_prompt_action(
 
     info!(prompt_id, ?decision, user_id, "prompt decision recorded");
 
-    // ── Resolve oneshot channel ──────────────────────────
+    // ── Resolve oneshot channel via driver ───────────────
     {
-        let mut pending = state.pending_prompts.lock().await;
-        if let Some(tx) = pending.remove(prompt_id) {
-            let response = PromptResponse {
-                decision: match decision {
-                    PromptDecision::Continue => "continue".to_owned(),
-                    PromptDecision::Refine => "refine".to_owned(),
-                    PromptDecision::Stop => "stop".to_owned(),
-                },
-                instruction,
-            };
-            if tx.send(response).is_err() {
-                warn!(prompt_id, "oneshot receiver already dropped");
-            }
-        } else {
-            warn!(
-                prompt_id,
-                "no pending oneshot found (prompt may have timed out)"
-            );
+        let decision_str = match decision {
+            PromptDecision::Continue => "continue",
+            PromptDecision::Refine => "refine",
+            PromptDecision::Stop => "stop",
+        };
+        if let Err(err) = state
+            .driver
+            .resolve_prompt(prompt_id, decision_str, instruction)
+            .await
+        {
+            warn!(prompt_id, %err, "failed to resolve prompt oneshot");
         }
     }
 
