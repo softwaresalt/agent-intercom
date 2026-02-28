@@ -12,6 +12,8 @@ mod unit {
     mod config_tests;
     mod credential_loading_tests;
     mod diff_tests;
+    mod driver_trait_tests;
+    mod error_tests;
     mod heartbeat_tests;
     mod inbox_repo_tests;
     mod mode_routing_tests;
@@ -20,6 +22,7 @@ mod unit {
     mod policy_evaluator_tests;
     mod policy_tests;
     mod prompt_repo_tests;
+    mod session_model_tests;
     mod session_repo_tests;
     mod stall_consumer_tests;
     mod stall_detector_tests;

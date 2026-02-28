@@ -6,7 +6,9 @@ use chrono::Utc;
 use sqlx::Row;
 
 use crate::models::progress::ProgressItem;
-use crate::models::session::{Session, SessionMode, SessionStatus};
+use crate::models::session::{
+    ConnectivityStatus, ProtocolMode, Session, SessionMode, SessionStatus,
+};
 use crate::{AppError, Result};
 
 use super::db::Database;
@@ -33,6 +35,12 @@ struct SessionRow {
     nudge_count: i64,
     stall_paused: i64,
     progress_snapshot: Option<String>,
+    protocol_mode: String,
+    channel_id: Option<String>,
+    thread_ts: Option<String>,
+    connectivity_status: String,
+    last_activity_at: Option<String>,
+    restart_of: Option<String>,
 }
 
 impl SessionRow {
@@ -68,6 +76,18 @@ impl SessionRow {
             })
             .transpose()?;
 
+        let protocol_mode = parse_protocol_mode(&self.protocol_mode)?;
+        let connectivity_status = parse_connectivity_status(&self.connectivity_status)?;
+        let last_activity_at = self
+            .last_activity_at
+            .as_deref()
+            .map(|s| {
+                chrono::DateTime::parse_from_rfc3339(s)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .map_err(|e| AppError::Db(format!("invalid last_activity_at: {e}")))
+            })
+            .transpose()?;
+
         Ok(Session {
             id: self.id,
             owner_user_id: self.owner_user_id,
@@ -82,6 +102,12 @@ impl SessionRow {
             stall_paused: self.stall_paused != 0,
             terminated_at,
             progress_snapshot,
+            protocol_mode,
+            channel_id: self.channel_id,
+            thread_ts: self.thread_ts,
+            connectivity_status,
+            last_activity_at,
+            restart_of: self.restart_of,
         })
     }
 }
@@ -128,6 +154,44 @@ fn mode_str(m: SessionMode) -> &'static str {
     }
 }
 
+/// Parse a protocol mode string from the database.
+fn parse_protocol_mode(s: &str) -> Result<ProtocolMode> {
+    match s {
+        "mcp" => Ok(ProtocolMode::Mcp),
+        "acp" => Ok(ProtocolMode::Acp),
+        other => Err(AppError::Db(format!("invalid protocol_mode: {other}"))),
+    }
+}
+
+/// Serialize a protocol mode enum to its database string.
+fn protocol_mode_str(m: ProtocolMode) -> &'static str {
+    match m {
+        ProtocolMode::Mcp => "mcp",
+        ProtocolMode::Acp => "acp",
+    }
+}
+
+/// Parse a connectivity status string from the database.
+fn parse_connectivity_status(s: &str) -> Result<ConnectivityStatus> {
+    match s {
+        "online" => Ok(ConnectivityStatus::Online),
+        "offline" => Ok(ConnectivityStatus::Offline),
+        "stalled" => Ok(ConnectivityStatus::Stalled),
+        other => Err(AppError::Db(format!(
+            "invalid connectivity_status: {other}"
+        ))),
+    }
+}
+
+/// Serialize a connectivity status enum to its database string.
+fn connectivity_status_str(c: ConnectivityStatus) -> &'static str {
+    match c {
+        ConnectivityStatus::Online => "online",
+        ConnectivityStatus::Offline => "offline",
+        ConnectivityStatus::Stalled => "stalled",
+    }
+}
+
 /// Valid session status transitions.
 fn is_valid_transition(from: SessionStatus, to: SessionStatus) -> bool {
     matches!(
@@ -170,12 +234,17 @@ impl SessionRepo {
             .map(serde_json::to_string)
             .transpose()
             .map_err(|e| AppError::Db(format!("failed to serialize progress_snapshot: {e}")))?;
+        let protocol_mode = protocol_mode_str(session.protocol_mode);
+        let connectivity_status = connectivity_status_str(session.connectivity_status);
+        let last_activity_at = session.last_activity_at.map(|dt| dt.to_rfc3339());
 
         sqlx::query(
             "INSERT INTO session (id, owner_user_id, workspace_root, status, prompt, mode,
              created_at, updated_at, terminated_at, last_tool, nudge_count, stall_paused,
-             progress_snapshot)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             progress_snapshot, protocol_mode, channel_id, thread_ts, connectivity_status,
+             last_activity_at, restart_of)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+             ?17, ?18, ?19)",
         )
         .bind(&session.id)
         .bind(&session.owner_user_id)
@@ -190,6 +259,12 @@ impl SessionRepo {
         .bind(session.nudge_count)
         .bind(stall_paused)
         .bind(&progress_snapshot)
+        .bind(protocol_mode)
+        .bind(&session.channel_id)
+        .bind(&session.thread_ts)
+        .bind(connectivity_status)
+        .bind(&last_activity_at)
+        .bind(&session.restart_of)
         .execute(self.db.as_ref())
         .await?;
 
@@ -408,6 +483,70 @@ impl SessionRepo {
             .bind(id)
             .execute(self.db.as_ref())
             .await?;
+
+        Ok(())
+    }
+
+    /// Return all active sessions associated with a Slack channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn find_active_by_channel(&self, channel_id: &str) -> Result<Vec<Session>> {
+        let rows: Vec<SessionRow> = sqlx::query_as(
+            "SELECT * FROM session WHERE channel_id = ?1 AND status IN ('created', 'active',
+             'paused')",
+        )
+        .bind(channel_id)
+        .fetch_all(self.db.as_ref())
+        .await?;
+
+        rows.into_iter().map(SessionRow::into_session).collect()
+    }
+
+    /// Find a session by Slack channel and thread timestamp.
+    ///
+    /// Returns `None` if no matching session exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn find_by_channel_and_thread(
+        &self,
+        channel_id: &str,
+        thread_ts: &str,
+    ) -> Result<Option<Session>> {
+        let row: Option<SessionRow> =
+            sqlx::query_as("SELECT * FROM session WHERE channel_id = ?1 AND thread_ts = ?2")
+                .bind(channel_id)
+                .bind(thread_ts)
+                .fetch_optional(self.db.as_ref())
+                .await?;
+
+        row.map(SessionRow::into_session).transpose()
+    }
+
+    /// Set the Slack thread timestamp for a session.
+    ///
+    /// This is a write-once field: subsequent calls are a no-op if `thread_ts`
+    /// is already set. Callers that need to update an existing value should use
+    /// a direct query instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn set_thread_ts(&self, session_id: &str, thread_ts: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+
+        sqlx::query(
+            "UPDATE session SET thread_ts = ?1, updated_at = ?2
+             WHERE id = ?3 AND thread_ts IS NULL",
+        )
+        .bind(thread_ts)
+        .bind(&now)
+        .bind(session_id)
+        .execute(self.db.as_ref())
+        .await?;
 
         Ok(())
     }

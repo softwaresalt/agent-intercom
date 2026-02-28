@@ -62,6 +62,12 @@ async fn session_table_has_expected_columns() {
         "nudge_count",
         "stall_paused",
         "progress_snapshot",
+        "protocol_mode",
+        "channel_id",
+        "thread_ts",
+        "connectivity_status",
+        "last_activity_at",
+        "restart_of",
     ];
 
     assert_eq!(

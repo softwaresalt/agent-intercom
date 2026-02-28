@@ -34,6 +34,18 @@ pub enum SessionMode {
     Hybrid,
 }
 
+/// Agent connectivity state — separate from session lifecycle status.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectivityStatus {
+    /// Agent is actively communicating (stream messages or tool calls arriving).
+    Online,
+    /// Agent process is alive but no recent activity.
+    Offline,
+    /// Stall detector has flagged this session for inactivity.
+    Stalled,
+}
+
 /// Protocol used by the agent for this session.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +86,20 @@ pub struct Session {
     pub terminated_at: Option<DateTime<Utc>>,
     /// Last-reported progress snapshot from the agent.
     pub progress_snapshot: Option<Vec<ProgressItem>>,
+    /// Agent communication protocol for this session. Immutable after creation.
+    pub protocol_mode: ProtocolMode,
+    /// Slack channel ID where this session's messages are posted.
+    pub channel_id: Option<String>,
+    /// Slack thread timestamp of the session's root message.
+    ///
+    /// `None` until the first message is posted. Immutable once set.
+    pub thread_ts: Option<String>,
+    /// Agent connectivity state — separate from lifecycle status.
+    pub connectivity_status: ConnectivityStatus,
+    /// Timestamp of last agent activity for stall detection and recovery.
+    pub last_activity_at: Option<DateTime<Utc>>,
+    /// Session ID of the predecessor session if this is a restart, otherwise `None`.
+    pub restart_of: Option<String>,
 }
 
 impl Session {
@@ -100,6 +126,12 @@ impl Session {
             stall_paused: false,
             terminated_at: None,
             progress_snapshot: None,
+            protocol_mode: ProtocolMode::Mcp,
+            channel_id: None,
+            thread_ts: None,
+            connectivity_status: ConnectivityStatus::Online,
+            last_activity_at: None,
+            restart_of: None,
         }
     }
 

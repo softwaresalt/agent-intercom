@@ -7,6 +7,99 @@ use sqlx::SqlitePool;
 
 use crate::Result;
 
+/// Add a column to a table if it does not already exist.
+///
+/// Uses `PRAGMA table_info` to check column presence before issuing
+/// `ALTER TABLE`, making the operation idempotent on repeated startups.
+///
+/// # Errors
+///
+/// Returns `AppError::Db` if the PRAGMA query or `ALTER TABLE` fails.
+async fn add_column_if_missing(
+    pool: &SqlitePool,
+    table: &str,
+    column: &str,
+    alter_sql: &str,
+) -> Result<()> {
+    let count: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+    ))
+    .fetch_one(pool)
+    .await?;
+
+    if count == 0 {
+        sqlx::raw_sql(alter_sql).execute(pool).await?;
+    }
+    Ok(())
+}
+
+/// Apply column migrations for the `session` table.
+///
+/// Adds the six new columns introduced in feature 005 using idempotent
+/// `PRAGMA table_info` checks. Safe to call on every server startup.
+///
+/// # Errors
+///
+/// Returns `AppError::Db` if any check or migration fails.
+async fn migrate_session_columns(pool: &SqlitePool) -> Result<()> {
+    add_column_if_missing(
+        pool,
+        "session",
+        "protocol_mode",
+        "ALTER TABLE session ADD COLUMN protocol_mode TEXT NOT NULL DEFAULT 'mcp'",
+    )
+    .await?;
+
+    add_column_if_missing(
+        pool,
+        "session",
+        "channel_id",
+        "ALTER TABLE session ADD COLUMN channel_id TEXT",
+    )
+    .await?;
+
+    add_column_if_missing(
+        pool,
+        "session",
+        "thread_ts",
+        "ALTER TABLE session ADD COLUMN thread_ts TEXT",
+    )
+    .await?;
+
+    add_column_if_missing(
+        pool,
+        "session",
+        "connectivity_status",
+        "ALTER TABLE session ADD COLUMN connectivity_status TEXT NOT NULL DEFAULT 'online'",
+    )
+    .await?;
+
+    add_column_if_missing(
+        pool,
+        "session",
+        "last_activity_at",
+        "ALTER TABLE session ADD COLUMN last_activity_at TEXT",
+    )
+    .await?;
+
+    add_column_if_missing(
+        pool,
+        "session",
+        "restart_of",
+        "ALTER TABLE session ADD COLUMN restart_of TEXT",
+    )
+    .await?;
+
+    sqlx::raw_sql(
+        "CREATE INDEX IF NOT EXISTS idx_session_channel ON session(channel_id, status);
+         CREATE INDEX IF NOT EXISTS idx_session_channel_thread ON session(channel_id, thread_ts);",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 /// Apply all table definitions to the connected `SQLite` database.
 ///
 /// Creates all five tables idempotently. Safe to call on every startup.
@@ -113,5 +206,6 @@ CREATE INDEX IF NOT EXISTS idx_inbox_channel_consumed ON task_inbox(channel_id, 
 ";
 
     sqlx::raw_sql(ddl).execute(pool).await?;
+    migrate_session_columns(pool).await?;
     Ok(())
 }
