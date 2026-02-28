@@ -22,6 +22,7 @@ use agent_intercom::mcp::handler::{
 use agent_intercom::mcp::{sse, transport};
 use agent_intercom::orchestrator::{child_monitor, stall_consumer};
 use agent_intercom::persistence::{db, retention};
+use agent_intercom::policy::watcher::PolicyWatcher;
 use agent_intercom::slack::client::{SlackRuntime, SlackService};
 use agent_intercom::{AppError, Result};
 
@@ -162,6 +163,21 @@ async fn run(args: Cli) -> Result<()> {
         }
     };
 
+    // ── Initialize policy watcher ────────────────────────
+    // The watcher loads the initial policy from `.intercom/settings.json`,
+    // sets up a `notify` file watcher on that directory, and hot-reloads the
+    // in-memory cache whenever the file changes.  `AppState.policy_cache` is
+    // the SAME `Arc` owned by the watcher so all hot-reload events are
+    // immediately visible to `check_auto_approve` without any additional
+    // invalidation logic.
+    let policy_watcher = PolicyWatcher::new();
+    if let Err(err) = policy_watcher.register(&config.default_workspace_root).await {
+        warn!(%err, "policy watcher registration failed — falling back to on-demand loads");
+    } else {
+        info!("policy watcher registered for default workspace root");
+    }
+    let policy_cache = policy_watcher.cache().clone();
+
     // ── Create stall event channel ──────────────────────
     let (stall_tx, stall_rx) = tokio::sync::mpsc::channel(256);
 
@@ -175,12 +191,16 @@ async fn run(args: Cli) -> Result<()> {
         pending_modal_contexts: Arc::default(),
         stall_detectors: Some(StallDetectors::default()),
         ipc_auth_token,
-        policy_cache: Arc::default(),
+        policy_cache,
         audit_logger,
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: Some(stall_tx),
     });
+
+    // Keep the watcher alive for the server's lifetime — dropping it stops the
+    // notify watcher and the hot-reload stops working.
+    let _policy_watcher = policy_watcher;
 
     // ── Check for interrupted sessions from prior crash (T082) ──
     check_interrupted_on_startup(&state).await;

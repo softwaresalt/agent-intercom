@@ -31,15 +31,50 @@ pub fn suggestion_blocks(command: &str) -> Vec<SlackBlock> {
     ]
 }
 
-/// Generate a safe regex pattern that anchors to the given command.
+/// Generate a safe regex pattern that anchors to the significant prefix of a command.
 ///
-/// The pattern matches the command (with optional trailing whitespace and
-/// arguments) but never matches unrelated commands.  Special regex
-/// characters in the command are escaped before embedding.
+/// For commands that dispatch through subcommands (`cargo`, `git`, `npm`, etc.) the
+/// pattern captures `base subcommand`.  For simple OS commands (`DEL`, `rmdir`,
+/// `Copy-Item`, …) only the base command name is captured.  Everything after the
+/// anchor is wildcarded to permit any combination of flags and file arguments while
+/// still blocking shell-metacharacter injection.
+///
+/// # Examples
+///
+/// ```
+/// # use agent_intercom::slack::handlers::command_approve::generate_pattern;
+/// assert!(generate_pattern("DEL /F /Q file.txt").starts_with("^DEL"));
+/// assert!(generate_pattern("cargo test --release").starts_with("^cargo test"));
+/// assert!(generate_pattern("git add src/main.rs").starts_with("^git add"));
+/// assert!(generate_pattern("rmdir /S folder").starts_with("^rmdir"));
+/// ```
 #[must_use]
 pub fn generate_pattern(command: &str) -> String {
-    let escaped = regex::escape(command);
-    // Anchor the pattern: allow optional trailing args (no shell metacharacters).
+    /// Commands that dispatch through a subcommand (the second token carries
+    /// semantic meaning and should be included in the anchor).
+    const MULTI_LEVEL_COMMANDS: &[&str] = &[
+        "cargo", "git", "npm", "npx", "yarn", "pnpm", "dotnet", "docker",
+        "kubectl", "az", "aws", "gcloud", "pwsh", "powershell", "pip",
+        "python", "python3", "node", "deno", "rustup",
+    ];
+
+    let tokens: Vec<&str> = command.split_whitespace().collect();
+    let anchor = match tokens.as_slice() {
+        [] => command.to_owned(),
+        [base] => (*base).to_owned(),
+        [base, sub, ..] => {
+            let base_lower = base.to_lowercase();
+            if MULTI_LEVEL_COMMANDS.iter().any(|&c| c == base_lower) {
+                // Include the subcommand, e.g. "cargo test", "git add".
+                format!("{base} {sub}")
+            } else {
+                // Simple command — wildcard all flags/filenames.
+                (*base).to_owned()
+            }
+        }
+    };
+
+    let escaped = regex::escape(&anchor);
     format!(r"^{escaped}(\s[^;|&`]*)?$")
 }
 

@@ -182,6 +182,82 @@ fn write_pattern_to_workspace_file_does_not_duplicate() {
     assert_eq!(count, 1, "pattern key should appear exactly once");
 }
 
+/// S082 — `generate_pattern` for a simple OS command anchors to the base
+/// command only, not to specific flags or file paths.
+#[test]
+fn generate_pattern_simple_command_anchors_to_base_command_only() {
+    let pattern = command_approve::generate_pattern("DEL /F /Q tests\\fixtures\\hitl-scratch.txt");
+    let re = Regex::new(&pattern).expect("valid regex");
+
+    // Must match the base command with different arguments.
+    assert!(re.is_match("DEL /F /Q other-file.txt"), "should match DEL with other args");
+    assert!(re.is_match("DEL some-other-file.txt"), "should match DEL with any file");
+    assert!(re.is_match("DEL"), "should match bare DEL");
+
+    // Must NOT match a completely different command.
+    assert!(!re.is_match("rmdir /S /Q folder"), "should not match rmdir");
+    assert!(!re.is_match("cargo test"), "should not match cargo test");
+
+    // Pattern must NOT contain the specific path from the original command.
+    assert!(
+        !pattern.contains("fixtures"),
+        "pattern should not contain the filename path; got: {pattern}"
+    );
+}
+
+/// S083 — `generate_pattern` for a multi-level command (`cargo`) captures the
+/// base command AND the subcommand, but wildcards flags and file arguments.
+#[test]
+fn generate_pattern_multilevel_command_captures_base_and_subcommand() {
+    let pattern = command_approve::generate_pattern("cargo test --release src/main.rs");
+    let re = Regex::new(&pattern).expect("valid regex");
+
+    // Must match the same base+subcommand with different flags.
+    assert!(re.is_match("cargo test"), "should match bare 'cargo test'");
+    assert!(re.is_match("cargo test --release"), "should match with --release flag");
+    assert!(re.is_match("cargo test src/other.rs"), "should match with other file");
+
+    // Must NOT match a different cargo subcommand.
+    assert!(!re.is_match("cargo build"), "should not match 'cargo build'");
+    assert!(!re.is_match("cargo clippy"), "should not match 'cargo clippy'");
+    assert!(!re.is_match("cargo"), "should not match bare 'cargo'");
+
+    // Pattern should contain "cargo test" anchor.
+    assert!(
+        pattern.contains("cargo test"),
+        "pattern must contain 'cargo test' anchor; got: {pattern}"
+    );
+}
+
+/// S084 — `generate_pattern` for `git add src/main.rs` anchors to `git add`.
+#[test]
+fn generate_pattern_git_add_anchors_to_git_add() {
+    let pattern = command_approve::generate_pattern("git add src/main.rs");
+    let re = Regex::new(&pattern).expect("valid regex");
+
+    assert!(re.is_match("git add src/main.rs"), "should match original command");
+    assert!(re.is_match("git add ."), "should match `git add .`");
+    assert!(!re.is_match("git commit -m 'msg'"), "should not match git commit");
+    assert!(!re.is_match("git push"), "should not match git push");
+}
+
+/// S085 — `generate_pattern` for `rmdir /S /Q backup` anchors to `rmdir` only.
+#[test]
+fn generate_pattern_rmdir_anchors_to_rmdir_only() {
+    let pattern = command_approve::generate_pattern("rmdir /S /Q backup");
+    let re = Regex::new(&pattern).expect("valid regex");
+
+    assert!(re.is_match("rmdir /S /Q backup"), "should match original");
+    assert!(re.is_match("rmdir /S /Q other-dir"), "should match other dirs");
+    assert!(re.is_match("rmdir"), "should match bare rmdir");
+    assert!(!re.is_match("DEL /F /Q file"), "should not match DEL");
+
+    // Must not bake in the specific path.
+    assert!(
+        !pattern.contains("backup"),
+        "pattern must not contain the specific dir name; got: {pattern}"
+    );
+}
 /// S079 — `write_pattern_to_vscode_settings` returns `Ok(false)` when `.vscode/settings.json`
 /// does not exist.
 #[test]
