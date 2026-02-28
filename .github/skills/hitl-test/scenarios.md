@@ -225,14 +225,14 @@ The operator's expected action is stated in **bold**.
 **Steps:**
 1. Call `check_clearance` with:
    - `title`: `"HITL Test: Critical risk visual check"`
-   - `diff`: `"--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n #![forbid(unsafe_code)]\n \n+// CRITICAL CHANGE — this is a visual test\n //! `agent-intercom` — MCP remote agent server binary."`
+   - `diff`: `"--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,2 +1,3 @@\n #![forbid(unsafe_code)]\n \n+// CRITICAL CHANGE - this is a visual test\n"`
    - `file_path`: `"src/main.rs"`
    - `description`: `"HITL TEST: Please APPROVE. Verify that this message looks visually different from low-risk proposals AND that the original file content is attached as a Slack file."`
    - `risk_level`: `"critical"`
 2. **Operator action: APPROVE after visually confirming the risk indicator and file attachment**
 3. Call `check_diff` with the returned `request_id`
 4. Verify response `status` is `"applied"` — the diff applied cleanly to `src/main.rs`
-5. Immediately revert the change: use `check_clearance` with a reverse diff to remove the inserted comment line, then `check_diff` to apply
+5. Immediately revert the change: run `git restore src/main.rs` in the terminal to restore the original file
 
 **Expected:** Approved, diff applied successfully. Operator confirms critical-risk visual treatment AND original file attachment. Revert restores original `src/main.rs`.
 

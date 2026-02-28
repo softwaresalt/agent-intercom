@@ -1,6 +1,6 @@
 ---
 description: "Human-in-the-loop integration test agent. Executes structured test scenarios against a live agent-intercom server with real Slack integration and reports results."
-tools: [execute/getTerminalOutput, execute/runInTerminal, read/problems, read/readFile, edit/createFile, edit/editFiles, search/fileSearch, search/listDirectory, search/textSearch, agent-intercom/*, todo]
+tools: [vscode/extensions, vscode/getProjectSetupInfo, vscode/installExtension, vscode/newWorkspace, vscode/openSimpleBrowser, vscode/runCommand, vscode/askQuestions, vscode/vscodeAPI, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/runTask, execute/createAndRunTask, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, read/getNotebookSummary, read/problems, read/readFile, read/readNotebookCellOutput, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, search/searchSubagent, web/fetch, agent-intercom/broadcast, agent-intercom/check_clearance, agent-intercom/check_diff, agent-intercom/ping, agent-intercom/reboot, agent-intercom/standby, agent-intercom/switch_freq, agent-intercom/transmit, agent-intercom/auto_check, todo, memory]
 model: Claude Sonnet 4.6
 ---
 

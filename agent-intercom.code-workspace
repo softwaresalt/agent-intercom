@@ -1,82 +1,20 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"settings": {
-		"chat.tools.terminal.autoApprove": {
-			".specify/scripts/bash/": true,
-			".specify/scripts/powershell/": true,
-			"cargo doc": true,
-			"cargo metadata": true,
-			"Out-File": true,
-			"ForEach-Object": true,
-			"Out-Null": true,
-			"cargo clippy": true,
-			"cargo check": true,
-			"/^pwsh -File \\.specify/scripts/powershell/setup-plan\\.ps1 -Json$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"/^pwsh -File \\.specify/scripts/powershell/update-agent-context\\.ps1 -AgentType copilot$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json -RequireTasks -IncludeTasks$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"Test-Path": true,
-			"cargo test": true,
-			"git commit": true,
-			"git push": true,
-			"git add": true,
-			"New-Item": true,
-			"cargo fmt": true,
-			"Get-Item": true,
-			"Group-Object": true,
-			"cargo audit": true,
-			"git ls-remote": true,
-			"git restore": true,
-			"Clear-Host": true,
-			"cargo build": true,
-			"/^cargo metadata --format-version 1 2>\\$null \\| python -c \"import json,sys; data=json\\.load\\(sys\\.stdin\\); pkgs=\\[p for p in data\\['packages'\\] if p\\['name'\\]=='rmcp'\\]; print\\(pkgs\\[0\\]\\['manifest_path'\\] if pkgs else 'not found'\\)\"$/": {
-				"approve": true,
-				"matchCommandLine": true
-			},
-			"cargo search": true,
-			"cargo info": true,
-			"cargo add": true,
-			"rustup": true,
-			".\\run-debug.ps1": true,
-			".\\target\\debug\\agent-intercom.exe": true,
-			"Get-NetTCPConnection": true,
-			"netstat": true,
-			"cargo home": true
-		},
-		"powershell.cwd": "agent-intercom",
-    "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,
-		"github.copilot.chat.copilotMemory.enabled": true,
-		"xml.format.maxLineWidth": 500,
-		"chat.agent.maxRequests": 1000
-	},
-    "chat.agentFilesLocations": {
-        ".github/agents": true//,
-        //"lib/hve-core/.github/agents": true
-    },
-    "chat.promptFilesLocations": {
-        ".github/prompts": true,
-        "lib/hve-core/.github/prompts": true
-    },
-    "chat.instructionsFilesLocations": {
-        ".github/instructions": true,
-        "lib/hve-core/.github/instructions": true
-    },
+  "chat.agentFilesLocations": {
+    ".github/agents": true
+  },
+  "chat.instructionsFilesLocations": {
+    ".github/instructions": true,
+    "lib/hve-core/.github/instructions": true
+  },
+  "chat.promptFilesLocations": {
+    ".github/prompts": true,
+    "lib/hve-core/.github/prompts": true
+  },
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
   "mcp": {
     "servers": {
       "agent-intercom": {
@@ -84,9 +22,12 @@
         "url": "http://127.0.0.1:3000/mcp?channel_id=C0AF15RHPF0"
       },
       "context7": {
-        "type": "stdio",
+        "args": [
+          "-y",
+          "@upstash/context7-mcp"
+        ],
         "command": "npx",
-        "args": ["-y", "@upstash/context7-mcp"]
+        "type": "stdio"
       },
       "microsoft-docs": {
         "type": "http",
@@ -97,5 +38,66 @@
         "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=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"
       }
     }
+  },
+  "settings": {
+    "chat.agent.maxRequests": 1000,
+    "chat.tools.terminal.autoApprove": {
+      ".\\run-debug.ps1": true,
+      ".\\target\\debug\\agent-intercom.exe": true,
+      ".specify/scripts/bash/": true,
+      ".specify/scripts/powershell/": true,
+      "/^cargo metadata --format-version 1 2>\\$null \\| python -c \"import json,sys; data=json\\.load\\(sys\\.stdin\\); pkgs=\\[p for p in data\\['packages'\\] if p\\['name'\\]=='rmcp'\\]; print\\(pkgs\\[0\\]\\['manifest_path'\\] if pkgs else 'not found'\\)\"$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json -RequireTasks -IncludeTasks$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^pwsh -File \\.specify/scripts/powershell/check-prerequisites\\.ps1 -Json$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^pwsh -File \\.specify/scripts/powershell/setup-plan\\.ps1 -Json$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^pwsh -File \\.specify/scripts/powershell/update-agent-context\\.ps1 -AgentType copilot$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "Clear-Host": true,
+      "ForEach-Object": true,
+      "Get-Item": true,
+      "Get-NetTCPConnection": true,
+      "Group-Object": true,
+      "New-Item": true,
+      "Out-File": true,
+      "Out-Null": true,
+      "Test-Path": true,
+      "cargo add": true,
+      "cargo audit": true,
+      "cargo build": true,
+      "cargo check": true,
+      "cargo clippy": true,
+      "cargo doc": true,
+      "cargo fmt": true,
+      "cargo home": true,
+      "cargo info": true,
+      "cargo metadata": true,
+      "cargo search": true,
+      "cargo test": true,
+      "git add": true,
+      "git commit": true,
+      "git ls-remote": true,
+      "git push": true,
+      "git restore": true,
+      "netstat": true,
+      "rustup": true
+    },
+    "github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": true,
+    "github.copilot.chat.copilotMemory.enabled": true,
+    "powershell.cwd": "agent-intercom",
+    "xml.format.maxLineWidth": 500
   }
 }
