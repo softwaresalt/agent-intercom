@@ -25,8 +25,11 @@ The existing `Session` entity gains three new fields to support protocol trackin
 | `stall_paused` | Boolean | Yes | Whether stall detection is paused (existing) |
 | `progress_snapshot` | JSON | No | Last-reported progress items (existing) |
 | **`protocol_mode`** | **Enum** | **Yes** | **Agent communication protocol: `mcp` or `acp`. Recorded at session creation. Default: `mcp`.** |
-| **`channel_id`** | **String** | **No** | **Slack channel ID where this session's messages are posted. Resolved from workspace mapping or query parameter at connection time.** |
+| **`channel_id`** | **String** | **No** | **Slack channel ID where this session's messages are posted. For MCP: resolved from workspace mapping or query parameter at connection time. For ACP: derived from the Slack channel where `/intercom session-start` was issued.** |
 | **`thread_ts`** | **String** | **No** | **Slack thread timestamp of the session's root message. NULL until the first message is posted. All subsequent messages use this as `thread_ts`.** |
+| **`connectivity_status`** | **Enum** | **Yes** | **Agent connectivity state: `online`, `offline`, or `stalled`. Separate from lifecycle `status`. Default: `online`. Updated by stream activity monitoring and stall detector.** |
+| **`last_activity_at`** | **DateTime** | **No** | **Timestamp of last agent activity (stream message, tool call, heartbeat). Used by stall detector and persisted for recovery across server restarts.** |
+| **`restart_of`** | **String** | **No** | **Session ID of the predecessor session if this session was created via a restart. NULL for original sessions. Enables session lineage tracking.** |
 
 #### State Transitions
 
@@ -41,11 +44,15 @@ Paused → Terminated
 Interrupted → Active (recovery)
 ```
 
+**Session Restart**: When an operator restarts a stalled/interrupted session, a new session record is created with a fresh UUID. The new session inherits `thread_ts` and `channel_id` from the original. The original session remains in `terminated` state. The new session's `restart_of` field links to the original session ID.
+
 #### Validation Rules
 
 - `protocol_mode` must be `mcp` or `acp`
-- `channel_id` is set at session creation for ACP sessions (derived from workspace mapping) or at first tool call for MCP sessions (derived from query parameter)
+- `channel_id` is set at session creation for ACP sessions (derived from the Slack channel where `/intercom session-start` was issued) or at first tool call for MCP sessions (derived from workspace mapping or query parameter)
 - `thread_ts` is immutable once set — the session's Slack thread cannot change
+- `connectivity_status` must be `online`, `offline`, or `stalled`
+- `restart_of` must reference an existing session ID if set
 
 ---
 
@@ -73,7 +80,7 @@ Events emitted by the ACP driver (or MCP driver) to the shared application core 
 
 | Variant | Fields | Description |
 |---------|--------|-------------|
-| `ClearanceRequested` | `request_id: String`, `session_id: String`, `title: String`, `description: String`, `diff: Option<String>`, `file_path: String`, `risk_level: String` | Agent requests operator approval for a file operation |
+| `ClearanceRequested` | `request_id: String`, `session_id: String`, `title: String`, `description: Option<String>`, `diff: Option<String>`, `file_path: String`, `risk_level: String` | Agent requests operator approval for a file operation |
 | `StatusUpdated` | `session_id: String`, `message: String` | Agent sends a status update or log message |
 | `PromptForwarded` | `session_id: String`, `prompt_id: String`, `prompt_text: String`, `prompt_type: String` | Agent forwards a continuation prompt for operator decision |
 | `HeartbeatReceived` | `session_id: String`, `progress: Option<Vec<ProgressItem>>` | Agent sends a heartbeat/ping signal |
@@ -105,8 +112,9 @@ JSON messages exchanged over the ACP stdio stream. Two directions: agent → ser
 
 | Method | Fields | Description |
 |--------|--------|-------------|
-| `clearance/response` | `request_id: String`, `status: String`, `reason: Option<String>` | Approval decision from operator |
+| `clearance/response` | `id: String` (envelope), `status: String`, `reason: Option<String>` | Approval decision from operator. Correlation via envelope `id` matching the original `clearance/request` id. |
 | `prompt/send` | `text: String` | New prompt or instruction to the agent |
+| `prompt/response` | `id: String`, `decision: String`, `instruction: Option<String>` | Decision on a forwarded continuation prompt |
 | `session/interrupt` | `reason: String` | Request agent to stop current work |
 | `nudge` | `message: String` | Stall recovery nudge message |
 
@@ -123,10 +131,16 @@ Add to `persistence/schema.rs` `bootstrap_schema()` function:
 -- protocol_mode: 'mcp' (default) or 'acp'
 -- channel_id: Slack channel for this session
 -- thread_ts: Slack thread timestamp for session threading
+-- connectivity_status: 'online' (default), 'offline', or 'stalled'
+-- last_activity_at: timestamp of last agent activity (for stall recovery across restarts)
+-- restart_of: predecessor session ID for restarted sessions
 
 ALTER TABLE session ADD COLUMN protocol_mode TEXT NOT NULL DEFAULT 'mcp';
 ALTER TABLE session ADD COLUMN channel_id TEXT;
 ALTER TABLE session ADD COLUMN thread_ts TEXT;
+ALTER TABLE session ADD COLUMN connectivity_status TEXT NOT NULL DEFAULT 'online';
+ALTER TABLE session ADD COLUMN last_activity_at TEXT;
+ALTER TABLE session ADD COLUMN restart_of TEXT;
 ```
 
 Since SQLite does not support `ALTER TABLE ADD COLUMN IF NOT EXISTS`, the migration must check `PRAGMA table_info(session)` before each `ALTER TABLE` statement.
@@ -147,16 +161,19 @@ CREATE INDEX IF NOT EXISTS idx_session_channel_thread ON session(channel_id, thr
 └──────────────────┘                    └─────────────────────┘
         │ resolves channel_id                     │
         ▼                                         │
-┌──────────────────┐                    ┌─────────────────────┐
-│    Session       │◄───────────────────│     AppState        │
-│ + protocol_mode  │                    │ + agent_driver      │
-│ + channel_id     │                    └─────────────────────┘
-│ + thread_ts      │                              │
-└──────────────────┘                    ┌─────────────────────┐
-        ▲                               │   AgentDriver       │
-        │ session_id                    │   (trait object)    │
-┌──────────────────┐                    ├─────────────────────┤
-│   AgentEvent     │◄───────────────────│ McpDriver │AcpDriver│
-│ (mpsc channel)   │                    └─────────────────────┘
+┌──────────────────────┐                ┌─────────────────────┐
+│    Session           │◄───────────────│     AppState        │
+│ + protocol_mode      │                │ + agent_driver      │
+│ + channel_id         │                └─────────────────────┘
+│ + thread_ts          │                          │
+│ + connectivity_status│                ┌─────────────────────┐
+│ + last_activity_at   │                │   AgentDriver       │
+│ + restart_of         │                │   (trait object)    │
+└──────────────────────┘                ├─────────────────────┤
+        ▲                               │ McpDriver │AcpDriver│
+        │ session_id                    │           │(per-sess)│
+┌──────────────────┐                    └─────────────────────┘
+│   AgentEvent     │◄───────────────────        ▲
+│ (mpsc channel)   │                    session_id → Sender map
 └──────────────────┘
 ```

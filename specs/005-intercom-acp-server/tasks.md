@@ -23,6 +23,7 @@
 - [ ] T002 [P] Create `src/acp/mod.rs` with module structure and doc comments
 - [ ] T003 [P] Add `AppError::Acp(String)` variant in `src/errors.rs` with `Display` and `From` implementations
 - [ ] T004 [P] Add `ProtocolMode` enum (`Mcp`, `Acp`) to `src/models/session.rs` with serde serialization
+- [ ] T004b [P] Enable `codec` feature on `tokio-util` in `Cargo.toml` — change `features = ["rt"]` to `features = ["rt", "codec"]` for `LinesCodec`/`FramedRead`/`FramedWrite` support
 
 **Checkpoint**: New module stubs exist, project compiles with `cargo check`
 
@@ -42,8 +43,8 @@
 
 ### Implementation
 
-- [ ] T008 Add `protocol_mode`, `channel_id`, `thread_ts` fields to `Session` struct in `src/models/session.rs`
-- [ ] T009 Write idempotent schema migration in `src/persistence/schema.rs` — add `protocol_mode`, `channel_id`, `thread_ts` columns to `session` table using PRAGMA table_info check
+- [ ] T008 Add `protocol_mode`, `channel_id`, `thread_ts`, `connectivity_status`, `last_activity_at`, `restart_of` fields to `Session` struct in `src/models/session.rs`
+- [ ] T009 Write idempotent schema migration in `src/persistence/schema.rs` — add `protocol_mode`, `channel_id`, `thread_ts`, `connectivity_status`, `last_activity_at`, `restart_of` columns to `session` table using PRAGMA table_info check
 - [ ] T010 Update `SessionRepo` in `src/persistence/session_repo.rs` — include new fields in INSERT/SELECT/UPDATE queries
 - [ ] T011 [P] Add `find_active_by_channel(channel_id)` query to `src/persistence/session_repo.rs`
 - [ ] T012 [P] Add `find_by_channel_and_thread(channel_id, thread_ts)` query to `src/persistence/session_repo.rs`
@@ -119,8 +120,9 @@
 
 ### Implementation
 
-- [ ] T037 [US3] Create ACP spawner in `src/acp/spawner.rs` — spawn `host_cli` process with `kill_on_drop(true)`, capture stdin/stdout handles, return `AcpConnection`
-- [ ] T038 [US3] Wire ACP session-start in `src/slack/commands.rs` — when mode is ACP, spawn agent via ACP spawner instead of MCP spawner
+- [ ] T037 [US3] Create ACP spawner in `src/acp/spawner.rs` — spawn `host_cli` process with `kill_on_drop(true)`, `env_clear()` + safe variable allowlist (PATH, HOME, RUST_LOG), capture stdin/stdout handles, return `AcpConnection`
+- [ ] T037b [P] [US3] Write unit test verifying spawned process does NOT inherit SLACK_BOT_TOKEN or SLACK_APP_TOKEN in `tests/unit/acp_session_tests.rs` — covers S075
+- [ ] T038 [US3] Wire ACP session-start in `src/slack/commands.rs` — when mode is ACP, spawn agent via ACP spawner, pass `channel_id` from originating Slack channel context (FR-027), register session with AcpDriver
 - [ ] T039 [US3] Implement process exit monitoring in `src/acp/spawner.rs` — `tokio::spawn` task that awaits `child.wait()` and emits `AgentEvent::SessionTerminated`
 - [ ] T040 [US3] Implement startup timeout — if no message from agent within `startup_timeout_seconds`, kill process and emit failure event
 - [ ] T041 [US3] Handle max concurrent sessions check in ACP session-start path (S024)
@@ -199,6 +201,8 @@
 - [ ] T066 [US6] Update Slack approval handler in `src/slack/events.rs` to extract `channel_id` and `thread_ts` for routing
 - [ ] T067 [US6] Update slash command handler in `src/slack/commands.rs` to scope commands to originating channel
 - [ ] T068 [US6] Add "no active session" response when slash commands target a channel without sessions
+- [ ] T068b [P] [US6] Write unit test for non-owner action rejection in `tests/unit/session_routing_tests.rs` — covers S076 (FR-031)
+- [ ] T068c [US6] Add owner_user_id verification to Slack approval/steering handlers in `src/slack/events.rs` — reject actions from non-owners with ephemeral error message (FR-031)
 
 **Checkpoint**: All operator actions correctly scoped by channel and thread
 
@@ -228,7 +232,7 @@
 - [ ] T079 [US7] Implement NDJSON codec wrapper in `src/acp/codec.rs` using `tokio_util::codec::LinesCodec`
 - [ ] T080 [US7] Implement ACP reader task in `src/acp/reader.rs` — `FramedRead` on `ChildStdout`, parse JSON, emit `AgentEvent` via mpsc channel
 - [ ] T081 [US7] Implement ACP writer task in `src/acp/writer.rs` — receive outbound messages via mpsc, serialize JSON, write to `ChildStdin` via `FramedWrite`
-- [ ] T082 [US7] Implement `AcpDriver` struct in `src/driver/acp_driver.rs` — holds `tcp_tx: mpsc::Sender<Value>`, `event_tx: mpsc::Sender<AgentEvent>`
+- [ ] T082 [US7] Implement `AcpDriver` struct in `src/driver/acp_driver.rs` — holds `stream_writers: Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>` for per-session stream routing, with `register_session`/`deregister_session` lifecycle methods
 - [ ] T083 [US7] Implement `AgentDriver` trait for `AcpDriver` in `src/driver/acp_driver.rs` — serialize JSON responses and write to stream
 - [ ] T084 [US7] Wire ACP reader → core event loop in `src/main.rs` ACP startup path — spawn reader task, consume events
 
@@ -370,4 +374,5 @@ Phase 2 (Foundation)
 - Each user story is independently completable and testable
 - TDD required: write tests first, verify they fail, then implement
 - Commit after each task or logical group
-- Total: 106 tasks across 12 phases
+- Total: 112 tasks across 12 phases
+- **Deferred**: `ctl/main.rs` ACP subcommands and `src/ipc/server.rs` ACP extensions are deferred to a future feature. ACP sessions are managed exclusively via Slack in this feature.

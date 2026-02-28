@@ -11,7 +11,7 @@ Add Agent Client Protocol (ACP) server mode to agent-intercom so the server can 
 
 **Language/Version**: Rust stable, edition 2021
 **Primary Dependencies**: rmcp 0.13, axum 0.8, slack-morphism 2.17, sqlx 0.8, tokio 1.37, tokio-util 0.7 (LinesCodec for ACP stream framing), notify 6.1, interprocess 2.0, clap 4.5, serde/serde_json 1.0, chrono 0.4, uuid 1.7
-**Storage**: SQLite via sqlx 0.8 (file-based prod, in-memory tests). Schema additions: `thread_ts`, `channel_id`, `protocol_mode` columns on `session` table. New table: `workspace_mapping` (optional, may use in-memory config instead).
+**Storage**: SQLite via sqlx 0.8 (file-based prod, in-memory tests). Schema additions: `protocol_mode`, `channel_id`, `thread_ts`, `connectivity_status`, `last_activity_at`, `restart_of` columns on `session` table. Workspace mappings loaded from `config.toml` into in-memory HashMap (not persisted to SQLite).
 **Testing**: cargo test (unit/, contract/, integration/ tiers). TDD required.
 **Target Platform**: Windows (primary), Linux/macOS (secondary)
 **Project Type**: Single workspace, two binaries (agent-intercom, agent-intercom-ctl)
@@ -62,13 +62,13 @@ src/
 ├── driver/                 # NEW module: protocol-agnostic agent driver
 │   ├── mod.rs              # AgentDriver trait definition + AgentEvent enum
 │   ├── mcp_driver.rs       # MCP implementation (wraps existing oneshot pattern)
-│   └── acp_driver.rs       # ACP implementation (stream read/write tasks)
+│   └── acp_driver.rs       # ACP implementation (session-indexed stream writers)
 ├── acp/                    # NEW module: ACP stream handling
 │   ├── mod.rs              # ACP module root
 │   ├── codec.rs            # LinesCodec-based stream framing
 │   ├── reader.rs           # Read task: parse incoming agent messages → AgentEvent
 │   ├── writer.rs           # Write task: serialize outbound responses
-│   └── spawner.rs          # Process spawning and stdio capture
+│   └── spawner.rs          # Process spawning, stdio capture, env isolation
 ├── mcp/
 │   ├── handler.rs          # + AgentDriver in AppState, thread_ts routing
 │   ├── sse.rs              # + workspace_id query param, deprecation warning for channel_id
@@ -76,25 +76,25 @@ src/
 │       ├── heartbeat.rs    # unchanged (steering delivery already in 004)
 │       └── recover_state.rs # unchanged (inbox delivery already in 004)
 ├── models/
-│   └── session.rs          # + thread_ts, channel_id, protocol_mode fields
+│   └── session.rs          # + thread_ts, channel_id, protocol_mode, connectivity_status, last_activity_at, restart_of fields
 ├── orchestrator/
 │   ├── stall_detector.rs   # + ACP stream activity monitoring variant
 │   └── session_manager.rs  # + ACP session start/stop lifecycle
 ├── persistence/
-│   ├── schema.rs           # + ALTER session table (thread_ts, channel_id, protocol_mode)
+│   ├── schema.rs           # + ALTER session table (6 new columns + indexes)
 │   └── session_repo.rs     # + find_by_channel, find_by_channel_and_thread queries
 ├── slack/
 │   ├── blocks.rs           # + session thread root message builder
 │   ├── client.rs           # + thread_ts parameter on all session message sends
 │   ├── commands.rs         # + workspace_id to channel resolution in session-start
-│   ├── events.rs           # + thread_ts extraction for routing
+│   ├── events.rs           # + thread_ts extraction for routing + owner verification
 │   └── handlers/
 │       └── steer.rs        # + channel_id/thread_ts scoped session lookup (RI-04 fix)
 └── ipc/
-    └── server.rs           # + ACP session start/stop IPC commands
+    └── server.rs           # unchanged (ACP ctl subcommands deferred to future feature)
 
 ctl/
-└── main.rs                 # + acp-start, acp-stop subcommands
+└── main.rs                 # unchanged (ACP ctl subcommands deferred to future feature)
 
 tests/
 ├── unit/

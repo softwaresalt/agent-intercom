@@ -8,13 +8,13 @@
 
 | Metric | Count |
 |---|---|
-| **Total Scenarios** | 72 |
-| Happy-path | 28 |
+| **Total Scenarios** | 76 |
+| Happy-path | 30 |
 | Edge-case | 15 |
 | Error | 14 |
 | Boundary | 5 |
 | Concurrent | 6 |
-| Security | 4 |
+| Security | 6 |
 
 **Non-happy-path coverage**: 61% (minimum 30% required)
 
@@ -118,7 +118,7 @@
 | S052 | Handle malformed JSON line | `{not valid json}\n` | Read from agent stdout | Warning logged: "received malformed JSON", line skipped | Stream continues reading | error |
 | S053 | Handle unknown method | `{"method":"unknown/method","params":{}}\n` | Read from agent stdout | Debug logged: "unknown method: unknown/method", skipped | Stream continues reading | edge-case |
 | S054 | Handle missing required field | `{"method":"clearance/request","params":{"title":"x"}}\n` (missing file_path) | Read from agent stdout | Warning logged: "missing required field", skipped | Stream continues reading | error |
-| S055 | Stream EOF detection | Agent process closes stdout | Read returns EOF | `AgentEvent::SessionTerminated` emitted with reason "stream closed" | Session marked interrupted | happy-path |
+| S055 | Stream EOF detection | Agent process closes stdout | Read returns EOF | Reader emits EOF event; system awaits process exit code. If exit code 0 → `SessionTerminated` (per S022). If non-zero → `SessionInterrupted` (per S023). If process already exited → use cached exit code. | Session state depends on exit code, not EOF alone | happy-path |
 | S056 | Write clearance response | Approval for request `req-001` | `driver.resolve_clearance("req-001", true, None)` | `{"method":"clearance/response","id":"req-001","params":{"status":"approved"}}\n` written to stdin | Agent receives response | happy-path |
 | S057 | Message exceeds max line length | Single JSON line > 1 MB | Read from agent stdout | Error logged: "line exceeded max length", connection may close | Stream error handled | boundary |
 | S058 | Empty line in stream | `\n` (empty line) between messages | Read from agent stdout | Empty line skipped silently | Stream continues reading | boundary |
@@ -160,6 +160,17 @@
 
 ---
 
+## Additional Scenarios (Adversarial Review Remediations)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S073 | ACP driver resolves forwarded prompt | Active ACP session, agent sent `prompt/forward` with id `prompt-001`, operator responds | Slack operator clicks "Continue" | `prompt/response` JSON with `id: "prompt-001"`, `decision: "continue"` written to agent stream | Stream contains response, prompt removed from pending | happy-path |
+| S074 | ACP driver resolves standby wait | Active ACP session in standby, operator sends instruction | Slack operator sends steering message | `prompt/send` JSON with instruction text written to agent stream | Agent receives instruction, standby resolved | happy-path |
+| S075 | Spawned agent process does not inherit server credentials | ACP mode, server has SLACK_BOT_TOKEN in environment | `/intercom session-start "..."` | Agent process environment does NOT contain SLACK_BOT_TOKEN, SLACK_APP_TOKEN, or other server credentials. Only safe variables (PATH, HOME, RUST_LOG) are present. | Agent cannot access Slack API | security |
+| S076 | Non-owner user rejected from session modification | User A owns session, User B (also authorized) clicks "Approve" on User A's clearance | Slack button interaction by User B | Error message: "Only the session owner can perform this action" posted as ephemeral Slack message | Clearance remains pending, no state change | security |
+
+---
+
 ## Edge Case Coverage Checklist
 
 - [x] Malformed inputs and invalid arguments (S006, S026, S032, S033, S052, S054)
@@ -179,7 +190,7 @@
 
 ## Notes
 
-- Scenario IDs are globally sequential (S001–S072) across all components
+- Scenario IDs are globally sequential (S001–S076) across all components
 - Categories: `happy-path`, `edge-case`, `error`, `boundary`, `concurrent`, `security`
 - Each row is deterministic — exactly one expected outcome per input state
 - Security scenarios are minimal because the existing authorization guard (FR-013/SC-009 from base) covers most security paths; only ACP-specific security paths are added here

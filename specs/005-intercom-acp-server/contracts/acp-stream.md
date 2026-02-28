@@ -100,13 +100,13 @@ Agent sends a liveness signal.
 }
 ```
 
-**Response expected**: Optional — server may return pending steering messages.
+**Response expected**: None. On heartbeat receipt, the server checks for pending steering messages for this session. If pending messages exist, each is sent as a separate `prompt/send` outbound message. The heartbeat itself does not receive a direct response.
 
 ## Outbound Messages (Server → Agent)
 
 ### `clearance/response`
 
-Operator's decision on a clearance request.
+Operator's decision on a clearance request. Correlation via envelope `id` matching the original `clearance/request` id.
 
 ```json
 {
@@ -118,6 +118,8 @@ Operator's decision on a clearance request.
   }
 }
 ```
+
+> **Note**: The `id` field in the envelope is the correlation key. Do NOT duplicate it as `request_id` inside `params`.
 
 ### `prompt/send`
 
@@ -187,10 +189,11 @@ Stall recovery message.
 
 ```toml
 [acp]
-framing = "ndjson"          # or "lsp" for Content-Length framing
 max_line_length = 1048576   # 1 MB
 startup_timeout_seconds = 30
 ```
+
+> **Note**: Only NDJSON framing is supported. Content-Length (LSP-style) framing may be added in a future version if needed.
 
 ## Test Contract
 

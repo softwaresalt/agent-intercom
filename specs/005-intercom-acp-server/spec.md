@@ -18,7 +18,7 @@ An operator wants to choose how agent-intercom connects to agents. Today, agent-
 **Acceptance Scenarios**:
 
 1. **Given** the server is started with `--mode mcp` (or no mode flag), **When** the startup sequence completes, **Then** the server behaves identically to the current implementation — it starts the MCP HTTP/SSE and/or stdio transports and waits for agent connections.
-2. **Given** the server is started with `--mode acp`, **When** the startup sequence completes, **Then** the server initiates an outbound connection to the configured agent endpoint instead of listening for inbound MCP connections.
+2. **Given** the server is started with `--mode acp`, **When** the startup sequence completes, **Then** the server spawns and connects to the configured agent process via stdio instead of listening for inbound MCP connections.
 3. **Given** an invalid mode flag is passed, **When** the server starts, **Then** it exits with a clear error message listing valid mode options.
 4. **Given** ACP mode is selected but no agent endpoint is configured, **When** the server starts, **Then** it exits with a clear error message specifying the missing configuration.
 
@@ -169,7 +169,7 @@ The existing stall detection mechanism (monitoring `ping` frequency and escalati
 - What happens when the ACP stream connection is established but the agent never sends an initial handshake? A startup timeout fires and the session is marked as failed with a notification to the operator.
 - What happens when `config.toml` is hot-reloaded and removes a workspace mapping for an active session? Existing sessions are unaffected; only new sessions use the updated mappings.
 - What happens when the operator attempts to start an ACP session but the host CLI binary is missing or not executable? The server reports a clear error to Slack indicating the configured `host_cli` path is invalid.
-- What happens when a Slack thread exceeds Slack's reply limit? The system posts a continuation message as a new top-level message in the channel, linking back to the original thread, and updates the session's `thread_ts`.
+- What happens when a Slack thread exceeds Slack's reply limit? The system posts a continuation message as a new top-level message in the channel, linking back to the original thread. The session's `thread_ts` remains unchanged (immutable) — subsequent messages continue in the original thread. Note: Slack does not expose a deterministic thread reply limit via its API, so this behavior is best-effort based on observed post failures.
 
 ## Requirements *(mandatory)*
 
@@ -177,7 +177,7 @@ The existing stall detection mechanism (monitoring `ping` frequency and escalati
 
 - **FR-001**: System MUST support a `--mode` startup flag accepting `mcp` (default) and `acp` values to select the agent communication protocol.
 - **FR-002**: In MCP mode, the system MUST behave identically to the current implementation — no regressions in existing MCP functionality.
-- **FR-003**: In ACP mode, the system MUST initiate an outbound connection to a configured agent endpoint and send an initial prompt.
+- **FR-003**: In ACP mode, the system MUST spawn a configured agent process and establish bidirectional communication via its stdio streams (stdin/stdout), sending the initial prompt through the ACP stream protocol.
 - **FR-004**: System MUST provide a protocol-agnostic interface (agent driver) that abstracts the communication protocol from the shared application core (Slack handlers, persistence, policy engine).
 - **FR-005**: The agent driver MUST support resolving clearance requests (approve/reject), sending prompts, and interrupting agent execution regardless of the underlying protocol.
 - **FR-006**: In ACP mode, the system MUST spawn and manage headless agent processes when initiated via `/intercom session-start`.
@@ -201,6 +201,11 @@ The existing stall detection mechanism (monitoring `ping` frequency and escalati
 - **FR-024**: System MUST handle agent process crashes gracefully — mark the session as interrupted, resolve any pending requests as timed out, and notify the operator.
 - **FR-025**: System MUST support concurrent sessions across multiple workspaces, each with independent channel routing and threading.
 - **FR-026**: Session lifecycle events (start, active, paused, terminated, interrupted) MUST be persisted in the database with the protocol mode recorded.
+- **FR-027**: In ACP mode, the session's `channel_id` MUST be derived from the Slack channel where the `/intercom session-start` command was issued, not from a URL query parameter.
+- **FR-028**: Spawned agent processes MUST NOT inherit the server's credential environment variables (e.g., Slack tokens). The spawner MUST clear the child process environment and explicitly allowlist only safe variables (e.g., `PATH`, `HOME`, `RUST_LOG`).
+- **FR-029**: When a slash command is issued without thread context in a channel with multiple active sessions, the system MUST default to the most recently active session and include a disambiguation hint in the response listing other active sessions.
+- **FR-030**: The initial prompt for an ACP session MUST be delivered via the ACP stream protocol (stdin), never as a command-line argument to the agent process. `host_cli_args` in configuration MUST be static and not include user-provided content.
+- **FR-031**: All session-modifying actions (clearance resolution, prompt delivery, interruption, steering) MUST verify that the acting Slack user matches the session's `owner_user_id`. Actions from non-owners MUST be rejected with a descriptive error message.
 
 ### Key Entities
 
@@ -216,6 +221,7 @@ The existing stall detection mechanism (monitoring `ping` frequency and escalati
 - A single server instance serves multiple workspaces simultaneously; workspace isolation is achieved through session-level scoping, not process-level isolation.
 - The Slack Bot Token has sufficient permissions to post threaded replies (this is standard for bot tokens with `chat:write` scope).
 - The existing inbox queue (feature 004) provides a persistence foundation for offline message queuing; this feature extends rather than replaces that mechanism.
+- Feature 004 (Advanced Features — steering queue, inbox) MUST be complete before User Story 8 (Offline Agent Message Queuing) implementation begins, as US8 depends on the `steering_message` and `task_inbox` persistence tables.
 
 ## Success Criteria *(mandatory)*
 
