@@ -78,7 +78,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-tokio-util = { version = "0.7.18", features = ["rt"] }
+tokio-util = { version = "0.7.18", features = ["rt", "codec"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
 glob = "0.3"
 regex = "1.12.3"

@@ -498,10 +498,6 @@ After Step 12 completes, the phase is fully done. Report the following completio
 The orchestrator uses this signal to verify all gates passed before looping to the next phase.
 ## Troubleshooting
 
-### SurrealDB v2 SDK behavioral differences
-
-Refer to session memory at `.copilot-tracking/memory/` for documented workarounds including `Thing` deserialization via `*Row` structs, `SCHEMAFULL` table DDL patterns, and record ID serialization from `surrealdb::sql::Thing` to `String`.
-
 ### Tests pass locally but fail in CI
 
 Verify `rust-toolchain.toml` matches the CI configuration in `.github/workflows/ci.yml`. Check that the `[[test]]` entries in `Cargo.toml` include all external test files.

@@ -6,9 +6,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod acp;
 pub mod audit;
 pub mod config;
 pub mod diff;
+pub mod driver;
 pub mod errors;
 pub mod ipc;
 pub mod mcp;

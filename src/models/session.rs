@@ -34,6 +34,16 @@ pub enum SessionMode {
     Hybrid,
 }
 
+/// Protocol used by the agent for this session.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtocolMode {
+    /// Agent communicates via the Model Context Protocol (MCP).
+    Mcp,
+    /// Agent communicates via the Agent Client Protocol (ACP) over stdio.
+    Acp,
+}
+
 /// Session domain entity persisted in `SQLite`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
