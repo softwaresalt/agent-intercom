@@ -58,6 +58,8 @@ async fn spawn_server() -> (String, CancellationToken) {
             driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
             server_mode: agent_intercom::mode::ServerMode::Mcp,
             workspace_mappings: Arc::default(),
+            acp_event_tx: None,
+            acp_driver: None,
         };
         Arc::new(new_state)
     };

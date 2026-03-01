@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, missing_docs)]
 
 mod unit {
+    mod acp_codec_tests;
     mod acp_session_tests;
     mod approval_repo_tests;
     mod ask_approval_tests;

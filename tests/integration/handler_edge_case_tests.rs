@@ -72,6 +72,8 @@ async fn stall_detector_reset_works() {
         server_mode: agent_intercom::mode::ServerMode::Mcp,
 
         workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     let session = create_active_session(&state.db, root).await;
@@ -353,6 +355,8 @@ async fn ipc_auth_some_means_enabled() {
         server_mode: agent_intercom::mode::ServerMode::Mcp,
 
         workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     assert_eq!(state.ipc_auth_token.as_deref(), Some("test-secret-token"));

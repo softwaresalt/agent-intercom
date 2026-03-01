@@ -146,6 +146,19 @@ pub struct AppState {
     /// The SSE transport reads this at session-creation time to resolve a
     /// `?workspace_id=` query parameter to the configured `channel_id`.
     pub workspace_mappings: Arc<std::sync::RwLock<Vec<crate::config::WorkspaceMapping>>>,
+    /// Shared sender for ACP agent events (absent in MCP mode).
+    ///
+    /// Each ACP session's reader task emits [`crate::driver::AgentEvent`]s through
+    /// this channel. A single consumer task started in `main.rs` dispatches events
+    /// (status updates, clearance requests, heartbeats, terminations) to the
+    /// appropriate Slack handler as the ACP feature grows across phases.
+    pub acp_event_tx: Option<tokio::sync::mpsc::Sender<crate::driver::AgentEvent>>,
+    /// ACP-specific driver for per-session stream registration (absent in MCP mode).
+    ///
+    /// Holds the per-session outbound writer channels used by `handle_acp_session_start`
+    /// to wire the reader/writer tasks. Slack handlers resolve operator decisions
+    /// through the `driver` field (which points to the same underlying `AcpDriver`).
+    pub acp_driver: Option<Arc<crate::driver::acp_driver::AcpDriver>>,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.

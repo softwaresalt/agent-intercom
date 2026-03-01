@@ -5,6 +5,7 @@
 //! protocol (MCP or ACP). All operator actions that affect agent flow
 //! route through this trait.
 
+pub mod acp_driver;
 pub mod mcp_driver;
 
 use std::future::Future;

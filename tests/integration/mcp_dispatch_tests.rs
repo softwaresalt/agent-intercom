@@ -66,6 +66,8 @@ async fn spawn_test_server() -> (String, CancellationToken) {
         server_mode: agent_intercom::mode::ServerMode::Mcp,
 
         workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     let server_ct = ct.clone();

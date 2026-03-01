@@ -67,8 +67,9 @@ async fn test_state() -> Arc<AppState> {
         stall_event_tx: None,
         driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         server_mode: agent_intercom::mode::ServerMode::Mcp,
-
         workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     })
 }
 
@@ -164,8 +165,9 @@ default_nudge_message = "continue"
         stall_event_tx: None,
         driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         server_mode: agent_intercom::mode::ServerMode::Mcp,
-
         workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     // No override, no config channel → None.

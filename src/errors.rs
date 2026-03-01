@@ -72,3 +72,9 @@ impl From<sqlx::Error> for AppError {
         Self::Db(err.to_string())
     }
 }
+
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err.to_string())
+    }
+}

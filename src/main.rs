@@ -17,7 +17,9 @@ use agent_intercom::audit::writer::JsonlAuditWriter;
 use agent_intercom::audit::AuditLogger;
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::config_watcher::ConfigWatcher;
+use agent_intercom::driver::acp_driver::AcpDriver;
 use agent_intercom::driver::mcp_driver::McpDriver;
+use agent_intercom::driver::AgentEvent;
 use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
@@ -151,13 +153,32 @@ async fn run(args: Cli) -> Result<()> {
     let pending_prompts: PendingPrompts = PendingPrompts::default();
     let pending_waits: PendingWaits = PendingWaits::default();
 
-    // Build the MCP driver from clones of the pending maps so that Slack
-    // handlers and MCP tool handlers share the same in-memory channels.
-    let driver = McpDriver::new(
-        Arc::clone(&pending_approvals),
-        Arc::clone(&pending_prompts),
-        Arc::clone(&pending_waits),
-    );
+    // Build the protocol driver and ACP event channel.
+    // In MCP mode: McpDriver wraps the pending oneshot maps.
+    // In ACP mode: AcpDriver routes operator decisions to per-session streams;
+    //              a shared event channel carries inbound AgentEvents from all
+    //              reader tasks to a single consumer task started below.
+    let (driver, acp_driver_opt, acp_event_tx_opt) = if args.mode == ServerMode::Acp {
+        let acp = Arc::new(AcpDriver::new());
+        let (tx, rx) = tokio::sync::mpsc::channel::<AgentEvent>(1024);
+        let consumer_ct = ct.clone();
+        tokio::spawn(async move {
+            run_acp_event_consumer(rx, consumer_ct).await;
+        });
+        // Coerce Arc<AcpDriver> → Arc<dyn AgentDriver> via unsized coercion.
+        let driver_arc: Arc<dyn agent_intercom::driver::AgentDriver> = acp.clone();
+        (driver_arc, Some(acp), Some(tx))
+    } else {
+        // MCP mode: build McpDriver from clones of the pending maps so that
+        // Slack handlers and MCP tool handlers share the same in-memory channels.
+        let mcp = McpDriver::new(
+            Arc::clone(&pending_approvals),
+            Arc::clone(&pending_prompts),
+            Arc::clone(&pending_waits),
+        );
+        let driver_arc: Arc<dyn agent_intercom::driver::AgentDriver> = Arc::new(mcp);
+        (driver_arc, None, None)
+    };
 
     // Start Slack client if configured.
     // NOTE: Socket mode is wired in a second phase (below) after AppState
@@ -239,9 +260,11 @@ async fn run(args: Cli) -> Result<()> {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: Some(stall_tx),
-        driver: Arc::new(driver),
+        driver,
         server_mode: args.mode,
         workspace_mappings,
+        acp_event_tx: acp_event_tx_opt,
+        acp_driver: acp_driver_opt,
     });
 
     // Keep the watchers alive for the server's lifetime — dropping them stops
@@ -302,7 +325,14 @@ async fn run(args: Cli) -> Result<()> {
         args.mode == ServerMode::Mcp && matches!(args.transport, Transport::Sse | Transport::Both);
 
     if args.mode == ServerMode::Acp {
-        info!("ACP mode: MCP transports disabled — ACP stream processor not yet started");
+        info!(
+            "ACP mode: MCP transports disabled — ACP event consumer running, \
+             reader/writer tasks spawned per session via session-start"
+        );
+        // T084: ACP infrastructure is now fully wired. The acp_event_tx and
+        // acp_driver fields are set in AppState. When an operator runs
+        // `/intercom session-start`, handle_acp_session_start in commands.rs
+        // spawns run_reader and run_writer tasks for the new session.
     }
 
     let stdio_handle = if start_stdio {
@@ -611,9 +641,68 @@ async fn check_interrupted_on_startup(state: &AppState) {
     }
 }
 
+/// Minimal ACP event consumer for Phase 9 (T084).
+///
+/// Reads [`AgentEvent`]s from the shared channel and logs them. The full
+/// event-dispatch implementation (posting to Slack, persisting clearances,
+/// etc.) is added in Phase 11 once all ACP user stories are in place.
+///
+/// Exits when the channel closes or `cancel` fires.
+async fn run_acp_event_consumer(
+    mut rx: tokio::sync::mpsc::Receiver<AgentEvent>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    loop {
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                info!("acp event consumer: cancellation received, stopping");
+                break;
+            }
+            event = rx.recv() => {
+                match event {
+                    None => {
+                        info!("acp event consumer: channel closed, stopping");
+                        break;
+                    }
+                    Some(AgentEvent::ClearanceRequested { ref session_id, ref request_id, ref title, .. }) => {
+                        info!(
+                            session_id,
+                            request_id,
+                            title,
+                            "acp event: clearance requested (full handler in Phase 11)"
+                        );
+                    }
+                    Some(AgentEvent::StatusUpdated { ref session_id, ref message }) => {
+                        info!(session_id, message, "acp event: status update");
+                    }
+                    Some(AgentEvent::PromptForwarded { ref session_id, ref prompt_id, ref prompt_text, .. }) => {
+                        info!(
+                            session_id,
+                            prompt_id,
+                            prompt_text,
+                            "acp event: prompt forwarded (full handler in Phase 11)"
+                        );
+                    }
+                    Some(AgentEvent::HeartbeatReceived { ref session_id, .. }) => {
+                        info!(session_id, "acp event: heartbeat received");
+                    }
+                    Some(AgentEvent::SessionTerminated { ref session_id, exit_code, ref reason }) => {
+                        info!(
+                            session_id,
+                            exit_code,
+                            reason,
+                            "acp event: session terminated"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 async fn shutdown_signal() {
     let ctrl_c = tokio::signal::ctrl_c();
-
     #[cfg(unix)]
     {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {

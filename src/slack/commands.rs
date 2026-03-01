@@ -319,6 +319,11 @@ async fn handle_session_start(
 
 /// Start a new ACP session: spawn a headless agent process and record the
 /// session in the database with `protocol_mode = Acp` (T038, FR-025, FR-027).
+// This startup sequence is inherently sequential — each step depends on the
+// previous (validate → count sessions → create DB record → spawn process →
+// register driver → post Slack message). Splitting it artificially would
+// reduce clarity without reducing complexity.
+#[allow(clippy::too_many_lines)]
 async fn handle_acp_session_start(
     prompt: &str,
     user_id: &str,
@@ -377,15 +382,50 @@ async fn handle_acp_session_start(
         }
     };
 
-    // Store the child process handle — the spawner's `kill_on_drop` keeps it
-    // alive as long as the AppState holds the map entry.
-    // stdin/stdout are dropped here; Phase 6 will introduce ACP I/O tasks.
-    let child = conn.child;
-    state
-        .active_children
-        .lock()
-        .await
-        .insert(created.id.clone(), child);
+    // Wire ACP I/O tasks for this session (T084).
+    // Each session gets its own outbound message channel; inbound events are
+    // routed through the shared acp_event_tx stored in AppState.
+    if let (Some(ref acp_driver), Some(ref event_tx)) = (&state.acp_driver, &state.acp_event_tx) {
+        use tokio_util::sync::CancellationToken;
+
+        let (msg_tx, msg_rx) = tokio::sync::mpsc::channel(256);
+        acp_driver.register_session(&created.id, msg_tx).await;
+
+        let session_ct = CancellationToken::new();
+        let reader_event_tx = event_tx.clone();
+        let reader_session_id = created.id.clone();
+        let reader_ct = session_ct.clone();
+        tokio::spawn(crate::acp::reader::run_reader(
+            reader_session_id,
+            conn.stdout,
+            reader_event_tx,
+            reader_ct,
+        ));
+
+        let writer_session_id = created.id.clone();
+        let writer_ct = session_ct.clone();
+        tokio::spawn(crate::acp::writer::run_writer(
+            writer_session_id,
+            conn.stdin,
+            msg_rx,
+            writer_ct,
+        ));
+
+        // Store both the child handle and session cancel token so that
+        // session-stop can cleanly shut down reader/writer tasks.
+        state
+            .active_children
+            .lock()
+            .await
+            .insert(created.id.clone(), conn.child);
+    } else {
+        // ACP driver not configured — store child handle only.
+        state
+            .active_children
+            .lock()
+            .await
+            .insert(created.id.clone(), conn.child);
+    }
 
     // Activate the session.
     let active = repo

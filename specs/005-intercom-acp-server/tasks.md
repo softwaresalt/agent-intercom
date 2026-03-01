@@ -216,25 +216,25 @@
 
 ### Tests (S049–S058)
 
-- [ ] T069 [P] [US7] Write unit test for single NDJSON message parsing in `tests/unit/acp_codec_tests.rs` — covers S049
-- [ ] T070 [P] [US7] Write unit test for batched message parsing in `tests/unit/acp_codec_tests.rs` — covers S050
-- [ ] T071 [P] [US7] Write unit test for partial delivery reassembly in `tests/unit/acp_codec_tests.rs` — covers S051
-- [ ] T072 [P] [US7] Write unit test for malformed JSON handling in `tests/unit/acp_codec_tests.rs` — covers S052
-- [ ] T073 [P] [US7] Write unit test for unknown method skip in `tests/unit/acp_codec_tests.rs` — covers S053
-- [ ] T074 [P] [US7] Write unit test for missing required field handling in `tests/unit/acp_codec_tests.rs` — covers S054
-- [ ] T075 [P] [US7] Write unit test for stream EOF → SessionTerminated in `tests/unit/acp_codec_tests.rs` — covers S055
-- [ ] T076 [P] [US7] Write unit test for outbound clearance response serialization in `tests/unit/acp_codec_tests.rs` — covers S056
-- [ ] T077 [P] [US7] Write boundary test for max line length exceeded in `tests/unit/acp_codec_tests.rs` — covers S057
-- [ ] T078 [P] [US7] Write boundary test for empty line handling in `tests/unit/acp_codec_tests.rs` — covers S058
+- [x] T069 [P] [US7] Write unit test for single NDJSON message parsing in `tests/unit/acp_codec_tests.rs` — covers S049
+- [x] T070 [P] [US7] Write unit test for batched message parsing in `tests/unit/acp_codec_tests.rs` — covers S050
+- [x] T071 [P] [US7] Write unit test for partial delivery reassembly in `tests/unit/acp_codec_tests.rs` — covers S051
+- [x] T072 [P] [US7] Write unit test for malformed JSON handling in `tests/unit/acp_codec_tests.rs` — covers S052
+- [x] T073 [P] [US7] Write unit test for unknown method skip in `tests/unit/acp_codec_tests.rs` — covers S053
+- [x] T074 [P] [US7] Write unit test for missing required field handling in `tests/unit/acp_codec_tests.rs` — covers S054
+- [x] T075 [P] [US7] Write unit test for stream EOF → SessionTerminated in `tests/unit/acp_codec_tests.rs` — covers S055
+- [x] T076 [P] [US7] Write unit test for outbound clearance response serialization in `tests/unit/acp_codec_tests.rs` — covers S056
+- [x] T077 [P] [US7] Write boundary test for max line length exceeded in `tests/unit/acp_codec_tests.rs` — covers S057
+- [x] T078 [P] [US7] Write boundary test for empty line handling in `tests/unit/acp_codec_tests.rs` — covers S058
 
 ### Implementation
 
-- [ ] T079 [US7] Implement NDJSON codec wrapper in `src/acp/codec.rs` using `tokio_util::codec::LinesCodec`
-- [ ] T080 [US7] Implement ACP reader task in `src/acp/reader.rs` — `FramedRead` on `ChildStdout`, parse JSON, emit `AgentEvent` via mpsc channel
-- [ ] T081 [US7] Implement ACP writer task in `src/acp/writer.rs` — receive outbound messages via mpsc, serialize JSON, write to `ChildStdin` via `FramedWrite`
-- [ ] T082 [US7] Implement `AcpDriver` struct in `src/driver/acp_driver.rs` — holds `stream_writers: Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>` for per-session stream routing, with `register_session`/`deregister_session` lifecycle methods
-- [ ] T083 [US7] Implement `AgentDriver` trait for `AcpDriver` in `src/driver/acp_driver.rs` — serialize JSON responses and write to stream
-- [ ] T084 [US7] Wire ACP reader → core event loop in `src/main.rs` ACP startup path — spawn reader task, consume events
+- [x] T079 [US7] Implement NDJSON codec wrapper in `src/acp/codec.rs` using `tokio_util::codec::LinesCodec`
+- [x] T080 [US7] Implement ACP reader task in `src/acp/reader.rs` — `FramedRead` on `ChildStdout`, parse JSON, emit `AgentEvent` via mpsc channel
+- [x] T081 [US7] Implement ACP writer task in `src/acp/writer.rs` — receive outbound messages via mpsc, serialize JSON, write to `ChildStdin` via `FramedWrite`
+- [x] T082 [US7] Implement `AcpDriver` struct in `src/driver/acp_driver.rs` — holds `stream_writers: Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>` for per-session stream routing, with `register_session`/`deregister_session` lifecycle methods
+- [x] T083 [US7] Implement `AgentDriver` trait for `AcpDriver` in `src/driver/acp_driver.rs` — serialize JSON responses and write to stream
+- [x] T084 [US7] Wire ACP reader → core event loop in `src/main.rs` ACP startup path — spawn reader task, consume events
 
 **Checkpoint**: ACP stream reliably reads/writes NDJSON messages; all parsing edge cases handled
 

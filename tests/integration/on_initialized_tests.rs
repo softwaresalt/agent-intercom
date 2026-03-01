@@ -58,8 +58,9 @@ async fn on_initialized_direct_connection_creates_session() {
         stall_event_tx: None,
         driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         server_mode: agent_intercom::mode::ServerMode::Mcp,
-
         workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     // Direct connection: no session_id_override, no channel_id_override.
@@ -237,8 +238,9 @@ async fn server_constructors_correct_overrides() {
         stall_event_tx: None,
         driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         server_mode: agent_intercom::mode::ServerMode::Mcp,
-
         workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     // new() — no overrides.

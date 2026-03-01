@@ -78,10 +78,12 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-tokio-util = { version = "0.7.18", features = ["rt", "codec"] }
-reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 glob = "0.3"
 regex = "1.12.3"
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+tokio-util = { version = "0.7.18", features = ["rt", "codec"] }
 
 [dev-dependencies]
 serial_test = "3"
