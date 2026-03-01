@@ -27,6 +27,8 @@ use crate::orchestrator::{checkpoint_manager, session_manager, spawner};
 use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::db::Database;
 use crate::persistence::session_repo::SessionRepo;
+use crate::slack::blocks;
+use crate::slack::client::SlackMessage;
 use crate::slack::handlers::steer as steer_handler;
 use crate::slack::handlers::task as task_handler;
 
@@ -355,6 +357,33 @@ async fn handle_acp_session_start(
         .update_status(&created.id, SessionStatus::Active)
         .await?;
 
+    // T058 / S036: Post "session started" as the thread root and record ts.
+    // All subsequent messages for this session will be posted as thread replies.
+    if let Some(ref slack) = state.slack {
+        let started_blocks = blocks::session_started_blocks(&active);
+        let msg = SlackMessage {
+            channel: SlackChannelId(channel_id.to_owned()),
+            text: Some(format!(
+                "\u{1f680} ACP session `{}` started",
+                active.id.chars().take(8).collect::<String>()
+            )),
+            blocks: Some(started_blocks),
+            thread_ts: None,
+        };
+        match slack.post_message_direct(msg).await {
+            Ok(ts) => {
+                if let Err(err) = repo.set_thread_ts(&active.id, &ts.0).await {
+                    warn!(%err, session_id = %active.id, "failed to record thread_ts");
+                } else {
+                    info!(session_id = %active.id, thread_ts = %ts.0, "thread_ts recorded");
+                }
+            }
+            Err(err) => {
+                warn!(%err, session_id = %active.id, "failed to post session-started message");
+            }
+        }
+    }
+
     info!(
         session_id = active.id,
         channel_id, user_id, "ACP session started"
@@ -445,6 +474,12 @@ async fn handle_session_clear(
     // to avoid holding the lock guard across an await point.
     let mut child = state.active_children.lock().await.remove(&session.id);
     let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
+
+    // T060 / S094: Post session-ended summary as a threaded reply.
+    if let Some(ref slack) = state.slack {
+        session_manager::notify_session_ended(&terminated, "terminated by operator", slack).await;
+    }
+
     Ok(format!("Session `{}` terminated.", terminated.id))
 }
 

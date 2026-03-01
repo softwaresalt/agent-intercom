@@ -597,6 +597,7 @@ impl ServerHandler for IntercomServer {
     ) -> impl Future<Output = ()> + Send + '_ {
         let state = Arc::clone(&self.state);
         let session_id_override = self.session_id_override.clone();
+        let channel_id_override = self.channel_id_override.clone();
         let is_remote = self.channel_id_override.is_some();
         let session_db_id = Arc::clone(&self.session_db_id);
 
@@ -708,6 +709,55 @@ impl ServerHandler for IntercomServer {
                             }
                             // Spawn a per-session stall detector for direct connections (FR-028).
                             spawn_stall_detector_for_session(&state, &created.id).await;
+
+                            // T058 / S036: For remote direct connections that have a
+                            // channel_id, post the session-started message and record
+                            // the returned Slack ts as the session's thread_ts.
+                            if let (Some(ref ch), Some(slack)) =
+                                (&channel_id_override, state.slack.as_ref())
+                            {
+                                if let Ok(Some(ref session)) =
+                                    session_repo.get_by_id(&created.id).await
+                                {
+                                    let started_blocks =
+                                        crate::slack::blocks::session_started_blocks(session);
+                                    let msg = crate::slack::client::SlackMessage {
+                                        channel: slack_morphism::prelude::SlackChannelId(
+                                            ch.clone(),
+                                        ),
+                                        text: Some(format!(
+                                            "\u{1f680} Session `{}` connected",
+                                            session.id.chars().take(8).collect::<String>()
+                                        )),
+                                        blocks: Some(started_blocks),
+                                        thread_ts: None,
+                                    };
+                                    match slack.post_message_direct(msg).await {
+                                        Ok(ts) => {
+                                            if let Err(err) =
+                                                session_repo.set_thread_ts(&session.id, &ts.0).await
+                                            {
+                                                warn!(%err,
+                                                    session_id = %session.id,
+                                                    "failed to record thread_ts"
+                                                );
+                                            } else {
+                                                info!(
+                                                    session_id = %session.id,
+                                                    thread_ts = %ts.0,
+                                                    "thread_ts recorded for direct connection"
+                                                );
+                                            }
+                                        }
+                                        Err(err) => {
+                                            warn!(%err,
+                                                session_id = %session.id,
+                                                "failed to post session-started message"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Err(err) => {
                             warn!(
@@ -887,6 +937,7 @@ impl Drop for IntercomServer {
         if let Some(id) = self.session_db_id.get().cloned() {
             let db = Arc::clone(&self.state.db);
             let audit_logger = self.state.audit_logger.clone();
+            let slack = self.state.slack.clone();
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
                     let session_repo = SessionRepo::new(db);
@@ -894,8 +945,17 @@ impl Drop for IntercomServer {
                         .set_terminated(&id, SessionStatus::Terminated)
                         .await
                     {
-                        Ok(_) => {
+                        Ok(terminated_session) => {
                             info!(session_id = %id, "session terminated on transport disconnect");
+                            // T060: Post session-ended summary as thread reply.
+                            if let Some(ref s) = slack {
+                                crate::orchestrator::session_manager::notify_session_ended(
+                                    &terminated_session,
+                                    "transport disconnected",
+                                    s,
+                                )
+                                .await;
+                            }
                         }
                         Err(err) => {
                             warn!(

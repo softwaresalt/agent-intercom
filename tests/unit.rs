@@ -26,6 +26,7 @@ mod unit {
     mod prompt_repo_tests;
     mod session_model_tests;
     mod session_repo_tests;
+    mod session_routing_tests;
     mod stall_consumer_tests;
     mod stall_detector_tests;
     mod stall_repo_tests;

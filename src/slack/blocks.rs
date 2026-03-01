@@ -10,6 +10,8 @@ use slack_morphism::prelude::{
     SlackView,
 };
 
+use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
+
 /// Build a severity-formatted section block for log messages.
 #[must_use]
 pub fn severity_section(level: &str, message: &str) -> SlackBlock {
@@ -302,4 +304,71 @@ pub fn instruction_modal(callback_id: &str, title: &str, placeholder: &str) -> S
         .with_callback_id(SlackCallbackId(callback_id.to_owned()))
         .with_submit(SlackBlockPlainTextOnly::from("Submit")),
     )
+}
+
+/// Build the initial "Session started" Block Kit message for a new session.
+///
+/// Posts as a top-level channel message whose Slack timestamp becomes the
+/// session's `thread_ts`.  All subsequent messages for this session are
+/// posted as replies to this thread (S036).
+///
+/// Includes: session ID prefix, protocol mode (MCP/ACP), operational mode,
+/// workspace root, and the session creation timestamp.
+#[must_use]
+pub fn session_started_blocks(session: &Session) -> Vec<SlackBlock> {
+    let short_id: String = session.id.chars().take(8).collect();
+    let protocol = match session.protocol_mode {
+        ProtocolMode::Mcp => "MCP",
+        ProtocolMode::Acp => "ACP",
+    };
+    let mode = match session.mode {
+        SessionMode::Remote => "remote",
+        SessionMode::Local => "local",
+        SessionMode::Hybrid => "hybrid",
+    };
+    let started = session.created_at.format("%Y-%m-%d %H:%M UTC");
+    let text = format!(
+        "\u{1f680} *Session started*\n\
+         *ID:* `{short_id}\u{2026}` | *Protocol:* {protocol} | *Mode:* {mode}\n\
+         *Workspace:* `{workspace}`\n\
+         *Started:* {started}",
+        workspace = session.workspace_root,
+    );
+    vec![text_section(&text)]
+}
+
+/// Build a "Session ended" Block Kit summary message for a thread reply (T060).
+///
+/// Posted as a reply to the session thread when the session transitions to
+/// `Terminated` or `Interrupted`.  Includes session ID prefix, final status,
+/// termination reason, and wall-clock duration.
+#[must_use]
+pub fn session_ended_blocks(session: &Session, reason: &str) -> Vec<SlackBlock> {
+    let short_id: String = session.id.chars().take(8).collect();
+    let status_label = match session.status {
+        SessionStatus::Terminated => "terminated",
+        SessionStatus::Interrupted => "interrupted",
+        _ => "ended",
+    };
+    let duration_text = if let Some(ended_at) = session.terminated_at {
+        let secs = ended_at
+            .signed_duration_since(session.created_at)
+            .num_seconds()
+            .max(0);
+        if secs >= 3600 {
+            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+        } else if secs >= 60 {
+            format!("{}m {}s", secs / 60, secs % 60)
+        } else {
+            format!("{secs}s")
+        }
+    } else {
+        "unknown".to_owned()
+    };
+    let text = format!(
+        "\u{1f3c1} *Session ended* \u{2014} `{short_id}\u{2026}`\n\
+         *Status:* {status_label} | *Reason:* {reason}\n\
+         *Duration:* {duration_text}",
+    );
+    vec![text_section(&text)]
 }

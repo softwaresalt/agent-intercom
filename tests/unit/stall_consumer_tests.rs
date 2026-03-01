@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use agent_intercom::orchestrator::stall_consumer::spawn_stall_event_consumer;
 use agent_intercom::orchestrator::stall_detector::StallEvent;
+use agent_intercom::persistence::db::Database;
 use agent_intercom::slack::client::SlackService;
 
 /// The consumer task exits cleanly when the cancellation token fires
@@ -114,10 +115,12 @@ async fn spawn_returns_join_handle() {
     // This test verifies the function signature returns JoinHandle<()>.
     // We cannot call it without a SlackService, but we can verify the
     // type at compile time.
-    let _: fn(
+    type ConsumerFn = fn(
         mpsc::Receiver<StallEvent>,
         Arc<SlackService>,
         String,
+        Arc<Database>,
         CancellationToken,
-    ) -> tokio::task::JoinHandle<()> = spawn_stall_event_consumer;
+    ) -> tokio::task::JoinHandle<()>;
+    let _: ConsumerFn = spawn_stall_event_consumer;
 }

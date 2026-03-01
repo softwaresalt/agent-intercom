@@ -134,6 +134,13 @@ pub async fn handle(
             .next()
             .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
 
+        // Capture thread_ts early so it can be passed to all outgoing messages
+        // for this session (S037 — subsequent messages use the thread).
+        let session_thread_ts = session
+            .thread_ts
+            .as_deref()
+            .map(|ts| slack_morphism::prelude::SlackTs(ts.to_owned()));
+
         let workspace_root = std::path::PathBuf::from(&session.workspace_root);
 
         // ── Validate file path ───────────────────────────────
@@ -223,10 +230,22 @@ pub async fn handle(
                     channel: channel.clone(),
                     text: Some(format!("\u{1f4cb} Approval Request: {}", input.title)),
                     blocks: Some(message_blocks),
-                    thread_ts: None,
+                    // S037: post inside session thread when thread_ts is set;
+                    // otherwise post at channel root (and this ts becomes the root).
+                    thread_ts: session_thread_ts.clone(),
                 };
                 match slack.post_message_direct(msg).await {
-                    Ok(ts) => Some(ts),
+                    Ok(ts) => {
+                        // S036: if the session had no thread_ts, record this
+                        // approval message as the session's thread root.
+                        if session_thread_ts.is_none() {
+                            if let Err(err) = session_repo.set_thread_ts(&session.id, &ts.0).await {
+                                warn!(%err, session_id = %session.id,
+                                    "failed to record thread_ts from approval message");
+                            }
+                        }
+                        Some(ts)
+                    }
                     Err(err) => {
                         warn!(%err, "failed to post approval message");
                         None
@@ -336,7 +355,7 @@ pub async fn handle(
                                 input.title, timeout_seconds
                             ),
                         )]),
-                        thread_ts: None,
+                        thread_ts: session_thread_ts.clone(),
                     };
                     let _ = slack.enqueue(msg).await;
                 }

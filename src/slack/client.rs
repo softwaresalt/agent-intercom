@@ -457,6 +457,56 @@ impl SlackService {
             .map_err(|err| AppError::Slack(format!("failed to open modal: {err}")))?;
         Ok(())
     }
+
+    /// Post a message directly, returning the Slack timestamp.
+    ///
+    /// Convenience wrapper around [`post_message_direct`] that builds the
+    /// [`SlackMessage`] from discrete arguments.  When `thread_ts` is `Some`,
+    /// the message is posted as a threaded reply (S037).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Slack` if the API call fails.
+    pub async fn post_message(
+        &self,
+        channel: SlackChannelId,
+        text: String,
+        blocks: Option<Vec<SlackBlock>>,
+        thread_ts: Option<&str>,
+    ) -> Result<SlackTs> {
+        let message = SlackMessage {
+            channel,
+            text: Some(text),
+            blocks,
+            thread_ts: thread_ts.map(|ts| SlackTs(ts.to_owned())),
+        };
+        self.post_message_direct(message).await
+    }
+
+    /// Enqueue a message for async delivery, optionally as a thread reply.
+    ///
+    /// Convenience wrapper around [`enqueue`] that builds the [`SlackMessage`]
+    /// from discrete arguments.  When `thread_ts` is `Some`, the message is
+    /// posted as a threaded reply to an existing Slack thread (S037).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Slack` if the message queue is full.
+    pub async fn enqueue_message(
+        &self,
+        channel: SlackChannelId,
+        text: String,
+        blocks: Option<Vec<SlackBlock>>,
+        thread_ts: Option<&str>,
+    ) -> Result<()> {
+        let message = SlackMessage {
+            channel,
+            text: Some(text),
+            blocks,
+            thread_ts: thread_ts.map(|ts| SlackTs(ts.to_owned())),
+        };
+        self.enqueue(message).await
+    }
 }
 
 // ── Reconnection: re-post pending interactive messages (T095) ────────

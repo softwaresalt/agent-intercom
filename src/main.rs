@@ -259,6 +259,7 @@ async fn run(args: Cli) -> Result<()> {
             stall_rx,
             Arc::clone(slack),
             default_channel,
+            Arc::clone(&state.db),
             ct.clone(),
         ))
     } else {

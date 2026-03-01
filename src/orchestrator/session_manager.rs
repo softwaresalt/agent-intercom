@@ -6,11 +6,13 @@
 
 use std::time::Duration;
 
+use slack_morphism::prelude::{SlackChannelId, SlackTs};
 use tokio::process::Child;
 use tracing::{info, info_span, warn};
 
 use crate::models::session::{Session, SessionStatus};
 use crate::persistence::session_repo::SessionRepo;
+use crate::slack::client::{SlackMessage, SlackService};
 use crate::{AppError, Result};
 
 /// Pause a running session.
@@ -148,4 +150,40 @@ pub async fn resolve_session(
     }
 
     Ok(session)
+}
+
+/// Post a "Session ended" summary as a threaded Slack reply (T060 / S094 / S095).
+///
+/// If the session has both a `channel_id` and a `thread_ts`, the summary is
+/// posted as a reply to the session's dedicated Slack thread so the operator
+/// can see the final status in context.  When either field is absent the call
+/// is a silent no-op.
+///
+/// # Arguments
+///
+/// * `session` — The terminated or interrupted session.
+/// * `reason`  — Human-readable reason for the session ending.
+/// * `slack`   — Slack service used to enqueue the message.
+pub async fn notify_session_ended(session: &Session, reason: &str, slack: &SlackService) {
+    let (Some(ref channel_id), Some(ref thread_ts)) = (&session.channel_id, &session.thread_ts)
+    else {
+        return;
+    };
+
+    let ended_blocks = crate::slack::blocks::session_ended_blocks(session, reason);
+    let msg = SlackMessage {
+        channel: SlackChannelId(channel_id.clone()),
+        text: Some(format!(
+            "\u{1f3c1} Session `{}` ended",
+            session.id.chars().take(8).collect::<String>()
+        )),
+        blocks: Some(ended_blocks),
+        thread_ts: Some(SlackTs(thread_ts.clone())),
+    };
+
+    if let Err(err) = slack.enqueue(msg).await {
+        warn!(%err, session_id = %session.id, "failed to post session-ended notification");
+    } else {
+        info!(session_id = %session.id, "posted session-ended summary to thread");
+    }
 }

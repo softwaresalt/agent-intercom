@@ -83,6 +83,19 @@ pub async fn handle(
             .next()
             .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
 
+        // S037: prefer agent-supplied thread_ts; fall back to session's thread_ts
+        // so all broadcast messages land inside the session's Slack thread.
+        let effective_thread_ts = input
+            .thread_ts
+            .as_deref()
+            .map(|ts| SlackTs(ts.to_owned()))
+            .or_else(|| {
+                session
+                    .thread_ts
+                    .as_deref()
+                    .map(|ts| SlackTs(ts.to_owned()))
+            });
+
         // ── Detail level filter (T065) ───────────────────────
         let detail_str = match state.config.slack_detail_level {
             SlackDetailLevel::Minimal => "minimal",
@@ -111,14 +124,13 @@ pub async fn handle(
         let (posted, ts) = if let Some(ref slack) = state.slack {
             if let Some(ref ch) = channel_id {
                 let channel = SlackChannelId(ch.clone());
-                let thread_ts = input.thread_ts.as_ref().map(|ts| SlackTs(ts.clone()));
 
                 let severity_block = blocks::severity_section(&input.level, &input.message);
                 let msg = SlackMessage {
                     channel,
                     text: Some(input.message.clone()),
                     blocks: Some(vec![severity_block]),
-                    thread_ts,
+                    thread_ts: effective_thread_ts,
                 };
 
                 match slack.post_message_direct(msg).await {
