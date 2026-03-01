@@ -143,6 +143,26 @@ status = "git status"
 #
 #   agent-intercom --mode acp
 #
+# ── ACP workspace routing ─────────────────────────────────────────────────────
+#
+# When an operator runs /session-start in a Slack channel, the server looks up
+# the [[workspace]] entry whose channel_id matches that channel and uses the
+# entry's `path` as the working directory for the spawned agent process.
+#
+# If no [[workspace]] entry matches the channel, or if the matching entry has no
+# `path` field, the server falls back to `default_workspace_root`.
+#
+# Recommended: add a `path` field to every [[workspace]] entry used with ACP so
+# each session starts in the correct repository directory:
+#
+#   [[workspace]]
+#   workspace_id = "my-repo"
+#   channel_id   = "C0123456789"
+#   label        = "My Repository"
+#   path         = "/home/user/projects/my-repo"   # ← ACP agent cwd
+#
+# ── ACP credentials ───────────────────────────────────────────────────────────
+#
 # ACP credentials and authorized users are read from mode-prefixed sources:
 #   SLACK_BOT_TOKEN_ACP, SLACK_APP_TOKEN_ACP, SLACK_MEMBER_IDS_ACP
 # Credentials that do not have an _ACP variant fall back to the shared env vars.
