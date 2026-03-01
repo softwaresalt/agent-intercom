@@ -126,9 +126,35 @@ status = "git status"
 # [[workspace]]
 # workspace_id = "my-repo"
 # channel_id   = "C0123456789"
-# label        = "My Repository"
+# label        = "My Repository"      # optional — shown in logs and Slack messages
 #
 # [[workspace]]
 # workspace_id = "api-service"
 # channel_id   = "C9876543210"
 # label        = "API Service"
+
+# ── ACP mode configuration ────────────────────────────────────────────────────
+#
+# ACP (Agent Communication Protocol) mode spawns the agent CLI as a subprocess
+# and communicates via a newline-delimited JSON (NDJSON) stream instead of the
+# MCP HTTP/SSE or stdio transports.  Start the server in ACP mode with:
+#
+#   agent-intercom --mode acp
+#
+# ACP credentials and authorized users are read from mode-prefixed sources:
+#   SLACK_BOT_TOKEN_ACP, SLACK_APP_TOKEN_ACP, SLACK_MEMBER_IDS_ACP
+# Credentials that do not have an _ACP variant fall back to the shared env vars.
+# The OS keychain service for ACP mode is "agent-intercom-acp".
+#
+# Uncomment and adjust the [acp] section to override defaults:
+#
+# [acp]
+# # Maximum number of concurrent ACP sessions.
+# # Requests beyond this limit are rejected with a descriptive error.
+# # Default: 5
+# max_sessions = 5
+#
+# # Seconds to wait for the agent subprocess to emit its ready signal on stdout.
+# # If no ready line arrives within this window the spawner kills the process.
+# # Default: 30
+# startup_timeout_seconds = 30

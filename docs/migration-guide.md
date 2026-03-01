@@ -195,7 +195,65 @@ If your MCP client configuration or agent custom instructions reference old tool
 
 ---
 
-## Rollback
+## `channel_id` to `workspace_id` Migration
+
+Earlier installations used a raw Slack `channel_id` directly in the MCP URL query parameter. The preferred approach is now to define named `[[workspace]]` entries in `config.toml` and use `workspace_id` in the URL. The old `channel_id` parameter continues to work, so this migration is optional but recommended for new setups and multi-workspace environments.
+
+### Why Migrate?
+
+| | `?channel_id=` (old) | `?workspace_id=` (new) |
+|---|---|---|
+| Channel change requires | Editing every workspace's `mcp.json` | Editing only `config.toml` |
+| Hot-reload | No | Yes — new sessions pick up immediately |
+| Human-readable URL | No | Yes |
+| Backward compatible | N/A | Yes — `channel_id` still works as fallback |
+
+### Before
+
+`.vscode/mcp.json` in each workspace contains the raw channel ID:
+
+```jsonc
+{
+  "servers": {
+    "agent-intercom": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?channel_id=C0123456789"
+    }
+  }
+}
+```
+
+### After
+
+**Step 1** — Add a `[[workspace]]` entry to `config.toml` for each workspace:
+
+```toml
+[[workspace]]
+workspace_id = "my-repo"
+channel_id   = "C0123456789"
+label        = "My Repository"
+```
+
+**Step 2** — Update `.vscode/mcp.json` to use `workspace_id`:
+
+```jsonc
+{
+  "servers": {
+    "agent-intercom": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?workspace_id=my-repo"
+    }
+  }
+}
+```
+
+**Step 3** — Reload the VS Code window (`Ctrl+Shift+P` → **Developer: Reload Window**) so the IDE reconnects with the updated URL.
+
+No server restart is required — the `config.toml` watcher picks up new `[[workspace]]` entries for new sessions automatically.
+
+### Resolution Fallback
+
+If an agent connects with `?workspace_id=unknown-id` and no matching mapping exists, the server falls back to the `channel_id` query parameter (if provided). Connections that yield no channel at all are rejected with a descriptive error.
 
 If you need to revert:
 

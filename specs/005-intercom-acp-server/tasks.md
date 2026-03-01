@@ -291,13 +291,13 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T100 [P] Update `config.toml.example` with all new configuration sections (`[[workspace]]`, `[acp]`)
-- [ ] T101 [P] Update `docs/configuration.md` (if exists) with workspace mapping and ACP mode documentation
-- [ ] T102 [P] Add migration guide for `channel_id` → `workspace_id` query parameter transition
-- [ ] T103 Run full regression: `cargo test` — all existing + new tests pass
-- [ ] T104 Run `cargo clippy -- -D warnings` — zero warnings
-- [ ] T105 Run `cargo fmt --all -- --check` — formatting clean
-- [ ] T106 Validate quickstart.md against actual implementation
+- [x] T100 [P] Update `config.toml.example` with all new configuration sections (`[[workspace]]`, `[acp]`)
+- [x] T101 [P] Update `docs/configuration.md` (if exists) with workspace mapping and ACP mode documentation
+- [x] T102 [P] Add migration guide for `channel_id` → `workspace_id` query parameter transition
+- [x] T103 Run full regression: `cargo test` — all existing + new tests pass
+- [x] T104 Run `cargo clippy -- -D warnings` — zero warnings
+- [x] T105 Run `cargo fmt --all -- --check` — formatting clean
+- [x] T106 Validate quickstart.md against actual implementation
 
 ---
 
