@@ -21,6 +21,7 @@ mod unit {
     mod inbox_repo_tests;
     mod mode_routing_tests;
     mod model_tests;
+    mod offline_queue_tests;
     mod path_validation_tests;
     mod policy_evaluator_tests;
     mod policy_tests;

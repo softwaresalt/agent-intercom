@@ -8,6 +8,14 @@
 //! enforces the 1 MiB per-line limit before any heap allocation for JSON
 //! parsing.
 //!
+//! # Reconnect flush
+//!
+//! When an optional [`ReconnectFlushContext`] is supplied, `run_reader` sets
+//! the session's connectivity status to `Online`, delivers any queued steering
+//! messages via the ACP driver, and optionally posts a Slack notification
+//! before entering the stream loop.  This ensures that operator messages sent
+//! while the agent was `Offline` or `Stalled` are not lost.
+//!
 //! # Known inbound methods
 //!
 //! | Method             | Maps to                                        |
@@ -18,17 +26,25 @@
 //! | `heartbeat`        | [`AgentEvent::HeartbeatReceived`]              |
 //! | *(any other)*      | Skipped; logged at `DEBUG`                     |
 
+use std::sync::Arc;
+
 use futures_util::StreamExt;
 use serde::Deserialize;
+use slack_morphism::prelude::{SlackChannelId, SlackTs};
 use tokio::io::AsyncRead;
 use tokio::sync::mpsc;
 use tokio_util::codec::FramedRead;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::acp::codec::AcpCodec;
-use crate::driver::AgentEvent;
+use crate::driver::{AgentDriver, AgentEvent};
 use crate::models::progress::ProgressItem;
+use crate::models::session::ConnectivityStatus;
+use crate::persistence::db::Database;
+use crate::persistence::session_repo::SessionRepo;
+use crate::persistence::steering_repo::SteeringRepo;
+use crate::slack::client::{SlackMessage, SlackService};
 use crate::{AppError, Result};
 
 // ── Inbound message types ─────────────────────────────────────────────────────
@@ -73,6 +89,27 @@ struct PromptForwardParams {
 #[derive(Debug, Deserialize)]
 struct HeartbeatParams {
     progress: Option<Vec<ProgressItem>>,
+}
+
+// ── Reconnect flush context ───────────────────────────────────────────────────
+
+/// Context supplied to [`run_reader`] for flushing queued messages on reconnect.
+///
+/// When provided, the reader sets the session's connectivity status to `Online`
+/// before entering the stream loop, delivers all unconsumed steering messages
+/// via the ACP driver in FIFO order, and optionally notifies the operator in
+/// Slack that the agent is back online.
+pub struct ReconnectFlushContext {
+    /// Database handle for session status updates and steering queue access.
+    pub db: Arc<Database>,
+    /// ACP driver for delivering queued steering messages to the agent.
+    pub driver: Arc<dyn AgentDriver>,
+    /// Optional Slack service for posting the "back online" notification.
+    pub slack: Option<Arc<SlackService>>,
+    /// Slack channel ID for the notification (required when `slack` is `Some`).
+    pub channel_id: Option<String>,
+    /// Thread timestamp for posting the notification as a reply.
+    pub thread_ts: Option<String>,
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -121,6 +158,13 @@ pub fn parse_inbound_line(session_id: &str, line: &str) -> Result<Option<AgentEv
 /// Each decoded line is forwarded to [`parse_inbound_line`]; any resulting
 /// [`AgentEvent`] is sent through `event_tx`.
 ///
+/// When `flush_ctx` is `Some`, the reader first sets the session's connectivity
+/// status to `Online`, flushes any queued steering messages via the ACP driver
+/// (in FIFO order), and optionally posts a Slack notification.
+///
+/// After each successfully parsed line, emits [`AgentEvent::StreamActivity`] so
+/// the stall consumer can reset the inactivity timer (S063).
+///
 /// On clean EOF, sends [`AgentEvent::SessionTerminated`] with
 /// `reason: "stream closed"` before returning.
 ///
@@ -141,10 +185,16 @@ pub async fn run_reader<R>(
     stdout: R,
     event_tx: mpsc::Sender<AgentEvent>,
     cancel: CancellationToken,
+    flush_ctx: Option<ReconnectFlushContext>,
 ) -> Result<()>
 where
     R: AsyncRead + Unpin + Send,
 {
+    // ── Reconnect flush (T089/T090) ───────────────────────────────────────────
+    if let Some(ctx) = flush_ctx {
+        flush_queued_messages(&session_id, &ctx, &event_tx).await;
+    }
+
     let mut framed = FramedRead::new(stdout, AcpCodec::new());
 
     loop {
@@ -189,6 +239,14 @@ where
                     Some(Ok(line)) => {
                         match parse_inbound_line(&session_id, &line) {
                             Ok(Some(event)) => {
+                                // Emit StreamActivity before the main event so the
+                                // stall consumer resets the timer regardless of
+                                // whether the receiver is still listening (S063).
+                                let activity = AgentEvent::StreamActivity {
+                                    session_id: session_id.clone(),
+                                };
+                                let _ = event_tx.send(activity).await;
+
                                 if event_tx.send(event).await.is_err() {
                                     debug!(
                                         session_id,
@@ -219,6 +277,84 @@ where
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Set connectivity to Online, deliver queued messages, and notify Slack.
+///
+/// This is the reconnect flush logic (T089/T090 — S059, S060, S062).
+async fn flush_queued_messages(
+    session_id: &str,
+    ctx: &ReconnectFlushContext,
+    event_tx: &mpsc::Sender<AgentEvent>,
+) {
+    let session_repo = SessionRepo::new(Arc::clone(&ctx.db));
+    let steering_repo = SteeringRepo::new(Arc::clone(&ctx.db));
+
+    // Mark the session as Online so future steering messages are delivered
+    // directly instead of being queued.
+    if let Err(err) = session_repo
+        .set_connectivity_status(session_id, ConnectivityStatus::Online)
+        .await
+    {
+        warn!(session_id, %err, "acp reader: failed to set connectivity Online");
+    }
+
+    // Fetch unconsumed steering messages in FIFO order.
+    let queued = match steering_repo.fetch_unconsumed(session_id).await {
+        Ok(msgs) => msgs,
+        Err(err) => {
+            warn!(session_id, %err, "acp reader: failed to fetch queued messages");
+            return;
+        }
+    };
+
+    if queued.is_empty() {
+        return;
+    }
+
+    let count = queued.len();
+    info!(
+        session_id,
+        count, "acp reader: delivering queued messages on reconnect"
+    );
+
+    // Deliver each queued message via the driver.
+    for msg in &queued {
+        if let Err(err) = ctx.driver.send_prompt(session_id, &msg.message).await {
+            warn!(session_id, %err, message_id = %msg.id,
+                "acp reader: failed to deliver queued message, continuing");
+        }
+        if let Err(err) = steering_repo.mark_consumed(&msg.id).await {
+            warn!(session_id, %err, message_id = %msg.id,
+                "acp reader: failed to mark queued message consumed");
+        }
+        // Emit StreamActivity for each delivered message so the stall detector
+        // knows the session is active during the flush.
+        let _ = event_tx
+            .send(AgentEvent::StreamActivity {
+                session_id: session_id.to_owned(),
+            })
+            .await;
+    }
+
+    // Post "back online" notification to the Slack thread.
+    if let (Some(ref slack), Some(ref channel_id)) = (&ctx.slack, &ctx.channel_id) {
+        let thread_ts = ctx.thread_ts.as_deref().map(|s| SlackTs(s.to_owned()));
+        let text = format!(
+            "\u{1f7e2} Agent back online \u{2014} delivering {count} queued \
+             message{s}",
+            s = if count == 1 { "" } else { "s" }
+        );
+        let slack_msg = SlackMessage {
+            channel: SlackChannelId(channel_id.clone()),
+            text: Some(text),
+            blocks: None,
+            thread_ts,
+        };
+        if let Err(err) = slack.enqueue(slack_msg).await {
+            warn!(session_id, %err, "acp reader: failed to post back-online notification");
+        }
+    }
+}
 
 /// Parse a `clearance/request` envelope into [`AgentEvent::ClearanceRequested`].
 fn parse_clearance_request(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEvent>> {

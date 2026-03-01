@@ -526,6 +526,32 @@ impl SessionRepo {
         row.map(SessionRow::into_session).transpose()
     }
 
+    /// Set the connectivity status of a session.
+    ///
+    /// Used by the ACP reader on connect (`Online`) and by the stall detector
+    /// on inactivity (`Stalled`) to track the agent's reachability state.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn set_connectivity_status(
+        &self,
+        id: &str,
+        status: ConnectivityStatus,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let status_s = connectivity_status_str(status);
+
+        sqlx::query("UPDATE session SET connectivity_status = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(status_s)
+            .bind(&now)
+            .bind(id)
+            .execute(self.db.as_ref())
+            .await?;
+
+        Ok(())
+    }
+
     /// Set the Slack thread timestamp for a session.
     ///
     /// This is a write-once field: subsequent calls are a no-op if `thread_ts`

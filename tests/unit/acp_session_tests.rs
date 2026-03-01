@@ -209,3 +209,76 @@ fn spawned_process_does_not_inherit_slack_tokens() {
         );
     }
 }
+
+// ── T094: crash with pending clearance resolves as timeout ───────────────────
+
+/// S068 — When an ACP session crashes (EOF on stream) while a clearance
+/// request is pending in the database, that request must be resolved as
+/// `interrupted` so the operator is not left waiting for a non-existent
+/// approval button.
+///
+/// This test verifies the pending-clearance resolution logic in isolation,
+/// without requiring the full ACP event consumer to be running.
+#[tokio::test]
+async fn crash_with_pending_clearance_resolves_as_timeout() {
+    use std::sync::Arc;
+
+    use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus};
+    use agent_intercom::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
+    use agent_intercom::persistence::approval_repo::ApprovalRepo;
+    use agent_intercom::persistence::db;
+    use agent_intercom::persistence::session_repo::SessionRepo;
+
+    let pool = Arc::new(db::connect_memory().await.expect("in-memory db"));
+
+    // Create an ACP session.
+    let session_repo = SessionRepo::new(Arc::clone(&pool));
+    let mut session = Session::new(
+        "U_OP".to_owned(),
+        std::env::temp_dir().to_string_lossy().to_string(),
+        Some("build feature".to_owned()),
+        SessionMode::Remote,
+    );
+    session.protocol_mode = ProtocolMode::Acp;
+    let created = session_repo.create(&session).await.expect("create session");
+    session_repo
+        .update_status(&created.id, SessionStatus::Active)
+        .await
+        .expect("activate");
+
+    // Create a pending approval request for this session.
+    let approval_repo = ApprovalRepo::new(Arc::clone(&pool));
+    let approval = ApprovalRequest::new(
+        created.id.clone(),
+        "Update config.toml".to_owned(),
+        None,
+        String::new(),
+        "config.toml".to_owned(),
+        agent_intercom::models::approval::RiskLevel::Low,
+        "sha256:abc123".to_owned(),
+    );
+    let persisted = approval_repo
+        .create(&approval)
+        .await
+        .expect("create approval");
+    assert_eq!(persisted.status, ApprovalStatus::Pending);
+
+    // Simulate crash resolution: mark all pending approvals for the session
+    // as interrupted (what the ACP event consumer does on SessionTerminated).
+    approval_repo
+        .resolve_pending_for_session(&created.id, ApprovalStatus::Interrupted)
+        .await
+        .expect("resolve pending for session");
+
+    // Verify the approval is no longer pending.
+    let updated = approval_repo
+        .get_by_id(&persisted.id)
+        .await
+        .expect("fetch approval")
+        .expect("approval present");
+    assert_eq!(
+        updated.status,
+        ApprovalStatus::Interrupted,
+        "pending clearance must be marked interrupted when agent crashes"
+    );
+}

@@ -47,12 +47,30 @@ Both apps may post to the **same Slack channel** — Slack threads are
 per-bot, so there is no collision. Alternatively, operators may configure
 different channels per app for complete visual separation.
 
+### Credential Resolution (Mode-Prefixed)
+
+`load_credentials(mode)` resolves each credential using a four-step
+fallback chain. The first non-empty value wins:
+
+| Priority | Source | ACP Example | MCP Example |
+|----------|--------|-------------|-------------|
+| 1 | Keyring `agent-intercom-{mode}` | `agent-intercom-acp` / `slack_bot_token` | `agent-intercom` / `slack_bot_token` |
+| 2 | Env var `{VAR}_{MODE}` | `SLACK_BOT_TOKEN_ACP` | `SLACK_BOT_TOKEN` |
+| 3 | Keyring `agent-intercom` (shared) | `agent-intercom` / `slack_bot_token` | *(same as #1)* |
+| 4 | Env var `{VAR}` (shared) | `SLACK_BOT_TOKEN` | *(same as #2)* |
+
+MCP is the default protocol, so its mode suffix is empty — steps 1–2
+are identical to 3–4, preserving full backwards compatibility.
+
+ACP-mode env vars: `SLACK_APP_TOKEN_ACP`, `SLACK_BOT_TOKEN_ACP`,
+`SLACK_TEAM_ID_ACP`, `SLACK_MEMBER_IDS_ACP`.
+
 ## Consequences
 
 ### Positive
 
-- **No code changes required**: the existing `--mode` flag and single-driver
-  architecture work as-is.
+- **Backwards compatible**: existing deployments with un-prefixed env vars
+  continue to work unchanged for MCP mode.
 - **Visual clarity**: different bot names and avatars make MCP vs ACP messages
   immediately distinguishable in Slack.
 - **Independent rate limits**: ACP sessions (potentially many concurrent child
@@ -98,6 +116,8 @@ different channels per app for complete visual separation.
 │ agent-intercom │        │ agent-intercom │
 │ --mode mcp     │        │ --mode acp     │
 │ Bot: MCP App   │        │ Bot: ACP App   │
+│ SLACK_BOT_TOKEN│        │ SLACK_BOT_     │
+│ (shared name)  │        │ TOKEN_ACP      │
 │ Port: 3000     │        │ Port: 3001     │
 │ DB: intercom   │        │ DB: intercom   │
 │   -mcp.db      │        │   -acp.db      │
@@ -107,3 +127,19 @@ different channels per app for complete visual separation.
 Both servers may share the same workspace root directories and policy files
 (`.agentrc/settings.json`). They use separate SQLite databases to avoid
 write contention.
+
+### Example: Running Both Servers
+
+```powershell
+# Terminal 1 — MCP server (uses default/shared env vars)
+$env:SLACK_BOT_TOKEN  = "xoxb-mcp-bot-token"
+$env:SLACK_APP_TOKEN  = "xapp-mcp-app-token"
+$env:SLACK_MEMBER_IDS = "U0123456789"
+agent-intercom --mode mcp --config config-mcp.toml
+
+# Terminal 2 — ACP server (ACP-suffixed env vars take priority)
+$env:SLACK_BOT_TOKEN_ACP  = "xoxb-acp-bot-token"
+$env:SLACK_APP_TOKEN_ACP  = "xapp-acp-app-token"
+$env:SLACK_MEMBER_IDS_ACP = "U0123456789"
+agent-intercom --mode acp --config config-acp.toml
+```

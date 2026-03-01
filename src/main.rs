@@ -126,7 +126,8 @@ async fn run(args: Cli) -> Result<()> {
     }
 
     // Load Slack credentials from keyring / env vars.
-    config.load_credentials().await?;
+    // Mode-prefixed sources are tried first for ACP (ADR-0015).
+    config.load_credentials(args.mode).await?;
 
     // Validate ACP-specific configuration when running in ACP mode.
     if args.mode == ServerMode::Acp {
@@ -157,17 +158,16 @@ async fn run(args: Cli) -> Result<()> {
     // In MCP mode: McpDriver wraps the pending oneshot maps.
     // In ACP mode: AcpDriver routes operator decisions to per-session streams;
     //              a shared event channel carries inbound AgentEvents from all
-    //              reader tasks to a single consumer task started below.
-    let (driver, acp_driver_opt, acp_event_tx_opt) = if args.mode == ServerMode::Acp {
+    //              reader tasks to a single consumer task started after AppState
+    //              is fully constructed so the consumer has access to the full
+    //              state (stall detectors, Slack service, DB).
+    let (driver, acp_driver_opt, acp_event_tx_opt, acp_event_recv) = if args.mode == ServerMode::Acp
+    {
         let acp = Arc::new(AcpDriver::new());
         let (tx, rx) = tokio::sync::mpsc::channel::<AgentEvent>(1024);
-        let consumer_ct = ct.clone();
-        tokio::spawn(async move {
-            run_acp_event_consumer(rx, consumer_ct).await;
-        });
         // Coerce Arc<AcpDriver> → Arc<dyn AgentDriver> via unsized coercion.
         let driver_arc: Arc<dyn agent_intercom::driver::AgentDriver> = acp.clone();
-        (driver_arc, Some(acp), Some(tx))
+        (driver_arc, Some(acp), Some(tx), Some(rx))
     } else {
         // MCP mode: build McpDriver from clones of the pending maps so that
         // Slack handlers and MCP tool handlers share the same in-memory channels.
@@ -177,7 +177,7 @@ async fn run(args: Cli) -> Result<()> {
             Arc::clone(&pending_waits),
         );
         let driver_arc: Arc<dyn agent_intercom::driver::AgentDriver> = Arc::new(mcp);
-        (driver_arc, None, None)
+        (driver_arc, None, None, None)
     };
 
     // Start Slack client if configured.
@@ -272,17 +272,37 @@ async fn run(args: Cli) -> Result<()> {
     let _policy_watcher = policy_watcher;
     let _config_watcher = config_watcher;
 
+    // ── Spawn ACP event consumer (T099) ────────────────────
+    // Spawned after AppState is built so the consumer has access to the full
+    // state: stall detectors (for StreamActivity), Slack service (for crash
+    // notifications), and the database (for pending clearance resolution).
+    if let Some(rx) = acp_event_recv {
+        let consumer_ct = ct.clone();
+        let consumer_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            run_acp_event_consumer(rx, consumer_ct, consumer_state).await;
+        });
+        info!("acp event consumer started");
+    }
+
     // ── Check for interrupted sessions from prior crash (T082) ──
     check_interrupted_on_startup(&state).await;
 
     // ── Spawn stall event consumer ──────────────────────
     let _stall_consumer_handle = if let Some(ref slack) = state.slack {
         let default_channel = state.config.slack.channel_id.clone();
+        // T097: Pass the driver so the consumer can deliver ACP nudges on-stream.
+        let stall_driver: Option<Arc<dyn agent_intercom::driver::AgentDriver>> =
+            state.acp_driver.as_ref().map(|d| {
+                let drv: Arc<dyn agent_intercom::driver::AgentDriver> = d.clone();
+                drv
+            });
         Some(stall_consumer::spawn_stall_event_consumer(
             stall_rx,
             Arc::clone(slack),
             default_channel,
             Arc::clone(&state.db),
+            stall_driver,
             ct.clone(),
         ))
     } else {
@@ -641,17 +661,25 @@ async fn check_interrupted_on_startup(state: &AppState) {
     }
 }
 
-/// Minimal ACP event consumer for Phase 9 (T084).
+/// ACP event consumer — dispatches [`AgentEvent`]s from all reader tasks.
 ///
-/// Reads [`AgentEvent`]s from the shared channel and logs them. The full
-/// event-dispatch implementation (posting to Slack, persisting clearances,
-/// etc.) is added in Phase 11 once all ACP user stories are in place.
+/// Reads events from the shared channel and:
+/// - [`StreamActivity`]: resets the per-session stall detector timer (S063).
+/// - [`SessionTerminated`]: resolves any pending clearance requests as
+///   `Interrupted` (S068) and optionally notifies the operator on Slack.
+/// - All other variants: logged at INFO for observability.
 ///
 /// Exits when the channel closes or `cancel` fires.
 async fn run_acp_event_consumer(
     mut rx: tokio::sync::mpsc::Receiver<AgentEvent>,
     cancel: tokio_util::sync::CancellationToken,
+    state: Arc<AppState>,
 ) {
+    use agent_intercom::models::approval::ApprovalStatus;
+    use agent_intercom::persistence::approval_repo::ApprovalRepo;
+    use agent_intercom::slack::client::SlackMessage;
+    use slack_morphism::prelude::SlackChannelId;
+
     loop {
         tokio::select! {
             biased;
@@ -665,12 +693,21 @@ async fn run_acp_event_consumer(
                         info!("acp event consumer: channel closed, stopping");
                         break;
                     }
+                    Some(AgentEvent::StreamActivity { ref session_id }) => {
+                        // Reset stall detector timer on any stream activity (S063).
+                        if let Some(ref detectors) = state.stall_detectors {
+                            let map = detectors.lock().await;
+                            if let Some(handle) = map.get(session_id) {
+                                handle.reset();
+                            }
+                        }
+                    }
                     Some(AgentEvent::ClearanceRequested { ref session_id, ref request_id, ref title, .. }) => {
                         info!(
                             session_id,
                             request_id,
                             title,
-                            "acp event: clearance requested (full handler in Phase 11)"
+                            "acp event: clearance requested"
                         );
                     }
                     Some(AgentEvent::StatusUpdated { ref session_id, ref message }) => {
@@ -681,7 +718,7 @@ async fn run_acp_event_consumer(
                             session_id,
                             prompt_id,
                             prompt_text,
-                            "acp event: prompt forwarded (full handler in Phase 11)"
+                            "acp event: prompt forwarded"
                         );
                     }
                     Some(AgentEvent::HeartbeatReceived { ref session_id, .. }) => {
@@ -692,8 +729,40 @@ async fn run_acp_event_consumer(
                             session_id,
                             exit_code,
                             reason,
-                            "acp event: session terminated"
+                            "acp event: session terminated — resolving pending clearances"
                         );
+
+                        // S068: Resolve any pending clearance requests as Interrupted
+                        // so the operator is not left waiting for buttons that will
+                        // never be clicked.
+                        let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+                        if let Err(err) = approval_repo
+                            .resolve_pending_for_session(session_id, ApprovalStatus::Interrupted)
+                            .await
+                        {
+                            warn!(%err, session_id, "failed to resolve pending clearances on termination");
+                        }
+
+                        // Notify the operator via Slack (when available).
+                        if let Some(ref slack) = state.slack {
+                            let ch = state.config.slack.channel_id.clone();
+                            if !ch.is_empty() {
+                                let text = format!(
+                                    "\u{1f534} ACP session `{session_id}` terminated \
+                                     (reason: {reason}). Any pending clearances have been \
+                                     cancelled."
+                                );
+                                let msg = SlackMessage {
+                                    channel: SlackChannelId(ch),
+                                    text: Some(text),
+                                    blocks: None,
+                                    thread_ts: None,
+                                };
+                                if let Err(err) = slack.enqueue(msg).await {
+                                    warn!(%err, session_id, "failed to post termination notification");
+                                }
+                            }
+                        }
                     }
                 }
             }

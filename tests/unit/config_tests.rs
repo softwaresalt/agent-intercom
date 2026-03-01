@@ -243,9 +243,10 @@ async fn missing_authorized_user_ids_env_var_fails() {
 
     unsafe {
         std::env::remove_var("SLACK_MEMBER_IDS");
+        std::env::remove_var("SLACK_MEMBER_IDS_ACP");
     }
 
-    let result = config.load_authorized_users();
+    let result = config.load_authorized_users(agent_intercom::mode::ServerMode::Mcp);
     assert!(
         result.is_err(),
         "load_authorized_users should fail when env var is absent"
@@ -296,7 +297,7 @@ async fn keychain_service_constant_is_agent_intercom() {
     }
 
     let err = config
-        .load_credentials()
+        .load_credentials(agent_intercom::mode::ServerMode::Mcp)
         .await
         .expect_err("should fail when no credentials");
     let msg = format!("{err}");

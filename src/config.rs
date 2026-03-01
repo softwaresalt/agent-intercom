@@ -7,8 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
+use crate::mode::ServerMode;
 use crate::{AppError, Result};
 
 /// A single workspace-to-channel mapping entry configured via `[[workspace]]`.
@@ -351,31 +351,39 @@ impl GlobalConfig {
     /// Load Slack credentials from OS keychain with env-var fallback, and load
     /// authorized user IDs from `SLACK_MEMBER_IDS`.
     ///
-    /// Tries the `agent-intercom` keyring service first for Slack tokens,
-    /// then falls back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment
-    /// variables. `SLACK_TEAM_ID` is optional (FR-041) and will not cause an
-    /// error if absent.
+    /// When `mode` is [`ServerMode::Acp`], mode-prefixed sources are tried
+    /// first (keychain service `agent-intercom-acp`, env vars with `_ACP`
+    /// suffix) before falling back to the shared names. This allows two
+    /// server instances (one MCP, one ACP) to run on the same machine with
+    /// independent Slack app credentials. See ADR-0015.
     ///
-    /// Authorized user IDs are always read from `SLACK_MEMBER_IDS`
-    /// (comma-separated Slack user IDs, e.g. `U0123456789,U9876543210`).
+    /// Resolution order per credential:
+    /// 1. Keychain `agent-intercom-{mode}` / `{key}`
+    /// 2. Env var `{ENV_VAR}_{MODE}`
+    /// 3. Keychain `agent-intercom` / `{key}` (shared fallback)
+    /// 4. Env var `{ENV_VAR}` (shared fallback)
     ///
     /// # Errors
     ///
     /// Returns `AppError::Config` if neither keychain nor env vars provide
     /// the required Slack tokens, or if `SLACK_MEMBER_IDS` is
     /// absent or empty.
-    pub async fn load_credentials(&mut self) -> Result<()> {
-        let _span = tracing::info_span!("load_credentials").entered();
-        self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
-        self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
+    pub async fn load_credentials(&mut self, mode: ServerMode) -> Result<()> {
+        let _span = tracing::info_span!("load_credentials", ?mode).entered();
+        self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN", mode).await?;
+        self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN", mode).await?;
         // SLACK_TEAM_ID is optional per FR-041 — absence is not an error.
-        self.slack.team_id = load_optional_credential("slack_team_id", "SLACK_TEAM_ID").await;
-        self.load_authorized_users()?;
+        self.slack.team_id = load_optional_credential("slack_team_id", "SLACK_TEAM_ID", mode).await;
+        self.load_authorized_users(mode)?;
         Ok(())
     }
 
     /// Load authorized Slack user IDs from the `SLACK_MEMBER_IDS`
-    /// environment variable.
+    /// environment variable, with mode-prefixed fallback.
+    ///
+    /// Resolution order:
+    /// 1. `SLACK_MEMBER_IDS_{MODE}` (e.g. `SLACK_MEMBER_IDS_ACP`)
+    /// 2. `SLACK_MEMBER_IDS` (shared fallback)
     ///
     /// The variable must contain a comma-separated list of Slack user IDs
     /// (e.g., `U0123456789,U9876543210`). Whitespace around each entry is
@@ -383,8 +391,8 @@ impl GlobalConfig {
     ///
     /// # Errors
     ///
-    /// Returns `AppError::Config` if the variable is absent, empty, or
-    /// resolves to an empty list after trimming.
+    /// Returns `AppError::Config` if both variables are absent, empty, or
+    /// resolve to an empty list after trimming.
     ///
     /// # Note
     ///
@@ -392,19 +400,27 @@ impl GlobalConfig {
     /// test crate.  It is an internal implementation detail of
     /// [`load_credentials`] and is not part of the public API contract.
     #[doc(hidden)]
-    pub fn load_authorized_users(&mut self) -> Result<()> {
-        let raw = env::var("SLACK_MEMBER_IDS").unwrap_or_default();
+    pub fn load_authorized_users(&mut self, mode: ServerMode) -> Result<()> {
+        let mode_suffix = mode_env_suffix(mode);
+        let mode_env = format!("SLACK_MEMBER_IDS{mode_suffix}");
+
+        // Try mode-prefixed variable first, then shared fallback.
+        let raw = env::var(&mode_env)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .or_else(|| env::var("SLACK_MEMBER_IDS").ok().filter(|v| !v.is_empty()))
+            .unwrap_or_default();
+
         let ids: Vec<String> = raw
             .split(',')
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
             .collect();
         if ids.is_empty() {
-            return Err(AppError::Config(
-                "no authorized user IDs found: set SLACK_MEMBER_IDS to a \
+            return Err(AppError::Config(format!(
+                "no authorized user IDs found: set {mode_env} or SLACK_MEMBER_IDS to a \
                  comma-separated list of Slack user IDs (e.g. U0123456789,U9876543210)"
-                    .into(),
-            ));
+            )));
         }
         self.authorized_user_ids = ids;
         Ok(())
@@ -555,68 +571,136 @@ impl GlobalConfig {
     }
 }
 
-/// Keychain service identifier used for credential storage.
+/// Keychain service identifier used for credential storage (shared/default).
 const KEYCHAIN_SERVICE: &str = "agent-intercom";
 
-/// Load a single credential from OS keychain with env-var fallback.
+/// Return the uppercase env-var suffix for a given server mode.
 ///
-/// Resolution order:
-/// 1. OS keychain service `agent-intercom`, key `{keyring_key}`
-/// 2. Environment variable `{env_key}`
+/// MCP is the default protocol, so it uses no suffix (empty string) for
+/// backwards compatibility. ACP mode uses `_ACP`.
+fn mode_env_suffix(mode: ServerMode) -> &'static str {
+    match mode {
+        ServerMode::Mcp => "",
+        ServerMode::Acp => "_ACP",
+    }
+}
+
+/// Return the keychain service name scoped to a server mode.
 ///
-/// Empty values from either source are treated as absent.
+/// MCP uses the shared service (`agent-intercom`), ACP uses
+/// `agent-intercom-acp`.
+fn mode_keychain_service(mode: ServerMode) -> &'static str {
+    match mode {
+        ServerMode::Mcp => KEYCHAIN_SERVICE,
+        ServerMode::Acp => "agent-intercom-acp",
+    }
+}
+
+/// Try a single keychain lookup and return `Ok(value)` on success.
+async fn try_keyring(service: &str, key: &str) -> std::result::Result<String, ()> {
+    let service = service.to_owned();
+    let key = key.to_owned();
+    let result = tokio::task::spawn_blocking(move || {
+        keyring::Entry::new(&service, &key).and_then(|entry| entry.get_password())
+    })
+    .await
+    .map_err(|_| ())?;
+    match result {
+        Ok(value) if !value.is_empty() => Ok(value),
+        _ => Err(()),
+    }
+}
+
+/// Load a single credential using mode-prefixed resolution with fallback.
+///
+/// Resolution order (first non-empty wins):
+/// 1. Keychain `agent-intercom-{mode}` / `{keyring_key}`
+/// 2. Env var `{env_key}_{MODE}`
+/// 3. Keychain `agent-intercom` / `{keyring_key}` (shared)
+/// 4. Env var `{env_key}` (shared)
+///
+/// For MCP mode (the default), steps 1–2 are identical to 3–4 because the
+/// mode suffix is empty, so the function behaves exactly as before.
 ///
 /// # Errors
 ///
-/// Returns `AppError::Config` with a message naming both the keychain
-/// service and the environment variable so the operator knows exactly
-/// which sources were checked.
-async fn load_credential(keyring_key: &str, env_key: &str) -> Result<String> {
-    let key = keyring_key.to_owned();
-    let _span = tracing::info_span!("load_credential", key = keyring_key, env = env_key).entered();
+/// Returns `AppError::Config` with a message naming all checked sources.
+async fn load_credential(keyring_key: &str, env_key: &str, mode: ServerMode) -> Result<String> {
+    let _span =
+        tracing::info_span!("load_credential", key = keyring_key, env = env_key, ?mode,).entered();
 
-    // Try OS keychain first via spawn_blocking (keyring is synchronous I/O).
-    let keychain_result = tokio::task::spawn_blocking(move || {
-        keyring::Entry::new(KEYCHAIN_SERVICE, &key).and_then(|entry| entry.get_password())
-    })
-    .await
-    .map_err(|err| AppError::Config(format!("keychain task panicked: {err}")))?;
+    let mode_service = mode_keychain_service(mode);
+    let mode_suffix = mode_env_suffix(mode);
+    let mode_env = format!("{env_key}{mode_suffix}");
 
-    match keychain_result {
-        Ok(value) if !value.is_empty() => {
-            tracing::info!(key = keyring_key, source = "keychain", "credential loaded");
-            return Ok(value);
-        }
-        Ok(_) => {
-            warn!(key = keyring_key, "keychain entry is empty, trying env var");
-        }
-        Err(err) => {
-            warn!(
+    // 1. Mode-specific keychain.
+    if let Ok(value) = try_keyring(mode_service, keyring_key).await {
+        tracing::info!(
+            key = keyring_key,
+            source = "keychain",
+            service = mode_service,
+            "credential loaded"
+        );
+        return Ok(value);
+    }
+
+    // 2. Mode-specific env var.
+    if let Ok(value) = env::var(&mode_env) {
+        if !value.is_empty() {
+            tracing::info!(
                 key = keyring_key,
-                ?err,
-                "keychain lookup failed, trying env var"
+                source = "env",
+                var = mode_env.as_str(),
+                "credential loaded"
             );
+            return Ok(value);
         }
     }
 
-    // Fallback to environment variable (empty value treated as absent).
-    match env::var(env_key) {
-        Ok(value) if !value.is_empty() => {
-            tracing::info!(key = keyring_key, source = "env", "credential loaded");
-            Ok(value)
+    // 3–4: Only needed when mode ≠ Mcp (MCP has no suffix, so 1–2 already
+    //       checked the shared names).
+    if mode != ServerMode::Mcp {
+        if let Ok(value) = try_keyring(KEYCHAIN_SERVICE, keyring_key).await {
+            tracing::info!(
+                key = keyring_key,
+                source = "keychain",
+                service = KEYCHAIN_SERVICE,
+                "credential loaded (shared fallback)"
+            );
+            return Ok(value);
         }
-        _ => Err(AppError::Config(format!(
+        if let Ok(value) = env::var(env_key) {
+            if !value.is_empty() {
+                tracing::info!(
+                    key = keyring_key,
+                    source = "env",
+                    var = env_key,
+                    "credential loaded (shared fallback)"
+                );
+                return Ok(value);
+            }
+        }
+    }
+
+    if mode == ServerMode::Mcp {
+        Err(AppError::Config(format!(
             "credential `{keyring_key}` not found: checked keychain service \
              `{KEYCHAIN_SERVICE}` and environment variable `{env_key}`"
-        ))),
+        )))
+    } else {
+        Err(AppError::Config(format!(
+            "credential `{keyring_key}` not found: checked keychain services \
+             `{mode_service}` and `{KEYCHAIN_SERVICE}`, and environment \
+             variables `{mode_env}` and `{env_key}`"
+        )))
     }
 }
 
 /// Load an optional credential — returns an empty string if absent.
 ///
 /// Uses the same resolution order as [`load_credential`] but never fails.
-async fn load_optional_credential(keyring_key: &str, env_key: &str) -> String {
-    if let Ok(value) = load_credential(keyring_key, env_key).await {
+async fn load_optional_credential(keyring_key: &str, env_key: &str, mode: ServerMode) -> String {
+    if let Ok(value) = load_credential(keyring_key, env_key, mode).await {
         value
     } else {
         tracing::info!(
