@@ -16,7 +16,9 @@ use tracing::{info, warn};
 use crate::mcp::handler::AppState;
 use crate::models::prompt::PromptDecision;
 use crate::persistence::prompt_repo::PromptRepo;
+use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
+use crate::slack::handlers::check_session_ownership;
 
 /// Process a single prompt button action from Slack.
 ///
@@ -60,6 +62,27 @@ pub async fn handle_prompt_action(
             prompt_id, "unauthorised user attempted prompt action"
         );
         return Err("user not authorised for prompt actions".into());
+    }
+
+    // ── T068c / FR-031: Verify session ownership ─────────
+    // Look up the prompt record to find its session, then confirm the
+    // acting user is the session owner.
+    {
+        let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+        if let Ok(Some(record)) = prompt_repo.get_by_id(prompt_id).await {
+            let session_repo = SessionRepo::new(Arc::clone(&state.db));
+            if let Ok(Some(session)) = session_repo.get_by_id(&record.session_id).await {
+                if let Err(err) = check_session_ownership(&session, user_id) {
+                    warn!(
+                        user_id,
+                        prompt_id,
+                        owner = %session.owner_user_id,
+                        "prompt action rejected: non-owner attempt (FR-031)"
+                    );
+                    return Err(err.to_string());
+                }
+            }
+        }
     }
 
     // ── Determine decision from action_id ────────────────

@@ -1,13 +1,23 @@
-//! Unit tests for session Slack thread routing (T052, T053, T055).
+//! Unit tests for session Slack thread routing (T052, T053, T055) and
+//! multi-session channel routing (T061–T063, T068b).
 //!
-//! Covers S036 (`thread_ts` recorded on first message), S037/S038 (subsequent
-//! messages use `thread_ts`), and S042 (`thread_ts` immutability once set).
+//! Covers:
+//! - S036 (`thread_ts` recorded on first message)
+//! - S037/S038 (subsequent messages use `thread_ts`)
+//! - S042 (`thread_ts` immutability once set)
+//! - S043 (`find_active_by_channel` returns correct session)
+//! - S045 (no active session in channel → empty result)
+//! - S046 (`find_by_channel_and_thread` disambiguates multiple sessions)
+//! - S047 (non-existent `thread_ts` → None)
+//! - S076 / FR-031 (non-owner action rejected by `check_session_ownership`)
 
 use std::sync::Arc;
 
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 use agent_intercom::persistence::{db, session_repo::SessionRepo};
 use agent_intercom::slack::blocks;
+use agent_intercom::slack::handlers::check_session_ownership;
+use agent_intercom::AppError;
 use slack_morphism::prelude::{SlackChannelId, SlackTs};
 
 use agent_intercom::slack::client::SlackMessage;
@@ -197,5 +207,205 @@ fn session_ended_blocks_contains_expected_content() {
     assert!(
         json.contains("terminated by operator"),
         "session_ended_blocks must include the reason"
+    );
+}
+
+// ── T061 / S043 ───────────────────────────────────────────────────────────────
+
+/// `find_active_by_channel` returns the active session in the given channel (S043).
+#[tokio::test]
+async fn session_lookup_by_channel_returns_active_session() {
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&database));
+
+    let mut session = Session::new(
+        "U_OWNER".into(),
+        "/workspace/channel-test".into(),
+        None,
+        SessionMode::Remote,
+    );
+    session.channel_id = Some("C_ROUTED".into());
+    let created = repo.create(&session).await.expect("create");
+    repo.update_status(&created.id, SessionStatus::Active)
+        .await
+        .expect("activate");
+
+    let results = repo
+        .find_active_by_channel("C_ROUTED")
+        .await
+        .expect("find_active_by_channel");
+
+    assert!(
+        !results.is_empty(),
+        "find_active_by_channel must return the active session (S043)"
+    );
+    assert_eq!(
+        results[0].id, created.id,
+        "returned session must match the created session"
+    );
+}
+
+// ── T062 / S045 ───────────────────────────────────────────────────────────────
+
+/// `find_active_by_channel` returns an empty vec when no session exists in the
+/// channel, so callers can surface a "no active session in this channel" message
+/// (S045).
+#[tokio::test]
+async fn session_lookup_by_channel_returns_none_when_no_active_session() {
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&database));
+
+    // Create a session in a different channel — should not appear in "C_EMPTY".
+    let mut other = Session::new(
+        "U_OWNER".into(),
+        "/workspace/other".into(),
+        None,
+        SessionMode::Remote,
+    );
+    other.channel_id = Some("C_OTHER".into());
+    let created = repo.create(&other).await.expect("create other");
+    repo.update_status(&created.id, SessionStatus::Active)
+        .await
+        .expect("activate other");
+
+    let results = repo
+        .find_active_by_channel("C_EMPTY")
+        .await
+        .expect("find_active_by_channel");
+
+    assert!(
+        results.is_empty(),
+        "channel with no sessions must return empty vec (S045)"
+    );
+}
+
+// ── T063 / S046 ───────────────────────────────────────────────────────────────
+
+/// `find_by_channel_and_thread` returns the correct session when multiple
+/// sessions share a channel but have different `thread_ts` values (S046).
+#[tokio::test]
+async fn thread_ts_disambiguates_multiple_sessions_in_channel() {
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&database));
+
+    let ts_a = "1700010000.000001";
+    let ts_b = "1700020000.000002";
+
+    // Session A — channel C_SHARED, thread ts_a.
+    let mut session_a = Session::new(
+        "U_OWNER_A".into(),
+        "/workspace/a".into(),
+        None,
+        SessionMode::Remote,
+    );
+    session_a.channel_id = Some("C_SHARED".into());
+    let created_a = repo.create(&session_a).await.expect("create A");
+    repo.update_status(&created_a.id, SessionStatus::Active)
+        .await
+        .expect("activate A");
+    repo.set_thread_ts(&created_a.id, ts_a)
+        .await
+        .expect("set thread ts A");
+
+    // Session B — same channel, different thread ts_b.
+    let mut session_b = Session::new(
+        "U_OWNER_B".into(),
+        "/workspace/b".into(),
+        None,
+        SessionMode::Remote,
+    );
+    session_b.channel_id = Some("C_SHARED".into());
+    let created_b = repo.create(&session_b).await.expect("create B");
+    repo.update_status(&created_b.id, SessionStatus::Active)
+        .await
+        .expect("activate B");
+    repo.set_thread_ts(&created_b.id, ts_b)
+        .await
+        .expect("set thread ts B");
+
+    // Looking up by ts_a must return session A.
+    let found_a = repo
+        .find_by_channel_and_thread("C_SHARED", ts_a)
+        .await
+        .expect("find A")
+        .expect("must find session A");
+    assert_eq!(
+        found_a.id, created_a.id,
+        "find_by_channel_and_thread must disambiguate by thread_ts (S046)"
+    );
+
+    // Looking up by ts_b must return session B.
+    let found_b = repo
+        .find_by_channel_and_thread("C_SHARED", ts_b)
+        .await
+        .expect("find B")
+        .expect("must find session B");
+    assert_eq!(
+        found_b.id, created_b.id,
+        "find_by_channel_and_thread must return session B for ts_b"
+    );
+}
+
+// ── T063 / S047 ───────────────────────────────────────────────────────────────
+
+/// `find_by_channel_and_thread` returns `None` when `thread_ts` does not exist
+/// in the channel (S047).
+#[tokio::test]
+async fn thread_ts_returns_none_when_thread_not_found() {
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&database));
+
+    let not_found = repo
+        .find_by_channel_and_thread("C_ANY", "1700099999.000000")
+        .await
+        .expect("find_by_channel_and_thread must not error");
+
+    assert!(
+        not_found.is_none(),
+        "non-existent thread_ts must return None (S047)"
+    );
+}
+
+// ── T068b / S076 ──────────────────────────────────────────────────────────────
+
+/// `check_session_ownership` returns `Unauthorized` when the acting user is not
+/// the session owner (S076 / FR-031).
+#[test]
+fn non_owner_action_is_rejected() {
+    let session = Session::new(
+        "U_OWNER".into(),
+        "/workspace/owned".into(),
+        None,
+        SessionMode::Remote,
+    );
+
+    // A different user must be rejected.
+    let result = check_session_ownership(&session, "U_OTHER");
+    assert!(
+        matches!(result, Err(AppError::Unauthorized(_))),
+        "non-owner must receive Unauthorized error (S076 / FR-031)"
+    );
+
+    // The actual owner must be accepted.
+    let ok = check_session_ownership(&session, "U_OWNER");
+    assert!(ok.is_ok(), "session owner must pass the ownership check");
+}
+
+/// `check_session_ownership` skips the check when `owner_user_id` is empty
+/// (MCP sessions without a designated operator).
+#[test]
+fn empty_owner_skips_ownership_check() {
+    let session = Session::new(
+        String::new(), // empty owner — MCP session placeholder
+        "/workspace/mcp".into(),
+        None,
+        SessionMode::Remote,
+    );
+
+    // Any user must be accepted when there is no designated owner.
+    let result = check_session_ownership(&session, "U_ANYONE");
+    assert!(
+        result.is_ok(),
+        "empty owner_user_id must skip the ownership check"
     );
 }

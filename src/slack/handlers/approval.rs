@@ -17,8 +17,9 @@ use crate::audit::{AuditEntry, AuditEventType};
 use crate::mcp::handler::{AppState, ApprovalResponse};
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
+use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
-use crate::slack::handlers::command_approve;
+use crate::slack::handlers::{check_session_ownership, command_approve};
 
 /// Process a single approval button action from Slack.
 ///
@@ -148,6 +149,28 @@ pub async fn handle_approval_action(
 
             info!(request_id, approved, user_id, "command approval resolved");
             return Ok(());
+        }
+    }
+
+    // ── T068c / FR-031: Verify session ownership ─────────
+    // Look up the approval record to find its session, then confirm the
+    // acting user is the session owner. Command approvals (handled above)
+    // have no DB record and are therefore exempt from this check.
+    {
+        let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+        if let Ok(Some(record)) = approval_repo.get_by_id(request_id).await {
+            let session_repo = SessionRepo::new(Arc::clone(&state.db));
+            if let Ok(Some(session)) = session_repo.get_by_id(&record.session_id).await {
+                if let Err(err) = check_session_ownership(&session, user_id) {
+                    warn!(
+                        user_id,
+                        request_id,
+                        owner = %session.owner_user_id,
+                        "approval action rejected: non-owner attempt (FR-031)"
+                    );
+                    return Err(err.to_string());
+                }
+            }
         }
     }
 

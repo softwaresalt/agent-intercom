@@ -1,14 +1,18 @@
-//! Integration tests for workspace-to-channel routing (Phase 6, T044).
+//! Integration tests for workspace-to-channel routing (Phase 6, T044)
+//! and multi-session channel routing (Phase 8, T064).
 //!
 //! Covers:
 //! - S034: Config hot-reload updates workspace mappings for new connections
 //! - S035: Concurrent sessions in different workspaces resolve independently
+//! - S048: Three sessions in three channels each route to the correct session
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use agent_intercom::config::{GlobalConfig, WorkspaceMapping};
 use agent_intercom::config_watcher::ConfigWatcher;
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::persistence::{db, session_repo::SessionRepo};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -168,4 +172,76 @@ fn workspace_resolution_is_independent() {
         config.resolve_channel_id(Some("gamma"), Some("C_IGNORED")),
         None
     );
+}
+
+// ── T064 / S048 ───────────────────────────────────────────────────────────────
+
+/// Three concurrent sessions in three different channels each route to the
+/// correct session when `find_active_by_channel` is called for each channel
+/// (S048 — independent multi-session channel routing).
+#[tokio::test]
+async fn three_sessions_in_three_channels_route_correctly() {
+    let database = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&database));
+
+    // ── Create three sessions, each bound to a distinct channel ──────────
+    let channels = ["C_ALPHA", "C_BETA", "C_GAMMA"];
+    let mut session_ids = Vec::with_capacity(3);
+
+    for (i, &ch) in channels.iter().enumerate() {
+        let mut session = Session::new(
+            format!("U_OWNER_{i}"),
+            format!("/workspace/s{i}"),
+            None,
+            SessionMode::Remote,
+        );
+        session.channel_id = Some(ch.to_owned());
+        let created = repo.create(&session).await.expect("create");
+        repo.update_status(&created.id, SessionStatus::Active)
+            .await
+            .expect("activate");
+        session_ids.push(created.id);
+    }
+
+    // ── Verify each channel resolves to its own session ───────────────────
+    for (i, &ch) in channels.iter().enumerate() {
+        let results = repo
+            .find_active_by_channel(ch)
+            .await
+            .expect("find_active_by_channel");
+
+        assert_eq!(
+            results.len(),
+            1,
+            "channel {ch} must have exactly one active session (S048)"
+        );
+        assert_eq!(
+            results[0].id, session_ids[i],
+            "channel {ch} must route to session {} (S048)",
+            session_ids[i]
+        );
+    }
+
+    // ── Cross-check: no channel bleeds into another ───────────────────────
+    let alpha_results = repo
+        .find_active_by_channel("C_ALPHA")
+        .await
+        .expect("find alpha");
+    assert_eq!(alpha_results[0].channel_id.as_deref(), Some("C_ALPHA"));
+
+    let beta_results = repo
+        .find_active_by_channel("C_BETA")
+        .await
+        .expect("find beta");
+    assert_eq!(beta_results[0].channel_id.as_deref(), Some("C_BETA"));
+
+    let gamma_results = repo
+        .find_active_by_channel("C_GAMMA")
+        .await
+        .expect("find gamma");
+    assert_eq!(gamma_results[0].channel_id.as_deref(), Some("C_GAMMA"));
+
+    // Ensure the three sessions are all different.
+    let ids: std::collections::HashSet<_> = session_ids.iter().collect();
+    assert_eq!(ids.len(), 3, "all three session IDs must be distinct");
 }

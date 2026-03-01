@@ -14,7 +14,9 @@ use slack_morphism::prelude::{
 use tracing::{info, warn};
 
 use crate::mcp::handler::AppState;
+use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
+use crate::slack::handlers::check_session_ownership;
 
 /// Process a single wait button action from Slack.
 ///
@@ -57,6 +59,24 @@ pub async fn handle_wait_action(
             session_id, "unauthorised user attempted wait action"
         );
         return Err("user not authorised for wait actions".into());
+    }
+
+    // ── T068c / FR-031: Verify session ownership ─────────
+    // The action value is the session_id directly, so we can look up the
+    // session and verify the acting user is the owner.
+    {
+        let session_repo = SessionRepo::new(Arc::clone(&state.db));
+        if let Ok(Some(session)) = session_repo.get_by_id(session_id).await {
+            if let Err(err) = check_session_ownership(&session, user_id) {
+                warn!(
+                    user_id,
+                    session_id,
+                    owner = %session.owner_user_id,
+                    "wait action rejected: non-owner attempt (FR-031)"
+                );
+                return Err(err.to_string());
+            }
+        }
     }
 
     // ── Determine response from action_id ────────────────

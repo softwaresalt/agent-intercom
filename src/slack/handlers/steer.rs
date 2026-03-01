@@ -20,6 +20,11 @@ use crate::persistence::steering_repo::SteeringRepo;
 /// message with `source = Slack`. Returns an operator-visible string
 /// confirming storage or describing the failure.
 ///
+/// When `channel_id` is `Some`, only sessions associated with that channel
+/// are considered (S043 / RI-04 fix). If no session is active in the
+/// channel the caller receives a descriptive "no active session in this
+/// channel" error (S045).
+///
 /// # Errors
 ///
 /// Returns an `AppError` if session lookup or message insertion fails.
@@ -35,19 +40,30 @@ pub async fn store_from_slack(
     }
 
     let session_repo = SessionRepo::new(Arc::clone(&state.db));
-    let sessions = session_repo
-        .list_active()
-        .await
-        .map_err(|err| crate::AppError::Db(format!("failed to list sessions: {err}")))?;
 
-    // When channel is known, prefer the session whose workspace matches
-    // the channel context. For now, if only one active session exists use it;
-    // if multiple exist, use any — routing by channel_id is handled at the
-    // `fetch_unconsumed` level via session_id scoping.
-    // TODO(005): Filter sessions by channel_id when multi-session channel routing is available.
-    let session = sessions.into_iter().next().ok_or_else(|| {
-        crate::AppError::Config("no active session to steer — start a session first".into())
-    })?;
+    let session = if let Some(ch) = channel_id {
+        // T065 / S043: scope session lookup to the originating channel.
+        let sessions = session_repo
+            .find_active_by_channel(ch)
+            .await
+            .map_err(|err| {
+                crate::AppError::Db(format!("failed to find sessions in channel: {err}"))
+            })?;
+        sessions.into_iter().next().ok_or_else(|| {
+            crate::AppError::Config(
+                "no active session in this channel — start a session first".into(),
+            )
+        })?
+    } else {
+        // No channel context: fall back to any active session (IPC / tests).
+        let sessions = session_repo
+            .list_active()
+            .await
+            .map_err(|err| crate::AppError::Db(format!("failed to list sessions: {err}")))?;
+        sessions.into_iter().next().ok_or_else(|| {
+            crate::AppError::Config("no active session to steer — start a session first".into())
+        })?
+    };
 
     let msg = SteeringMessage::new(
         session.id.clone(),

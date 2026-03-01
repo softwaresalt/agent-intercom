@@ -109,22 +109,22 @@ async fn dispatch_command(
 
         "session-pause" => {
             let session_id = args.first().copied();
-            handle_session_pause(session_id, user_id, db).await
+            handle_session_pause(session_id, user_id, channel_id, db).await
         }
 
         "session-resume" => {
             let session_id = args.first().copied();
-            handle_session_resume(session_id, user_id, db).await
+            handle_session_resume(session_id, user_id, channel_id, db).await
         }
 
         "session-clear" => {
             let session_id = args.first().copied();
-            handle_session_clear(session_id, user_id, state).await
+            handle_session_clear(session_id, user_id, channel_id, state).await
         }
 
         "session-checkpoint" => {
             let (session_id, label) = parse_checkpoint_args(args);
-            handle_session_checkpoint(session_id, label, user_id, db).await
+            handle_session_checkpoint(session_id, label, user_id, channel_id, db).await
         }
 
         "session-restore" => {
@@ -136,12 +136,12 @@ async fn dispatch_command(
 
         "session-checkpoints" => {
             let session_id = args.first().copied();
-            handle_session_checkpoints(session_id, user_id, db).await
+            handle_session_checkpoints(session_id, user_id, channel_id, db).await
         }
 
-        "list-files" => handle_list_files(args, user_id, state).await,
+        "list-files" => handle_list_files(args, user_id, channel_id, state).await,
 
-        "show-file" => handle_show_file(args, user_id, state).await,
+        "show-file" => handle_show_file(args, user_id, channel_id, state).await,
 
         "steer" => {
             let text = if args.is_empty() {
@@ -167,7 +167,7 @@ async fn dispatch_command(
             let result = validate_command_alias(other, &state.config.commands);
             match result {
                 Ok(shell_command) => {
-                    handle_run_command(other, &shell_command, user_id, state).await
+                    handle_run_command(other, &shell_command, user_id, channel_id, state).await
                 }
                 Err(_) => Ok(format!(
                     "Unknown command: `{other}`. Use `/intercom help` for available commands."
@@ -249,6 +249,41 @@ agent's next session recovery (`reboot` call), making them ideal for asynchronou
 items that the agent should pick up at the start of its next session.";
 
 // ── Session commands (T067, T072) ────────────────────────────────────
+
+/// Resolve the session a slash command should operate on.
+///
+/// When `session_id` is explicitly provided it is returned directly (without
+/// ownership verification — callers do that via [`spawner::verify_session_owner`]).
+/// When absent, the most-recently-updated session owned by `user_id` in
+/// `channel_id` is returned. If no session is found in the channel the
+/// caller receives a descriptive `NotFound` error (T068 / S045).
+async fn resolve_command_session(
+    session_id: Option<&str>,
+    user_id: &str,
+    channel_id: &str,
+    repo: &SessionRepo,
+) -> crate::Result<crate::models::session::Session> {
+    if let Some(id) = session_id {
+        return repo
+            .get_by_id(id)
+            .await?
+            .ok_or_else(|| crate::AppError::NotFound(format!("session {id} not found")));
+    }
+
+    // T067: Prefer the session in the originating channel (S043).
+    let channel_sessions = repo.find_active_by_channel(channel_id).await?;
+    if let Some(session) = channel_sessions
+        .into_iter()
+        .find(|s| s.owner_user_id == user_id)
+    {
+        return Ok(session);
+    }
+
+    // T068: No session in this channel — return a channel-specific error (S045).
+    Err(crate::AppError::NotFound(
+        "no active session in this channel — use `/intercom sessions` to see all sessions".into(),
+    ))
+}
 
 async fn handle_sessions(db: &Arc<Database>) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
@@ -435,11 +470,12 @@ async fn handle_mcp_session_start(
 async fn handle_session_pause(
     session_id: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     db: &Arc<Database>,
 ) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let paused = session_manager::pause_session(&session.id, &repo).await?;
@@ -449,11 +485,12 @@ async fn handle_session_pause(
 async fn handle_session_resume(
     session_id: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     db: &Arc<Database>,
 ) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let resumed = session_manager::resume_session(&session.id, &repo).await?;
@@ -463,11 +500,12 @@ async fn handle_session_resume(
 async fn handle_session_clear(
     session_id: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(&state.db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     // Remove the child from the registry before awaiting terminate_session
@@ -506,12 +544,13 @@ async fn handle_session_checkpoint(
     session_id: Option<&str>,
     label: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     db: &Arc<Database>,
 ) -> crate::Result<String> {
     let session_repo = SessionRepo::new(Arc::clone(db));
     let checkpoint_repo = CheckpointRepo::new(Arc::clone(db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &session_repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &session_repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let checkpoint =
@@ -562,6 +601,7 @@ async fn handle_session_restore(checkpoint_id: &str, db: &Arc<Database>) -> crat
 async fn handle_session_checkpoints(
     session_id: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     db: &Arc<Database>,
 ) -> crate::Result<String> {
     let session_repo = SessionRepo::new(Arc::clone(db));
@@ -570,7 +610,7 @@ async fn handle_session_checkpoints(
     let resolved_session_id = if let Some(id) = session_id {
         id.to_owned()
     } else {
-        let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
+        let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
         session.id
     };
 
@@ -609,6 +649,7 @@ async fn handle_session_checkpoints(
 async fn handle_list_files(
     args: &[&str],
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let span = info_span!("list_files", user = %user_id);
@@ -616,7 +657,7 @@ async fn handle_list_files(
 
     let db = &state.db;
     let session_repo = SessionRepo::new(Arc::clone(db));
-    let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
+    let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
 
     let workspace_root = PathBuf::from(&session.workspace_root);
 
@@ -640,6 +681,7 @@ async fn handle_list_files(
 async fn handle_show_file(
     args: &[&str],
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let span = info_span!("show_file", user = %user_id);
@@ -647,7 +689,7 @@ async fn handle_show_file(
 
     let db = &state.db;
     let session_repo = SessionRepo::new(Arc::clone(db));
-    let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
+    let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
 
     let workspace_root = PathBuf::from(&session.workspace_root);
 
@@ -720,6 +762,7 @@ async fn handle_run_command(
     alias: &str,
     shell_command: &str,
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let span = info_span!("run_command", alias, user = %user_id);
@@ -727,7 +770,7 @@ async fn handle_run_command(
 
     let db = &state.db;
     let session_repo = SessionRepo::new(Arc::clone(db));
-    let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
+    let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
 
     let workspace_root = PathBuf::from(&session.workspace_root);
 

@@ -190,19 +190,19 @@
 
 ### Tests (S043–S048)
 
-- [ ] T061 [P] [US6] Write unit test for session lookup by channel_id in `tests/unit/session_routing_tests.rs` — covers S043, S044
-- [ ] T062 [P] [US6] Write unit test for "no active session" response in `tests/unit/session_routing_tests.rs` — covers S045
-- [ ] T063 [P] [US6] Write unit test for thread_ts disambiguation in `tests/unit/session_routing_tests.rs` — covers S046, S047
-- [ ] T064 [P] [US6] Write concurrent test for three sessions in three channels in `tests/integration/workspace_routing_tests.rs` — covers S048
+- [x] T061 [P] [US6] Write unit test for session lookup by channel_id in `tests/unit/session_routing_tests.rs` — covers S043, S044
+- [x] T062 [P] [US6] Write unit test for "no active session" response in `tests/unit/session_routing_tests.rs` — covers S045
+- [x] T063 [P] [US6] Write unit test for thread_ts disambiguation in `tests/unit/session_routing_tests.rs` — covers S046, S047
+- [x] T064 [P] [US6] Write concurrent test for three sessions in three channels in `tests/integration/workspace_routing_tests.rs` — covers S048
 
 ### Implementation
 
-- [ ] T065 [US6] Refactor `store_from_slack` in `src/slack/handlers/steer.rs` to filter by `channel_id` before selecting session (RI-04 fix)
-- [ ] T066 [US6] Update Slack approval handler in `src/slack/events.rs` to extract `channel_id` and `thread_ts` for routing
-- [ ] T067 [US6] Update slash command handler in `src/slack/commands.rs` to scope commands to originating channel
-- [ ] T068 [US6] Add "no active session" response when slash commands target a channel without sessions
-- [ ] T068b [P] [US6] Write unit test for non-owner action rejection in `tests/unit/session_routing_tests.rs` — covers S076 (FR-031)
-- [ ] T068c [US6] Add owner_user_id verification to Slack approval/steering handlers in `src/slack/events.rs` — reject actions from non-owners with ephemeral error message (FR-031)
+- [x] T065 [US6] Refactor `store_from_slack` in `src/slack/handlers/steer.rs` to filter by `channel_id` before selecting session (RI-04 fix)
+- [x] T066 [US6] Update Slack approval handler in `src/slack/events.rs` to extract `channel_id` and `thread_ts` for routing
+- [x] T067 [US6] Update slash command handler in `src/slack/commands.rs` to scope commands to originating channel
+- [x] T068 [US6] Add "no active session" response when slash commands target a channel without sessions
+- [x] T068b [P] [US6] Write unit test for non-owner action rejection in `tests/unit/session_routing_tests.rs` — covers S076 (FR-031)
+- [x] T068c [US6] Add owner_user_id verification to Slack approval/steering handlers in `src/slack/events.rs` — reject actions from non-owners with ephemeral error message (FR-031)
 
 **Checkpoint**: All operator actions correctly scoped by channel and thread
 
