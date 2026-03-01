@@ -127,11 +127,13 @@ status = "git status"
 # workspace_id = "my-repo"
 # channel_id   = "C0123456789"
 # label        = "My Repository"      # optional — shown in logs and Slack messages
+# path         = "/home/user/projects/my-repo"  # optional — used as cwd for ACP agent
 #
 # [[workspace]]
 # workspace_id = "api-service"
 # channel_id   = "C9876543210"
 # label        = "API Service"
+# path         = "/home/user/projects/api-service"
 
 # ── ACP mode configuration ────────────────────────────────────────────────────
 #

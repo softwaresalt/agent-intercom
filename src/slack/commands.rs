@@ -19,6 +19,7 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, info_span, warn};
 
+use crate::acp::handshake;
 use crate::acp::spawner::SpawnConfig;
 use crate::diff::path_safety::validate_path;
 use crate::driver::AgentDriver;
@@ -107,6 +108,11 @@ async fn dispatch_command(
                 args.join(" ")
             };
             handle_session_start(&prompt, user_id, channel_id, state).await
+        }
+
+        "session-stop" => {
+            let session_id = args.first().copied();
+            handle_session_stop(session_id, user_id, channel_id, state).await
         }
 
         "session-restart" => {
@@ -206,9 +212,10 @@ const FULL_HELP: &str = "\
 
 *Session Management*
 • `session-start <prompt>` — Start a new agent session
+• `session-stop [session_id]` — Gracefully stop a running ACP session (sends interrupt first)
 • `session-pause [session_id]` — Pause a running session
 • `session-resume [session_id]` — Resume a paused session
-• `session-clear [session_id]` — Terminate and clean up a session
+• `session-clear [session_id]` — Force-terminate and clean up a session
 • `sessions` — List all tracked sessions
 
 *Checkpoints*
@@ -229,9 +236,10 @@ const FULL_HELP: &str = "\
 const SESSION_HELP: &str = "\
 *Session commands:*
 • `session-start <prompt>` — Start a new agent session with the given prompt
+• `session-stop [session_id]` — Gracefully stop a running ACP session (sends interrupt first)
 • `session-pause [session_id]` — Pause a running session (defaults to active session)
 • `session-resume [session_id]` — Resume a paused session
-• `session-clear [session_id]` — Terminate and clean up a session
+• `session-clear [session_id]` — Force-terminate and clean up a session
 • `sessions` — List all tracked sessions with state and timestamps";
 
 const CHECKPOINT_HELP: &str = "\
@@ -324,12 +332,10 @@ async fn handle_session_start(
     }
 }
 
-/// Start a new ACP session: spawn a headless agent process and record the
-/// session in the database with `protocol_mode = Acp` (T038, FR-025, FR-027).
 // This startup sequence is inherently sequential — each step depends on the
 // previous (validate → count sessions → create DB record → spawn process →
-// register driver → post Slack message). Splitting it artificially would
-// reduce clarity without reducing complexity.
+// handshake → register driver → post Slack message). Splitting it artificially
+// would reduce clarity without reducing complexity.
 #[allow(clippy::too_many_lines)]
 async fn handle_acp_session_start(
     prompt: &str,
@@ -352,16 +358,24 @@ async fn handle_acp_session_start(
         )));
     }
 
+    // Resolve the workspace root and name from the incoming Slack channel.
+    // Falls back to `default_workspace_root` when the channel has no mapping.
     let workspace_root = state
         .config
-        .default_workspace_root()
-        .to_string_lossy()
-        .to_string();
+        .workspace_root_for_channel(channel_id)
+        .to_path_buf();
+    let workspace_name = state
+        .config
+        .resolve_workspace_by_channel_id(channel_id)
+        .and_then(|m| m.label.as_deref())
+        .or_else(|| workspace_root.file_name().and_then(|n| n.to_str()))
+        .unwrap_or("workspace")
+        .to_owned();
 
     // Build the session record with ACP-specific fields.
     let mut session = Session::new(
         user_id.to_owned(),
-        workspace_root,
+        workspace_root.to_string_lossy().to_string(),
         Some(prompt.to_owned()),
         SessionMode::Remote,
     );
@@ -370,24 +384,45 @@ async fn handle_acp_session_start(
 
     let created = repo.create(&session).await?;
 
-    // Spawn the agent process.
+    // Spawn the agent process (no prompt CLI arg — FR-030).
     let spawn_cfg = SpawnConfig {
         host_cli: state.config.host_cli.clone(),
         host_cli_args: state.config.host_cli_args.clone(),
-        workspace_root: state.config.default_workspace_root().to_path_buf(),
+        workspace_root: workspace_root.clone(),
         startup_timeout: Duration::from_secs(state.config.acp.startup_timeout_seconds),
     };
 
-    let conn = match crate::acp::spawner::spawn_agent(&spawn_cfg, &created.id, prompt).await {
+    let mut conn = match crate::acp::spawner::spawn_agent(&spawn_cfg, &created.id).await {
         Ok(c) => c,
         Err(err) => {
-            // Mark the session interrupted so it's visible in recovery flows.
             repo.set_terminated(&created.id, SessionStatus::Interrupted)
                 .await
                 .ok();
             return Err(err);
         }
     };
+
+    // Perform the initialize / initialized handshake, then deliver the prompt.
+    let handshake_timeout = Duration::from_secs(state.config.acp.startup_timeout_seconds);
+    let handshake_result = async {
+        handshake::send_initialize(
+            &mut conn.stdin,
+            &created.id,
+            &workspace_root,
+            &workspace_name,
+        )
+        .await?;
+        handshake::wait_for_initialized(&mut conn.stdout, &created.id, handshake_timeout).await?;
+        handshake::send_prompt(&mut conn.stdin, &created.id, prompt).await
+    }
+    .await;
+
+    if let Err(err) = handshake_result {
+        repo.set_terminated(&created.id, SessionStatus::Interrupted)
+            .await
+            .ok();
+        return Err(err);
+    }
 
     // Wire ACP I/O tasks for this session (T084).
     // Each session gets its own outbound message channel; inbound events are
@@ -405,14 +440,13 @@ async fn handle_acp_session_start(
         let reader_db = Arc::clone(&state.db);
         let reader_driver: Arc<dyn crate::driver::AgentDriver> = acp_driver.clone();
         let reader_channel_id = channel_id.to_owned();
-        let reader_thread_ts: Option<String> = None; // thread_ts not yet recorded at spawn
         let reader_slack = state.slack.clone();
         let flush_ctx = crate::acp::reader::ReconnectFlushContext {
             db: reader_db,
             driver: reader_driver,
             slack: reader_slack,
             channel_id: Some(reader_channel_id),
-            thread_ts: reader_thread_ts,
+            thread_ts: None, // thread_ts not yet recorded at spawn
         };
         tokio::spawn(crate::acp::reader::run_reader(
             reader_session_id,
@@ -431,8 +465,6 @@ async fn handle_acp_session_start(
             writer_ct,
         ));
 
-        // Store both the child handle and session cancel token so that
-        // session-stop can cleanly shut down reader/writer tasks.
         state
             .active_children
             .lock()
@@ -459,7 +491,7 @@ async fn handle_acp_session_start(
         let msg = SlackMessage {
             channel: SlackChannelId(channel_id.to_owned()),
             text: Some(format!(
-                "\u{1f680} ACP session `{}` started",
+                "\u{1f680} ACP session `{}` started in `{workspace_name}`",
                 active.id.chars().take(8).collect::<String>()
             )),
             blocks: Some(started_blocks),
@@ -481,12 +513,12 @@ async fn handle_acp_session_start(
 
     info!(
         session_id = active.id,
-        channel_id, user_id, "ACP session started"
+        channel_id, user_id, workspace = %workspace_name, "ACP session started"
     );
 
     Ok(format!(
-        "ACP session `{}` started in channel `{}` with prompt: _{}_",
-        active.id, channel_id, prompt
+        "ACP session `{}` started in `{workspace_name}` with prompt: _{}_",
+        active.id, prompt
     ))
 }
 
@@ -555,6 +587,51 @@ async fn handle_session_resume(
 
     let resumed = session_manager::resume_session(&session.id, &repo).await?;
     Ok(format!("Session `{}` resumed.", resumed.id))
+}
+
+/// Gracefully stop an ACP session.
+///
+/// Sends `session/interrupt` to the agent process first, giving it a chance to
+/// clean up, then terminates the process and marks the session as `Terminated`.
+/// Posts a "session stopped" notification to the session's Slack thread.
+///
+/// Unlike `session-clear`, which force-terminates immediately, `session-stop`
+/// is the preferred way to close an ACP session when the agent should be given
+/// the opportunity to save state or wrap up current work.
+async fn handle_session_stop(
+    session_id: Option<&str>,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
+    spawner::verify_session_owner(&session, user_id)?;
+
+    if session.protocol_mode != ProtocolMode::Acp {
+        return Err(crate::AppError::Config(
+            "session-stop is only supported for ACP sessions; use session-clear for MCP sessions"
+                .into(),
+        ));
+    }
+
+    // Send session/interrupt to give the agent a chance to wrap up.
+    if let Some(ref acp_driver) = state.acp_driver {
+        if let Err(err) = acp_driver.interrupt(&session.id).await {
+            warn!(%err, session_id = %session.id, "session-stop: interrupt delivery failed — continuing with termination");
+        }
+    }
+
+    let mut child = state.active_children.lock().await.remove(&session.id);
+    let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
+
+    if let Some(ref slack) = state.slack {
+        session_manager::notify_session_ended(&terminated, "stopped by operator", slack).await;
+    }
+
+    info!(session_id = %terminated.id, user_id, "ACP session stopped by operator");
+    Ok(format!("ACP session `{}` stopped.", terminated.id))
 }
 
 async fn handle_session_clear(

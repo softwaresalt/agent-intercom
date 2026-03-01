@@ -17,6 +17,11 @@ use crate::{AppError, Result};
 /// Slack `channel_id` so that agents connecting with
 /// `?workspace_id=my-repo` are automatically routed to the correct channel.
 ///
+/// The optional `path` field records the physical filesystem path for the
+/// repository root. In ACP mode this becomes the working directory of the
+/// spawned agent process; without it the server falls back to
+/// `default_workspace_root`.
+///
 /// # Examples
 ///
 /// ```toml
@@ -24,6 +29,7 @@ use crate::{AppError, Result};
 /// workspace_id = "my-repo"
 /// channel_id   = "C0123456789"
 /// label        = "My Repository"
+/// path         = "/home/user/projects/my-repo"
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -38,6 +44,11 @@ pub struct WorkspaceMapping {
     pub channel_id: String,
     /// Optional human-readable label shown in logs and Slack messages.
     pub label: Option<String>,
+    /// Optional filesystem path to the repository root for this workspace.
+    ///
+    /// Used in ACP mode as the `current_dir()` for the spawned agent process.
+    /// Falls back to `GlobalConfig::default_workspace_root` when absent.
+    pub path: Option<PathBuf>,
 }
 
 /// Nested Slack configuration for Socket Mode connectivity.
@@ -538,6 +549,31 @@ impl GlobalConfig {
             // No workspace_id → pass channel_id through unchanged.
             channel_id
         }
+    }
+
+    /// Resolve the workspace mapping associated with a Slack channel ID.
+    ///
+    /// Returns the first `[[workspace]]` entry whose `channel_id` matches the
+    /// given value, or `None` if no match is found. Useful in ACP mode where
+    /// an incoming slash command arrives on a specific channel and the server
+    /// needs to determine which repository to spawn the agent in.
+    #[must_use]
+    pub fn resolve_workspace_by_channel_id(&self, channel_id: &str) -> Option<&WorkspaceMapping> {
+        self.workspaces.iter().find(|m| m.channel_id == channel_id)
+    }
+
+    /// Resolve the workspace root directory for a given Slack channel.
+    ///
+    /// Looks up the `[[workspace]]` entry for `channel_id` and returns its
+    /// `path` when set. Falls back to `default_workspace_root` when the
+    /// channel is unknown or the entry has no `path` configured.
+    #[must_use]
+    pub fn workspace_root_for_channel(&self, channel_id: &str) -> &Path {
+        self.workspaces
+            .iter()
+            .find(|m| m.channel_id == channel_id)
+            .and_then(|m| m.path.as_deref())
+            .unwrap_or(&self.default_workspace_root)
     }
 
     /// Validate configuration requirements for ACP mode.

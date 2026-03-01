@@ -142,6 +142,10 @@ pub fn parse_inbound_line(session_id: &str, line: &str) -> Result<Option<AgentEv
         "status/update" => parse_status_update(session_id, envelope),
         "prompt/forward" => parse_prompt_forward(session_id, envelope),
         "heartbeat" => parse_heartbeat(session_id, envelope),
+        // Handshake response from the agent — silently accepted. The
+        // `initialized` message is consumed by `handshake::wait_for_initialized`
+        // before `run_reader` starts; if one slips through, skip it gracefully.
+        "initialized" => Ok(None),
         other => {
             debug!(
                 method = other,

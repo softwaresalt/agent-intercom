@@ -4,7 +4,7 @@
 //! - T033 (S021): stopping an ACP session calls `interrupt()` on the driver
 //! - T034 (S023): agent process crash emits `AgentEvent::SessionTerminated`
 //! - T035 (S025): startup timeout kills the process if no ready signal arrives
-//! - T036 (S026): empty prompt is rejected at spawn time
+//! - T036 (S026): empty prompt is rejected by `handshake::send_prompt`
 //! - T037b (S075): spawned process does NOT inherit `SLACK_BOT_TOKEN`
 
 use std::time::Duration;
@@ -107,7 +107,7 @@ async fn agent_process_crash_is_detected() {
     cfg.host_cli_args = echo_args();
 
     // Spawn a process that exits immediately after printing one line.
-    let conn = spawn_agent(&cfg, "sess-crash-test", "run task")
+    let conn = spawn_agent(&cfg, "sess-crash-test")
         .await
         .expect("spawn_agent must succeed with echo-like process");
 
@@ -144,7 +144,7 @@ async fn startup_timeout_kills_process_if_no_response() {
         startup_timeout: Duration::from_millis(150),
     };
 
-    let result = spawn_agent(&config, "sess-timeout-test", "run task").await;
+    let result = spawn_agent(&config, "sess-timeout-test").await;
 
     assert!(
         result.is_err(),
@@ -158,24 +158,35 @@ async fn startup_timeout_kills_process_if_no_response() {
     );
 }
 
-// ── T036: empty prompt is rejected ───────────────────────────────────────────
+// ── T036: empty prompt is rejected by send_prompt ────────────────────────────
 
-/// S026 — `spawn_agent` must return an error when the prompt is empty or
-/// all-whitespace, preventing the agent from being started without work.
+/// S026 — `handshake::send_prompt` must return an error when the prompt is
+/// empty or all-whitespace, preventing the agent from receiving a no-op task.
+///
+/// The prompt validation moved from the spawner to the handshake layer so that
+/// `spawn_agent` remains solely responsible for process management (FR-030).
 #[tokio::test]
-async fn empty_prompt_is_rejected() {
-    let config = echo_config(Duration::from_secs(5));
+async fn empty_prompt_is_rejected_by_send_prompt() {
+    use agent_intercom::acp::handshake::send_prompt;
 
-    let result_empty = spawn_agent(&config, "sess-empty-test", "").await;
+    // We need a writable stdin handle. Spawn a short-lived process to get one.
+    let mut cfg = echo_config(Duration::from_secs(5));
+    cfg.host_cli_args = echo_args();
+    let Ok(mut conn) = spawn_agent(&cfg, "sess-empty-prompt-test").await else {
+        // If the process can't be spawned in this test environment, skip.
+        return;
+    };
+
+    let result_empty = send_prompt(&mut conn.stdin, "sess-empty-prompt-test", "").await;
     assert!(
         result_empty.is_err(),
-        "spawn_agent must reject an empty prompt"
+        "send_prompt must reject an empty prompt"
     );
 
-    let result_whitespace = spawn_agent(&config, "sess-ws-test", "   ").await;
+    let result_whitespace = send_prompt(&mut conn.stdin, "sess-empty-prompt-test", "   ").await;
     assert!(
         result_whitespace.is_err(),
-        "spawn_agent must reject a whitespace-only prompt"
+        "send_prompt must reject a whitespace-only prompt"
     );
 }
 

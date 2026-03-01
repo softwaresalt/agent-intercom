@@ -88,7 +88,7 @@ pub struct AcpConnection {
 /// Spawn an ACP agent process and wait for its ready signal.
 ///
 /// The spawner:
-/// 1. Validates that `prompt` is non-empty.
+/// 1. Validates that `session_id` is non-empty.
 /// 2. Builds a `tokio::process::Command` with `env_clear()` and only the
 ///    variables listed in [`ALLOWED_ENV_VARS`].
 /// 3. Passes `INTERCOM_SESSION_ID` as an explicit environment variable.
@@ -96,29 +96,21 @@ pub struct AcpConnection {
 ///    (the agent's ready signal).
 /// 5. On timeout: kills the process and returns `AppError::Acp`.
 ///
+/// The initial prompt is **not** passed as a CLI argument. Instead, the caller
+/// must send it via `handshake::send_prompt` after the `initialize` /
+/// `initialized` exchange completes (FR-030).
+///
 /// # Errors
 ///
-/// - `AppError::Acp("prompt must not be empty")` — `prompt` is blank.
 /// - `AppError::Acp("failed to spawn agent: …")` — OS spawn failure.
 /// - `AppError::Acp("startup timeout …")` — no ready line within the window.
 /// - `AppError::Acp("agent process exited before ready signal")` — early EOF.
-pub async fn spawn_agent(
-    config: &SpawnConfig,
-    session_id: &str,
-    prompt: &str,
-) -> Result<AcpConnection> {
-    if prompt.trim().is_empty() {
-        return Err(AppError::Acp("prompt must not be empty".into()));
-    }
-
+pub async fn spawn_agent(config: &SpawnConfig, session_id: &str) -> Result<AcpConnection> {
     let mut cmd = Command::new(&config.host_cli);
 
     for arg in &config.host_cli_args {
         cmd.arg(arg);
     }
-
-    // Pass the prompt as the final CLI argument.
-    cmd.arg(prompt);
 
     // Strip inherited environment, then inject only the safe allowlist.
     cmd.env_clear();
