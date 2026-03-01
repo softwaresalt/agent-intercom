@@ -98,6 +98,7 @@ pub async fn test_app_state(config: GlobalConfig) -> Arc<AppState> {
         stall_event_tx: None,
         driver: McpDriver::new_empty(),
         server_mode: ServerMode::Mcp,
+        workspace_mappings: Arc::default(),
     })
 }
 
@@ -121,6 +122,7 @@ pub fn test_app_state_with_db(config: GlobalConfig, db: Arc<SqlitePool>) -> Arc<
         stall_event_tx: None,
         driver: McpDriver::new_empty(),
         server_mode: ServerMode::Mcp,
+        workspace_mappings: Arc::default(),
     })
 }
 

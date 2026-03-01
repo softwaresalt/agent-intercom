@@ -31,4 +31,5 @@ mod unit {
     mod stall_repo_tests;
     mod steering_repo_tests;
     mod version_tests;
+    mod workspace_mapping_tests;
 }

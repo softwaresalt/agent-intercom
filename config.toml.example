@@ -101,3 +101,34 @@ default_nudge_message = "Continue working on the current task. Pick up where you
 [commands]
 # Shell command used to check the current workspace status.
 status = "git status"
+
+# ── Workspace-to-channel mappings (optional) ─────────────────────────────────
+#
+# Each [[workspace]] entry maps a short workspace_id to a Slack channel_id.
+# Agents connect with ?workspace_id=<id> in the MCP URL instead of the
+# deprecated ?channel_id= parameter.  The server resolves the channel at
+# connection time, enabling channel changes without updating every workspace.
+#
+# Changes to [[workspace]] entries take effect for new sessions without
+# restarting the server (hot-reload).
+#
+# Example .vscode/mcp.json using workspace_id:
+#
+#   {
+#     "servers": {
+#       "intercom": {
+#         "type": "http",
+#         "url": "http://127.0.0.1:3000/mcp?workspace_id=my-repo"
+#       }
+#     }
+#   }
+#
+# [[workspace]]
+# workspace_id = "my-repo"
+# channel_id   = "C0123456789"
+# label        = "My Repository"
+#
+# [[workspace]]
+# workspace_id = "api-service"
+# channel_id   = "C9876543210"
+# label        = "API Service"

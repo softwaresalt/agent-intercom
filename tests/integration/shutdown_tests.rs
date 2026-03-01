@@ -56,6 +56,8 @@ async fn shutdown_state_is_stable_with_no_slack() {
         stall_event_tx: None,
         driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         server_mode: agent_intercom::mode::ServerMode::Mcp,
+
+        workspace_mappings: Arc::default(),
     });
 
     // Reaching here without panic confirms no-Slack shutdown path is safe.
@@ -99,6 +101,8 @@ async fn empty_session_list_shutdown_is_noop() {
         stall_event_tx: None,
         driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         server_mode: agent_intercom::mode::ServerMode::Mcp,
+
+        workspace_mappings: Arc::default(),
     });
 
     // list_active on an empty DB should return empty Vec without error.

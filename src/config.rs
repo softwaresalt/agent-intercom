@@ -1,14 +1,44 @@
 //! Global configuration parsing, validation, and credential loading.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::{AppError, Result};
+
+/// A single workspace-to-channel mapping entry configured via `[[workspace]]`.
+///
+/// Each entry maps a short `workspace_id` string (e.g. `"my-repo"`) to a
+/// Slack `channel_id` so that agents connecting with
+/// `?workspace_id=my-repo` are automatically routed to the correct channel.
+///
+/// # Examples
+///
+/// ```toml
+/// [[workspace]]
+/// workspace_id = "my-repo"
+/// channel_id   = "C0123456789"
+/// label        = "My Repository"
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct WorkspaceMapping {
+    /// Short identifier supplied by agents as `?workspace_id=<id>`.
+    ///
+    /// Must be non-empty and unique within the `[[workspace]]` list.
+    pub workspace_id: String,
+    /// Slack channel ID that messages for this workspace are routed to.
+    ///
+    /// Must be non-empty.
+    pub channel_id: String,
+    /// Optional human-readable label shown in logs and Slack messages.
+    pub label: Option<String>,
+}
 
 /// Nested Slack configuration for Socket Mode connectivity.
 ///
@@ -281,6 +311,17 @@ pub struct GlobalConfig {
     /// ACP-mode configuration (max sessions, startup timeout).
     #[serde(default)]
     pub acp: AcpConfig,
+    /// Workspace-to-channel routing table.
+    ///
+    /// Each `[[workspace]]` entry in `config.toml` maps a `workspace_id`
+    /// (the string passed by agents as `?workspace_id=…`) to a Slack
+    /// `channel_id`.  The list is validated for uniqueness and non-empty
+    /// identifiers during [`GlobalConfig::from_toml_str`].
+    ///
+    /// Hot-reload support: changes to `config.toml` take effect for new
+    /// sessions when a [`crate::config_watcher::ConfigWatcher`] is active.
+    #[serde(default, rename = "workspace")]
+    pub workspaces: Vec<WorkspaceMapping>,
 }
 
 impl GlobalConfig {
@@ -407,7 +448,80 @@ impl GlobalConfig {
             .map_err(|err| AppError::Config(format!("default_workspace_root invalid: {err}")))?;
         self.default_workspace_root = canonical_root;
 
+        self.validate_workspace_mappings()?;
+
         Ok(())
+    }
+
+    /// Validate workspace-to-channel mapping entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` when:
+    /// - any `workspace_id` or `channel_id` is empty
+    /// - `workspace_id` values are not unique within the list
+    pub fn validate_workspace_mappings(&self) -> Result<()> {
+        let mut seen: HashSet<&str> = HashSet::new();
+        for mapping in &self.workspaces {
+            if mapping.workspace_id.is_empty() {
+                return Err(AppError::Config(
+                    "workspace_id cannot be empty in [[workspace]] entry".into(),
+                ));
+            }
+            if mapping.channel_id.is_empty() {
+                return Err(AppError::Config(
+                    "channel_id cannot be empty in [[workspace]] entry".into(),
+                ));
+            }
+            if !seen.insert(mapping.workspace_id.as_str()) {
+                return Err(AppError::Config(format!(
+                    "duplicate workspace_id '{}' in [[workspace]] entries",
+                    mapping.workspace_id
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve the effective Slack channel ID from connection parameters.
+    ///
+    /// Implements FR-011, FR-012, and FR-013:
+    ///
+    /// 1. If `workspace_id` is `Some(_)`, look it up in the `[[workspace]]`
+    ///    entries.
+    ///    - **Found** → return the mapped `channel_id`.
+    ///    - **Not found** → return `None` (`workspace_id` takes precedence;
+    ///      the bare `channel_id` parameter is **not** used as a fallback).
+    /// 2. If `workspace_id` is `None`, return `channel_id` unchanged
+    ///    (backward compatibility with legacy `?channel_id=` clients).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let config = agent_intercom::config::GlobalConfig::from_toml_str("").unwrap();
+    /// // workspace_id resolves to mapped channel
+    /// let ch = config.resolve_channel_id(Some("my-repo"), None);
+    ///
+    /// // bare channel_id used as-is (legacy clients)
+    /// let ch = config.resolve_channel_id(None, Some("C0123456789"));
+    /// ```
+    #[must_use]
+    pub fn resolve_channel_id<'a>(
+        &'a self,
+        workspace_id: Option<&str>,
+        channel_id: Option<&'a str>,
+    ) -> Option<&'a str> {
+        if let Some(ws_id) = workspace_id {
+            // workspace_id present → look up in the mapping table.
+            // If not found, return None (no silent fallback).
+            self.workspaces
+                .iter()
+                .find(|m| m.workspace_id == ws_id)
+                .map(|m| m.channel_id.as_str())
+        } else {
+            // No workspace_id → pass channel_id through unchanged.
+            channel_id
+        }
     }
 
     /// Validate configuration requirements for ACP mode.

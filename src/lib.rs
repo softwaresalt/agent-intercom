@@ -9,6 +9,7 @@
 pub mod acp;
 pub mod audit;
 pub mod config;
+pub mod config_watcher;
 pub mod diff;
 pub mod driver;
 pub mod errors;

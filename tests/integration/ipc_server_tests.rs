@@ -95,6 +95,8 @@ fn ipc_app_state(
         stall_event_tx: None,
         driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
         server_mode: agent_intercom::mode::ServerMode::Mcp,
+
+        workspace_mappings: Arc::default(),
     })
 }
 

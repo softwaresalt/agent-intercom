@@ -16,6 +16,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 use agent_intercom::audit::writer::JsonlAuditWriter;
 use agent_intercom::audit::AuditLogger;
 use agent_intercom::config::GlobalConfig;
+use agent_intercom::config_watcher::ConfigWatcher;
 use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
@@ -205,6 +206,21 @@ async fn run(args: Cli) -> Result<()> {
     }
     let policy_cache = policy_watcher.cache().clone();
 
+    // ── Initialize config watcher for workspace mapping hot-reload ───────
+    // Watches `config.toml` for changes and re-parses `[[workspace]]` entries
+    // so that new sessions always see the latest workspace→channel mappings
+    // without a server restart (FR-014).
+    let config_watcher = ConfigWatcher::new(&args.config)
+        .map_err(|err| {
+            warn!(%err, "config watcher failed to start — workspace mappings will not hot-reload");
+            err
+        })
+        .ok();
+    let workspace_mappings = config_watcher.as_ref().map_or_else(
+        || Arc::new(std::sync::RwLock::new(config.workspaces.clone())),
+        ConfigWatcher::mappings,
+    );
+
     // ── Create stall event channel ──────────────────────
     let (stall_tx, stall_rx) = tokio::sync::mpsc::channel(256);
 
@@ -225,11 +241,13 @@ async fn run(args: Cli) -> Result<()> {
         stall_event_tx: Some(stall_tx),
         driver: Arc::new(driver),
         server_mode: args.mode,
+        workspace_mappings,
     });
 
-    // Keep the watcher alive for the server's lifetime — dropping it stops the
-    // notify watcher and the hot-reload stops working.
+    // Keep the watchers alive for the server's lifetime — dropping them stops
+    // the notify subscriptions and hot-reload stops working.
     let _policy_watcher = policy_watcher;
+    let _config_watcher = config_watcher;
 
     // ── Check for interrupted sessions from prior crash (T082) ──
     check_interrupted_on_startup(&state).await;

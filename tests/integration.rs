@@ -38,4 +38,5 @@ mod integration {
     mod stdio_transport_tests;
     mod steering_flow_tests;
     mod streamable_http_tests;
+    mod workspace_routing_tests;
 }

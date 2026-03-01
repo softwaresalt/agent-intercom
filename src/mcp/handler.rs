@@ -136,6 +136,16 @@ pub struct AppState {
     /// takes: MCP spawns an HTTP/SSE-connecting process; ACP spawns a
     /// headless stdio-connected process.
     pub server_mode: ServerMode,
+    /// Hot-reloadable workspace-to-channel mapping table.
+    ///
+    /// Populated from `[[workspace]]` entries in `config.toml` at startup.
+    /// When a [`crate::config_watcher::ConfigWatcher`] is active it updates
+    /// this `Arc` in-place, so new sessions always see the latest mappings
+    /// without requiring a server restart (FR-014).
+    ///
+    /// The SSE transport reads this at session-creation time to resolve a
+    /// `?workspace_id=` query parameter to the configured `channel_id`.
+    pub workspace_mappings: Arc<std::sync::RwLock<Vec<crate::config::WorkspaceMapping>>>,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.
