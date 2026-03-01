@@ -19,11 +19,51 @@ use interprocess::local_socket::{traits::Stream as _, GenericNamespaced, Stream,
 )]
 struct Cli {
     /// IPC socket name (must match server's `ipc_name` config).
-    #[arg(long, default_value = "agent-intercom")]
-    ipc_name: String,
+    ///
+    /// When omitted, derived from `--mode`: `agent-intercom` for MCP,
+    /// `agent-intercom-acp` for ACP.
+    #[arg(long)]
+    ipc_name: Option<String>,
+
+    /// Server protocol mode to connect to: `mcp` (default) or `acp`.
+    ///
+    /// When `--ipc-name` is not set, the mode determines the IPC socket
+    /// name: `agent-intercom` for MCP, `agent-intercom-acp` for ACP.
+    /// This matches the auto-suffix applied by the server (ADR-0015).
+    #[arg(long, value_enum, default_value_t = CtlMode::Mcp)]
+    mode: CtlMode,
 
     #[command(subcommand)]
     command: Command,
+}
+
+/// Protocol mode selector for the ctl companion.
+///
+/// Mirrors [`agent_intercom::mode::ServerMode`] but is defined locally
+/// because the ctl binary does not depend on the library crate.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, clap::ValueEnum)]
+enum CtlMode {
+    /// Connect to the MCP server instance (default pipe: `agent-intercom`).
+    Mcp,
+    /// Connect to the ACP server instance (default pipe: `agent-intercom-acp`).
+    Acp,
+}
+
+impl Cli {
+    /// Resolve the effective IPC socket name.
+    ///
+    /// If `--ipc-name` was explicitly provided, use it as-is.
+    /// Otherwise derive from `--mode`.
+    fn effective_ipc_name(&self) -> String {
+        if let Some(ref name) = self.ipc_name {
+            name.clone()
+        } else {
+            match self.mode {
+                CtlMode::Mcp => "agent-intercom".into(),
+                CtlMode::Acp => "agent-intercom-acp".into(),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -104,7 +144,9 @@ fn main() {
         }
     };
 
-    match send_ipc_command(&args.ipc_name, &request_json) {
+    let ipc_name = args.effective_ipc_name();
+
+    match send_ipc_command(&ipc_name, &request_json) {
         Ok(response) => {
             if let Some(obj) = response.as_object() {
                 let ok = obj
@@ -131,10 +173,7 @@ fn main() {
         }
         Err(err) => {
             eprintln!("Failed to connect to server: {err}");
-            eprintln!(
-                "Is agent-intercom running with ipc_name '{}'?",
-                args.ipc_name
-            );
+            eprintln!("Is agent-intercom running with ipc_name '{ipc_name}'?");
             std::process::exit(1);
         }
     }

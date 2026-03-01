@@ -132,6 +132,13 @@ async fn run(args: Cli) -> Result<()> {
     // Validate ACP-specific configuration when running in ACP mode.
     if args.mode == ServerMode::Acp {
         config.validate_for_acp_mode()?;
+        // Auto-suffix the IPC pipe name so MCP and ACP instances don't
+        // collide on the same named pipe (ADR-0015). Only applied when
+        // the name is still the default; an explicit override is preserved.
+        if config.ipc_name == "agent-intercom" {
+            config.ipc_name = "agent-intercom-acp".into();
+            info!(ipc_name = %config.ipc_name, "ACP mode: IPC name auto-suffixed");
+        }
         info!("ACP mode: host_cli validated");
     }
 

@@ -97,6 +97,31 @@ ACP-mode env vars: `SLACK_APP_TOKEN_ACP`, `SLACK_BOT_TOKEN_ACP`,
   of work: dispatcher driver, per-session routing in all Slack handlers, and
   concurrent transport management.
 
+## IPC Pipe Isolation
+
+When two server instances run on the same machine, they must bind different
+named pipes to avoid collisions. The server auto-suffixes the `ipc_name`
+config field when running in ACP mode and the name is still the default:
+
+| Mode | Default `ipc_name` | Named Pipe (Windows) |
+|------|--------------------|----------------------|
+| MCP  | `agent-intercom`     | `\\.\pipe\agent-intercom` |
+| ACP  | `agent-intercom-acp` | `\\.\pipe\agent-intercom-acp` |
+
+The `agent-intercom-ctl` companion CLI has a `--mode` flag that performs
+the same derivation:
+
+```powershell
+# Talk to the MCP server (default)
+agent-intercom-ctl list
+
+# Talk to the ACP server
+agent-intercom-ctl --mode acp list
+
+# Explicit override (takes precedence over --mode)
+agent-intercom-ctl --ipc-name custom-name list
+```
+
 ## Deployment Pattern
 
 ```text
