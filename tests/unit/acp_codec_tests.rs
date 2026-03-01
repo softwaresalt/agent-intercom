@@ -154,7 +154,7 @@ async fn stream_eof_emits_session_terminated() {
     // Empty byte slice — immediate EOF.
     let empty: &[u8] = b"";
 
-    run_reader("sess-eof".to_owned(), empty, tx, cancel)
+    run_reader("sess-eof".to_owned(), empty, tx, cancel, None)
         .await
         .expect("run_reader must return Ok(()) on clean EOF");
 

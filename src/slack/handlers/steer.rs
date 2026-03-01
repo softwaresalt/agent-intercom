@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use tracing::{info, warn};
 
+use crate::driver::AgentDriver;
 use crate::mcp::handler::AppState;
+use crate::models::session::{ConnectivityStatus, ProtocolMode};
 use crate::models::steering::{SteeringMessage, SteeringSource};
 use crate::persistence::session_repo::SessionRepo;
 use crate::persistence::steering_repo::SteeringRepo;
@@ -65,6 +67,32 @@ pub async fn store_from_slack(
         })?
     };
 
+    // T088 / S060: For ACP sessions that are currently Online, deliver the
+    // steering message directly via the driver stream instead of queuing it.
+    if session.protocol_mode == ProtocolMode::Acp
+        && session.connectivity_status == ConnectivityStatus::Online
+    {
+        if let Some(ref acp_driver) = state.acp_driver {
+            acp_driver
+                .send_prompt(&session.id, text)
+                .await
+                .map_err(|err| {
+                    crate::AppError::Acp(format!(
+                        "failed to deliver steering message via ACP driver: {err}"
+                    ))
+                })?;
+            info!(
+                session_id = %session.id,
+                channel_id = ?channel_id,
+                "steering message delivered directly via ACP driver (session online)"
+            );
+            return Ok(format!(
+                "Steering message delivered directly to agent in session `{}`.",
+                session.id
+            ));
+        }
+    }
+
     let msg = SteeringMessage::new(
         session.id.clone(),
         channel_id.map(str::to_owned),
@@ -80,6 +108,20 @@ pub async fn store_from_slack(
         channel_id = ?channel_id,
         "steering message stored from Slack"
     );
+
+    // T088 / S059: For ACP sessions that are Offline or Stalled, report the
+    // queue depth so the operator knows their message was preserved.
+    if session.protocol_mode == ProtocolMode::Acp {
+        let queued = steering_repo
+            .fetch_unconsumed(&session.id)
+            .await
+            .unwrap_or_default();
+        let count = queued.len();
+        return Ok(format!(
+            "Agent offline — message queued ({count} in queue) for session `{}`.",
+            session.id
+        ));
+    }
 
     Ok(format!(
         "Steering message queued for session `{}`. It will be delivered on the next `ping`.",

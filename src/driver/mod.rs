@@ -68,6 +68,16 @@ pub enum AgentEvent {
         /// Human-readable reason for termination.
         reason: String,
     },
+    /// A line was successfully parsed from the ACP stream.
+    ///
+    /// Emitted by the reader after every non-empty, well-formed message.
+    /// The stall consumer reacts to this event by resetting the inactivity
+    /// timer for the session, preventing false stall alerts during active
+    /// streaming (S063).
+    StreamActivity {
+        /// Session that produced stream activity.
+        session_id: String,
+    },
 }
 
 /// Protocol-agnostic interface between the application core and an agent.

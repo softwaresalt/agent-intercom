@@ -38,7 +38,7 @@ host_cli_args = ["--stdio"]
 retention_days = 30
 
 [database]
-path = "data/agent-rc.db"
+path = "data/agent-intercom.db"
 
 [slack]
 # No fields required here — credentials are loaded from environment variables

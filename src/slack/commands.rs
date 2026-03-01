@@ -15,11 +15,13 @@ use std::time::Duration;
 use slack_morphism::prelude::{
     SlackChannelId, SlackClient, SlackClientEventsUserState, SlackClientHyperHttpsConnector,
     SlackCommandEvent, SlackCommandEventResponse, SlackMessageContent, SlackMessageResponseType,
+    SlackTs,
 };
 use tracing::{info, info_span, warn};
 
 use crate::acp::spawner::SpawnConfig;
 use crate::diff::path_safety::validate_path;
+use crate::driver::AgentDriver;
 use crate::mcp::handler::AppState;
 use crate::mode::ServerMode;
 use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
@@ -105,6 +107,11 @@ async fn dispatch_command(
                 args.join(" ")
             };
             handle_session_start(&prompt, user_id, channel_id, state).await
+        }
+
+        "session-restart" => {
+            let session_id = args.first().copied();
+            handle_session_restart(session_id, user_id, channel_id, state).await
         }
 
         "session-pause" => {
@@ -395,11 +402,24 @@ async fn handle_acp_session_start(
         let reader_event_tx = event_tx.clone();
         let reader_session_id = created.id.clone();
         let reader_ct = session_ct.clone();
+        let reader_db = Arc::clone(&state.db);
+        let reader_driver: Arc<dyn crate::driver::AgentDriver> = acp_driver.clone();
+        let reader_channel_id = channel_id.to_owned();
+        let reader_thread_ts: Option<String> = None; // thread_ts not yet recorded at spawn
+        let reader_slack = state.slack.clone();
+        let flush_ctx = crate::acp::reader::ReconnectFlushContext {
+            db: reader_db,
+            driver: reader_driver,
+            slack: reader_slack,
+            channel_id: Some(reader_channel_id),
+            thread_ts: reader_thread_ts,
+        };
         tokio::spawn(crate::acp::reader::run_reader(
             reader_session_id,
             conn.stdout,
             reader_event_tx,
             reader_ct,
+            Some(flush_ctx),
         ));
 
         let writer_session_id = created.id.clone();
@@ -559,6 +579,71 @@ async fn handle_session_clear(
     }
 
     Ok(format!("Session `{}` terminated.", terminated.id))
+}
+
+/// Restart an ACP session (T098 / S067).
+///
+/// Terminates the currently running session (marking it `Interrupted`),
+/// removes the child process from the registry, and spawns a fresh ACP session
+/// with the same original prompt, channel, and owner.  The new session posts
+/// its "started" message to the channel so the operator can track it.
+///
+/// Works only in ACP mode.  Attempting to restart an MCP session returns a
+/// descriptive error.
+async fn handle_session_restart(
+    session_id: Option<&str>,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
+    spawner::verify_session_owner(&session, user_id)?;
+
+    if session.protocol_mode != ProtocolMode::Acp {
+        return Err(crate::AppError::Config(
+            "session-restart is only supported for ACP sessions".into(),
+        ));
+    }
+
+    let original_prompt = session.prompt.clone().unwrap_or_default();
+    let old_session_id = session.id.clone();
+
+    // Interrupt the old session via the driver (best-effort).
+    if let Some(ref acp_driver) = state.acp_driver {
+        if let Err(err) = acp_driver.interrupt(&old_session_id).await {
+            warn!(%err, session_id = %old_session_id, "acp interrupt failed during restart — continuing");
+        }
+    }
+
+    // Remove the child from the registry so the old process is dropped.
+    let mut child = state.active_children.lock().await.remove(&old_session_id);
+
+    // Mark old session as Interrupted.
+    if let Err(err) =
+        session_manager::terminate_session(&old_session_id, &repo, child.as_mut()).await
+    {
+        warn!(%err, session_id = %old_session_id, "failed to terminate old session during restart");
+    }
+
+    // Notify the Slack thread that the session was restarted.
+    if let Some(ref slack) = state.slack {
+        let msg = SlackMessage {
+            channel: SlackChannelId(channel_id.to_owned()),
+            text: Some(format!(
+                "\u{1f504} Session `{old_session_id}` is being restarted with original prompt."
+            )),
+            blocks: None,
+            thread_ts: session.thread_ts.as_deref().map(|s| SlackTs(s.to_owned())),
+        };
+        if let Err(err) = slack.enqueue(msg).await {
+            warn!(%err, "failed to post restart notification");
+        }
+    }
+
+    // Spawn the new ACP session with the original prompt.
+    handle_acp_session_start(&original_prompt, user_id, channel_id, state).await
 }
 
 // ── Checkpoint commands (T070-T071 integration, T072) ────────────────

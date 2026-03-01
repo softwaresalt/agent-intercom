@@ -248,15 +248,15 @@
 
 ### Tests (S059–S062)
 
-- [ ] T085 [P] [US8] Write unit test for steering queue when agent offline in `tests/unit/offline_queue_tests.rs` — covers S059
-- [ ] T086 [P] [US8] Write integration test for queued message delivery on reconnect in `tests/integration/acp_lifecycle_tests.rs` — covers S060, S062
+- [x] T085 [P] [US8] Write unit test for steering queue when agent offline in `tests/unit/offline_queue_tests.rs` — covers S059
+- [x] T086 [P] [US8] Write integration test for queued message delivery on reconnect in `tests/integration/acp_lifecycle_tests.rs` — covers S060, S062
 
 ### Implementation
 
-- [ ] T087 [US8] Add agent connectivity status tracking to session model (online/offline/stalled) in `src/models/session.rs`
-- [ ] T088 [US8] Update steering handler in `src/slack/handlers/steer.rs` to check connectivity status and post "Agent offline — message queued" notification
-- [ ] T089 [US8] Implement message flush on ACP reconnect — on stream activity resume, read all unconsumed steering messages and deliver via `driver.send_prompt`
-- [ ] T090 [US8] Post "Agent back online — delivering N queued messages" notification to Slack thread
+- [x] T087 [US8] Add agent connectivity status tracking to session model (online/offline/stalled) in `src/models/session.rs`
+- [x] T088 [US8] Update steering handler in `src/slack/handlers/steer.rs` to check connectivity status and post "Agent offline — message queued" notification
+- [x] T089 [US8] Implement message flush on ACP reconnect — on stream activity resume, read all unconsumed steering messages and deliver via `driver.send_prompt`
+- [x] T090 [US8] Post "Agent back online — delivering N queued messages" notification to Slack thread
 
 **Checkpoint**: Offline queuing works transparently; operator sees clear status indicators
 
@@ -270,18 +270,18 @@
 
 ### Tests (S063–S068)
 
-- [ ] T091 [P] [US9] Write unit test for ACP stream activity resetting stall timer in `tests/unit/stall_detector_tests.rs` — covers S063
-- [ ] T092 [P] [US9] Write unit test for ACP nudge delivery via stream in `tests/unit/stall_detector_tests.rs` — covers S064
-- [ ] T093 [P] [US9] Write unit test for nudge retry exhaustion and operator notification in `tests/unit/stall_detector_tests.rs` — covers S066
-- [ ] T094 [P] [US9] Write unit test for crash with pending clearance in `tests/unit/acp_session_tests.rs` — covers S068
+- [x] T091 [P] [US9] Write unit test for ACP stream activity resetting stall timer in `tests/unit/stall_detector_tests.rs` — covers S063
+- [x] T092 [P] [US9] Write unit test for ACP nudge delivery via stream in `tests/unit/stall_detector_tests.rs` — covers S064
+- [x] T093 [P] [US9] Write unit test for nudge retry exhaustion and operator notification in `tests/unit/stall_detector_tests.rs` — covers S066
+- [x] T094 [P] [US9] Write unit test for crash with pending clearance in `tests/unit/acp_session_tests.rs` — covers S068
 
 ### Implementation
 
-- [ ] T095 [US9] Add `StreamActivity` variant to stall detector activity source in `src/orchestrator/stall_detector.rs`
-- [ ] T096 [US9] Update ACP reader task to bump `last_stream_activity` timestamp on every successful parse in `src/acp/reader.rs`
-- [ ] T097 [US9] Wire stall detector to call `driver.send_prompt(session_id, nudge)` for ACP sessions instead of MCP notification
-- [ ] T098 [US9] Implement session restart from Slack — kill old process, spawn new with original prompt, same thread_ts (S067)
-- [ ] T099 [US9] Handle pending clearance resolution on crash — resolve as timeout, notify operator (S068)
+- [x] T095 [US9] Add `StreamActivity` variant to stall detector activity source in `src/orchestrator/stall_detector.rs`
+- [x] T096 [US9] Update ACP reader task to bump `last_stream_activity` timestamp on every successful parse in `src/acp/reader.rs`
+- [x] T097 [US9] Wire stall detector to call `driver.send_prompt(session_id, nudge)` for ACP sessions instead of MCP notification
+- [x] T098 [US9] Implement session restart from Slack — kill old process, spawn new with original prompt, same thread_ts (S067)
+- [x] T099 [US9] Handle pending clearance resolution on crash — resolve as timeout, notify operator (S068)
 
 **Checkpoint**: ACP stall detection and recovery fully functional
 
