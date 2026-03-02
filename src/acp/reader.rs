@@ -52,11 +52,13 @@ use crate::{AppError, Result};
 /// Top-level ACP message envelope (agent → server).
 #[derive(Debug, Deserialize)]
 struct AcpEnvelope {
-    /// Message type identifier (e.g., `clearance/request`).
-    method: String,
+    /// Message type identifier (e.g., `clearance/request`).  Optional because
+    /// JSON-RPC result messages carry only `id` + `result`/`error`.
+    method: Option<String>,
     /// Optional correlation ID; required for request/response pairs.
     id: Option<String>,
-    /// Method-specific payload.
+    /// Method-specific payload.  Defaults to `null` for result messages.
+    #[serde(default)]
     params: serde_json::Value,
 }
 
@@ -89,6 +91,32 @@ struct PromptForwardParams {
 #[derive(Debug, Deserialize)]
 struct HeartbeatParams {
     progress: Option<Vec<ProgressItem>>,
+}
+
+/// Parameters for the ACP `session/update` method (streaming content).
+#[derive(Debug, Deserialize)]
+struct SessionUpdateParams {
+    update: SessionUpdatePayload,
+}
+
+/// Payload within a `session/update` message.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionUpdatePayload {
+    /// Update type (e.g., `agent_message_chunk`, `agent_tool_use`, etc.).
+    session_update: String,
+    /// Content block (present for `agent_message_chunk` updates).
+    content: Option<SessionUpdateContent>,
+}
+
+/// Content block within a `session/update` payload.
+#[derive(Debug, Deserialize)]
+struct SessionUpdateContent {
+    /// Content type (e.g., `text`, `tool_use`).
+    #[serde(rename = "type")]
+    _content_type: Option<String>,
+    /// Text content (present for `text` type updates).
+    text: Option<String>,
 }
 
 // ── Reconnect flush context ───────────────────────────────────────────────────
@@ -137,13 +165,22 @@ pub fn parse_inbound_line(session_id: &str, line: &str) -> Result<Option<AgentEv
     let envelope: AcpEnvelope =
         serde_json::from_str(line).map_err(|e| AppError::Acp(format!("malformed json: {e}")))?;
 
-    match envelope.method.as_str() {
+    // JSON-RPC result/error messages have no `method` — skip them gracefully.
+    let Some(ref method_str) = envelope.method else {
+        debug!(session_id, "acp reader: skipping JSON-RPC result message");
+        return Ok(None);
+    };
+
+    match method_str.as_str() {
         "clearance/request" => parse_clearance_request(session_id, envelope),
         "status/update" => parse_status_update(session_id, envelope),
         "prompt/forward" => parse_prompt_forward(session_id, envelope),
         "heartbeat" => parse_heartbeat(session_id, envelope),
+        // ACP `session/update` — streaming content from the agent during prompt
+        // execution.  Treated as a status update so the operator sees progress.
+        "session/update" => parse_session_update(session_id, envelope),
         // Handshake response from the agent — silently accepted. The
-        // `initialized` message is consumed by `handshake::wait_for_initialized`
+        // `initialized` message is consumed by `handshake::wait_for_initialize_result`
         // before `run_reader` starts; if one slips through, skip it gracefully.
         "initialized" => Ok(None),
         other => {
@@ -423,6 +460,41 @@ fn parse_heartbeat(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEve
         session_id: session_id.to_owned(),
         progress: params.progress,
     }))
+}
+
+/// Parse an ACP `session/update` envelope into [`AgentEvent::StatusUpdated`].
+///
+/// The `session/update` notification is the primary streaming mechanism in the
+/// ACP protocol.  Text chunks from the agent are surfaced as status updates so
+/// the operator can follow progress in the Slack thread.
+fn parse_session_update(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEvent>> {
+    let params: SessionUpdateParams = serde_json::from_value(env.params).map_err(|e| {
+        AppError::Acp(format!(
+            "missing required field: session/update params: {e}"
+        ))
+    })?;
+
+    let update_type = &params.update.session_update;
+
+    // Extract text content from agent_message_chunk updates.
+    if update_type == "agent_message_chunk" {
+        if let Some(ref content) = params.update.content {
+            if let Some(ref text) = content.text {
+                if !text.is_empty() {
+                    return Ok(Some(AgentEvent::StatusUpdated {
+                        session_id: session_id.to_owned(),
+                        message: text.clone(),
+                    }));
+                }
+            }
+        }
+    }
+
+    debug!(
+        session_id,
+        update_type, "acp reader: skipping non-text session/update"
+    );
+    Ok(None)
 }
 
 /// Send [`AgentEvent::SessionTerminated`] through `event_tx`, logging on failure.

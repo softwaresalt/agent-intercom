@@ -58,7 +58,7 @@ retention_days = 30
 
 # Agent binary used to spawn sessions (both modes reference this for spawning).
 host_cli = "D:/Tools/ghcpcli/copilot.exe"
-host_cli_args = ["--stdio"]
+host_cli_args = ["--acp", "--yolo"]
 
 # Slack message verbosity: minimal, standard, or verbose.
 slack_detail_level = "verbose"

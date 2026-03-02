@@ -126,13 +126,14 @@ async fn empty_prompt_is_rejected_by_send_prompt() {
         return;
     };
 
-    let result_empty = send_prompt(&mut conn.stdin, "sess-empty-prompt-test", "").await;
+    let result_empty = send_prompt(&mut conn.stdin, "sess-empty-prompt-test", "agent-s", "").await;
     assert!(
         result_empty.is_err(),
         "send_prompt must reject an empty prompt"
     );
 
-    let result_whitespace = send_prompt(&mut conn.stdin, "sess-empty-prompt-test", "   ").await;
+    let result_whitespace =
+        send_prompt(&mut conn.stdin, "sess-empty-prompt-test", "agent-s", "   ").await;
     assert!(
         result_whitespace.is_err(),
         "send_prompt must reject a whitespace-only prompt"
