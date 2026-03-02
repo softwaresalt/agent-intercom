@@ -83,7 +83,7 @@ Write-Host "  IPC pipe:  agent-intercom-acp (auto-suffixed)" -ForegroundColor Da
 Write-Host "  Database:  data/agent-intercom.db" -ForegroundColor DarkGray
 Write-Host "  Log level: $env:RUST_LOG" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "Use /intercom session-start in a mapped Slack channel to spawn an agent." -ForegroundColor Green
+Write-Host "Use /arc session-start in a mapped Slack channel to spawn an agent." -ForegroundColor Green
 Write-Host ""
 
 & $binary --config config.toml --mode acp

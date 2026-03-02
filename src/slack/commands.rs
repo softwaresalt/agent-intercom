@@ -379,8 +379,8 @@ async fn handle_session_start(
 
 // This startup sequence is inherently sequential — each step depends on the
 // previous (validate → count sessions → create DB record → spawn process →
-// handshake → register driver → post Slack message). Splitting it artificially
-// would reduce clarity without reducing complexity.
+// handshake → register driver → post Slack message). The heavy work runs
+// in a background task so the slash command can respond immediately.
 #[allow(clippy::too_many_lines)]
 async fn handle_acp_session_start(
     prompt: &str,
@@ -428,42 +428,98 @@ async fn handle_acp_session_start(
     session.channel_id = Some(channel_id.to_owned());
 
     let created = repo.create(&session).await?;
+    let session_id = created.id.clone();
+
+    // Spawn the heavy work (process launch, handshake, Slack posting) in a
+    // background task so the slash command can return immediately. Slack
+    // Socket Mode requires an acknowledgement within ~3 seconds; spawning
+    // and waiting for the agent's ready signal can take 30+ seconds.
+    let bg_state = Arc::clone(state);
+    let bg_prompt = prompt.to_owned();
+    let bg_channel = channel_id.to_owned();
+    let bg_workspace_root = workspace_root;
+    let bg_workspace_name = workspace_name.clone();
+    let bg_session_id = session_id.clone();
+
+    tokio::spawn(async move {
+        if let Err(err) = finish_acp_session_start(
+            &bg_session_id,
+            &bg_prompt,
+            &bg_channel,
+            &bg_workspace_root,
+            &bg_workspace_name,
+            &bg_state,
+        )
+        .await
+        {
+            warn!(
+                session_id = %bg_session_id,
+                %err,
+                "ACP session start failed in background"
+            );
+            // Mark the session as interrupted so it doesn't linger as pending.
+            let repo = SessionRepo::new(Arc::clone(&bg_state.db));
+            repo.set_terminated(&bg_session_id, SessionStatus::Interrupted)
+                .await
+                .ok();
+
+            // Notify the operator of the failure via Slack.
+            if let Some(ref slack) = bg_state.slack {
+                let msg = SlackMessage {
+                    channel: SlackChannelId(bg_channel.clone()),
+                    text: Some(format!(
+                        "\u{274c} ACP session `{}` failed to start: {err}",
+                        bg_session_id.chars().take(8).collect::<String>()
+                    )),
+                    blocks: None,
+                    thread_ts: None,
+                };
+                slack.post_message_direct(msg).await.ok();
+            }
+        }
+    });
+
+    Ok(format!(
+        "\u{23f3} Starting ACP session `{}` in `{workspace_name}`…",
+        session_id.chars().take(8).collect::<String>()
+    ))
+}
+
+/// Background continuation of ACP session start: spawn process, handshake,
+/// wire I/O tasks, post Slack notification.
+#[allow(clippy::too_many_lines)]
+async fn finish_acp_session_start(
+    session_id: &str,
+    prompt: &str,
+    channel_id: &str,
+    workspace_root: &Path,
+    workspace_name: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<()> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
 
     // Spawn the agent process (no prompt CLI arg — FR-030).
     let spawn_cfg = SpawnConfig {
         host_cli: state.config.host_cli.clone(),
         host_cli_args: state.config.host_cli_args.clone(),
-        workspace_root: workspace_root.clone(),
+        workspace_root: workspace_root.to_path_buf(),
         startup_timeout: Duration::from_secs(state.config.acp.startup_timeout_seconds),
     };
 
-    let mut conn = match crate::acp::spawner::spawn_agent(&spawn_cfg, &created.id).await {
-        Ok(c) => c,
-        Err(err) => {
-            repo.set_terminated(&created.id, SessionStatus::Interrupted)
-                .await
-                .ok();
-            return Err(err);
-        }
-    };
+    let mut conn = crate::acp::spawner::spawn_agent(&spawn_cfg, session_id).await?;
 
     // Perform the initialize / initialized handshake, then deliver the prompt.
     let handshake_timeout = Duration::from_secs(state.config.acp.startup_timeout_seconds);
     let handshake_result = async {
-        handshake::send_initialize(
-            &mut conn.stdin,
-            &created.id,
-            &workspace_root,
-            &workspace_name,
-        )
-        .await?;
-        handshake::wait_for_initialized(&mut conn.stdout, &created.id, handshake_timeout).await?;
-        handshake::send_prompt(&mut conn.stdin, &created.id, prompt).await
+        handshake::send_initialize(&mut conn.stdin, session_id, workspace_root, workspace_name)
+            .await?;
+        handshake::wait_for_initialized(&mut conn.stdout, session_id, handshake_timeout).await?;
+        handshake::send_prompt(&mut conn.stdin, session_id, prompt).await
     }
     .await;
 
     if let Err(err) = handshake_result {
-        repo.set_terminated(&created.id, SessionStatus::Interrupted)
+        repo.set_terminated(session_id, SessionStatus::Interrupted)
             .await
             .ok();
         return Err(err);
@@ -476,11 +532,11 @@ async fn handle_acp_session_start(
         use tokio_util::sync::CancellationToken;
 
         let (msg_tx, msg_rx) = tokio::sync::mpsc::channel(256);
-        acp_driver.register_session(&created.id, msg_tx).await;
+        acp_driver.register_session(session_id, msg_tx).await;
 
         let session_ct = CancellationToken::new();
         let reader_event_tx = event_tx.clone();
-        let reader_session_id = created.id.clone();
+        let reader_session_id = session_id.to_owned();
         let reader_ct = session_ct.clone();
         let reader_db = Arc::clone(&state.db);
         let reader_driver: Arc<dyn crate::driver::AgentDriver> = acp_driver.clone();
@@ -501,7 +557,7 @@ async fn handle_acp_session_start(
             Some(flush_ctx),
         ));
 
-        let writer_session_id = created.id.clone();
+        let writer_session_id = session_id.to_owned();
         let writer_ct = session_ct.clone();
         tokio::spawn(crate::acp::writer::run_writer(
             writer_session_id,
@@ -514,19 +570,19 @@ async fn handle_acp_session_start(
             .active_children
             .lock()
             .await
-            .insert(created.id.clone(), conn.child);
+            .insert(session_id.to_owned(), conn.child);
     } else {
         // ACP driver not configured — store child handle only.
         state
             .active_children
             .lock()
             .await
-            .insert(created.id.clone(), conn.child);
+            .insert(session_id.to_owned(), conn.child);
     }
 
     // Activate the session.
     let active = repo
-        .update_status(&created.id, SessionStatus::Active)
+        .update_status(session_id, SessionStatus::Active)
         .await?;
 
     // T058 / S036: Post "session started" as the thread root and record ts.
@@ -558,13 +614,10 @@ async fn handle_acp_session_start(
 
     info!(
         session_id = active.id,
-        channel_id, user_id, workspace = %workspace_name, "ACP session started"
+        channel_id, workspace = %workspace_name, "ACP session started"
     );
 
-    Ok(format!(
-        "ACP session `{}` started in `{workspace_name}` with prompt: _{}_",
-        active.id, prompt
-    ))
+    Ok(())
 }
 
 /// Start a new MCP session (existing behaviour, now refactored into its own fn).
