@@ -73,6 +73,14 @@ pub async fn store_from_slack(
         && session.connectivity_status == ConnectivityStatus::Online
     {
         if let Some(ref acp_driver) = state.acp_driver {
+            // Ensure agent_session_id is registered in the driver's in-memory
+            // map (may be absent after a server restart while the session's
+            // agent process is still alive).
+            if let Some(ref asid) = session.agent_session_id {
+                acp_driver
+                    .register_agent_session_id(&session.id, asid)
+                    .await;
+            }
             acp_driver
                 .send_prompt(&session.id, text)
                 .await

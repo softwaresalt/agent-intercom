@@ -672,6 +672,10 @@ async fn check_interrupted_on_startup(state: &AppState) {
 ///
 /// Reads events from the shared channel and:
 /// - [`StreamActivity`]: resets the per-session stall detector timer (S063).
+/// - [`StatusUpdated`]: accumulates text fragments per session and posts
+///   aggregated messages to the session's Slack thread after a 2-second
+///   debounce (prevents flooding from word-by-word `agent_message_chunk`
+///   streaming).
 /// - [`SessionTerminated`]: resolves any pending clearance requests as
 ///   `Interrupted` (S068) and optionally notifies the operator on Slack.
 /// - All other variants: logged at INFO for observability.
@@ -682,10 +686,18 @@ async fn run_acp_event_consumer(
     cancel: tokio_util::sync::CancellationToken,
     state: Arc<AppState>,
 ) {
-    use agent_intercom::models::approval::ApprovalStatus;
-    use agent_intercom::persistence::approval_repo::ApprovalRepo;
-    use agent_intercom::slack::client::SlackMessage;
-    use slack_morphism::prelude::SlackChannelId;
+    use std::collections::HashMap;
+    use tokio::time::{Duration, Instant};
+
+    /// Per-session text accumulator for debounced Slack posting.
+    struct TextBuffer {
+        text: String,
+        last_update: Instant,
+    }
+
+    let mut text_buffers: HashMap<String, TextBuffer> = HashMap::new();
+    let debounce = Duration::from_secs(2);
+    let mut flush_interval = tokio::time::interval(Duration::from_millis(500));
 
     loop {
         tokio::select! {
@@ -693,6 +705,20 @@ async fn run_acp_event_consumer(
             () = cancel.cancelled() => {
                 info!("acp event consumer: cancellation received, stopping");
                 break;
+            }
+            _ = flush_interval.tick() => {
+                // Flush text buffers that have been idle for ≥ debounce duration.
+                let now = Instant::now();
+                let expired_keys: Vec<String> = text_buffers
+                    .iter()
+                    .filter(|(_, buf)| now.duration_since(buf.last_update) >= debounce)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for session_id in expired_keys {
+                    if let Some(buf) = text_buffers.remove(&session_id) {
+                        flush_text_to_slack(&state, &session_id, &buf.text).await;
+                    }
+                }
             }
             event = rx.recv() => {
                 match event {
@@ -718,7 +744,15 @@ async fn run_acp_event_consumer(
                         );
                     }
                     Some(AgentEvent::StatusUpdated { ref session_id, ref message }) => {
-                        info!(session_id, message, "acp event: status update");
+                        // Accumulate text; debounce flush posts to Slack thread.
+                        let entry = text_buffers
+                            .entry(session_id.clone())
+                            .or_insert_with(|| TextBuffer {
+                                text: String::new(),
+                                last_update: Instant::now(),
+                            });
+                        entry.text.push_str(message);
+                        entry.last_update = Instant::now();
                     }
                     Some(AgentEvent::PromptForwarded { ref session_id, ref prompt_id, ref prompt_text, .. }) => {
                         info!(
@@ -739,41 +773,112 @@ async fn run_acp_event_consumer(
                             "acp event: session terminated — resolving pending clearances"
                         );
 
-                        // S068: Resolve any pending clearance requests as Interrupted
-                        // so the operator is not left waiting for buttons that will
-                        // never be clicked.
-                        let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
-                        if let Err(err) = approval_repo
-                            .resolve_pending_for_session(session_id, ApprovalStatus::Interrupted)
-                            .await
-                        {
-                            warn!(%err, session_id, "failed to resolve pending clearances on termination");
+                        // Flush any buffered text before posting the termination notice.
+                        if let Some(buf) = text_buffers.remove(session_id) {
+                            flush_text_to_slack(&state, session_id, &buf.text).await;
                         }
 
-                        // Notify the operator via Slack (when available).
-                        if let Some(ref slack) = state.slack {
-                            let ch = state.config.slack.channel_id.clone();
-                            if !ch.is_empty() {
-                                let text = format!(
-                                    "\u{1f534} ACP session `{session_id}` terminated \
-                                     (reason: {reason}). Any pending clearances have been \
-                                     cancelled."
-                                );
-                                let msg = SlackMessage {
-                                    channel: SlackChannelId(ch),
-                                    text: Some(text),
-                                    blocks: None,
-                                    thread_ts: None,
-                                };
-                                if let Err(err) = slack.enqueue(msg).await {
-                                    warn!(%err, session_id, "failed to post termination notification");
-                                }
-                            }
-                        }
+                        handle_session_terminated(&state, session_id, reason).await;
                     }
                 }
             }
         }
+    }
+}
+
+/// Handle the `SessionTerminated` event: resolve pending clearances and
+/// notify the operator on Slack.
+async fn handle_session_terminated(state: &Arc<AppState>, session_id: &str, reason: &str) {
+    use agent_intercom::models::approval::ApprovalStatus;
+    use agent_intercom::persistence::approval_repo::ApprovalRepo;
+    use agent_intercom::persistence::session_repo::SessionRepo;
+    use agent_intercom::slack::client::SlackMessage;
+    use slack_morphism::prelude::{SlackChannelId, SlackTs};
+
+    // S068: Resolve any pending clearance requests as Interrupted
+    // so the operator is not left waiting for buttons that will never be clicked.
+    let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+    if let Err(err) = approval_repo
+        .resolve_pending_for_session(session_id, ApprovalStatus::Interrupted)
+        .await
+    {
+        warn!(%err, session_id, "failed to resolve pending clearances on termination");
+    }
+
+    // Notify the operator via Slack (when available).
+    let Some(ref slack) = state.slack else { return };
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+    let (ch, ts) = match session_repo.get_by_id(session_id).await {
+        Ok(Some(sess)) => (
+            sess.channel_id.unwrap_or_default(),
+            sess.thread_ts.map(SlackTs),
+        ),
+        _ => (state.config.slack.channel_id.clone(), None),
+    };
+    if !ch.is_empty() {
+        let text = format!(
+            "\u{1f534} ACP session `{session_id}` terminated \
+             (reason: {reason}). Any pending clearances have been cancelled."
+        );
+        let msg = SlackMessage {
+            channel: SlackChannelId(ch),
+            text: Some(text),
+            blocks: None,
+            thread_ts: ts,
+        };
+        if let Err(err) = slack.enqueue(msg).await {
+            warn!(%err, session_id, "failed to post termination notification");
+        }
+    }
+}
+
+/// Post accumulated text to the session's Slack thread.
+///
+/// Looks up the session's `channel_id` and `thread_ts` from the database,
+/// then enqueues a single aggregated message. Silently logs failures
+/// without propagating errors.
+async fn flush_text_to_slack(state: &Arc<AppState>, session_id: &str, text: &str) {
+    use agent_intercom::persistence::session_repo::SessionRepo;
+    use agent_intercom::slack::client::SlackMessage;
+    use slack_morphism::prelude::{SlackChannelId, SlackTs};
+
+    if text.trim().is_empty() {
+        return;
+    }
+
+    let Some(ref slack) = state.slack else {
+        info!(session_id, "acp text flush: no slack service, logging only");
+        info!(session_id, text, "acp agent response");
+        return;
+    };
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+    let (channel_id, thread_ts) = match session_repo.get_by_id(session_id).await {
+        Ok(Some(sess)) => (sess.channel_id, sess.thread_ts),
+        Ok(None) => {
+            warn!(session_id, "acp text flush: session not found in db");
+            return;
+        }
+        Err(err) => {
+            warn!(%err, session_id, "acp text flush: db lookup failed");
+            return;
+        }
+    };
+
+    let Some(ch) = channel_id else {
+        info!(session_id, text, "acp agent response (no channel)");
+        return;
+    };
+
+    let msg = SlackMessage {
+        channel: SlackChannelId(ch),
+        text: Some(text.to_owned()),
+        blocks: None,
+        thread_ts: thread_ts.map(SlackTs),
+    };
+
+    if let Err(err) = slack.enqueue(msg).await {
+        warn!(%err, session_id, "acp text flush: failed to post to Slack");
     }
 }
 
