@@ -17,14 +17,13 @@ use agent_intercom::driver::AgentEvent;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Build a `SpawnConfig` that references a known-good executable with the
-/// given startup timeout.  On Windows the workspace root defaults to `TEMP`.
-fn echo_config(startup_timeout: Duration) -> SpawnConfig {
+/// Build a `SpawnConfig` that references a known-good executable.
+/// On Windows the workspace root defaults to `TEMP`.
+fn echo_config() -> SpawnConfig {
     SpawnConfig {
         host_cli: echo_exe(),
         host_cli_args: Vec::new(),
         workspace_root: std::env::temp_dir(),
-        startup_timeout,
     }
 }
 
@@ -50,28 +49,6 @@ fn echo_args() -> Vec<String> {
     vec!["/C".to_owned(), "echo ready".to_owned()]
 }
 
-/// Platform-appropriate command that hangs (never writes to stdout).
-#[cfg(unix)]
-fn hanging_exe() -> String {
-    "sh".to_owned()
-}
-
-#[cfg(windows)]
-fn hanging_exe() -> String {
-    "cmd".to_owned()
-}
-
-/// Args that cause the process to sleep for a very long time.
-#[cfg(unix)]
-fn hanging_args() -> Vec<String> {
-    vec!["-c".to_owned(), "sleep 300".to_owned()]
-}
-
-#[cfg(windows)]
-fn hanging_args() -> Vec<String> {
-    vec!["/C".to_owned(), "timeout /t 300 /nobreak".to_owned()]
-}
-
 // ── T033: stop ACP session calls interrupt() ─────────────────────────────────
 
 /// S021 — The `AgentDriver::interrupt` contract must be satisfied: calling it
@@ -84,7 +61,7 @@ async fn acp_session_stop_terminates_child_process() {
     use agent_intercom::driver::mcp_driver::McpDriver;
 
     // SpawnConfig import proves the spawner types are accessible.
-    let _config = echo_config(Duration::from_secs(5));
+    let _config = echo_config();
 
     // For ACP sessions the orchestrator calls driver.interrupt(session_id).
     // McpDriver's interrupt is idempotent — unknown sessions return Ok(()).
@@ -102,13 +79,12 @@ async fn acp_session_stop_terminates_child_process() {
 /// `AgentEvent::SessionTerminated` with the correct `session_id`.
 #[tokio::test]
 async fn agent_process_crash_is_detected() {
-    let mut cfg = echo_config(Duration::from_secs(10));
+    let mut cfg = echo_config();
     cfg.host_cli = echo_exe();
     cfg.host_cli_args = echo_args();
 
     // Spawn a process that exits immediately after printing one line.
     let conn = spawn_agent(&cfg, "sess-crash-test")
-        .await
         .expect("spawn_agent must succeed with echo-like process");
 
     let (tx, mut rx) = mpsc::channel::<AgentEvent>(8);
@@ -131,33 +107,6 @@ async fn agent_process_crash_is_detected() {
     }
 }
 
-// ── T035: startup timeout kills process ──────────────────────────────────────
-
-/// S025 — if the agent never writes to stdout within `startup_timeout`,
-/// `spawn_agent` must kill the process and return `AppError::Acp`.
-#[tokio::test]
-async fn startup_timeout_kills_process_if_no_response() {
-    let config = SpawnConfig {
-        host_cli: hanging_exe(),
-        host_cli_args: hanging_args(),
-        workspace_root: std::env::temp_dir(),
-        startup_timeout: Duration::from_millis(150),
-    };
-
-    let result = spawn_agent(&config, "sess-timeout-test").await;
-
-    assert!(
-        result.is_err(),
-        "spawn_agent must fail when no ready signal arrives within startup_timeout"
-    );
-    let err = result.unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("startup timeout") || msg.contains("acp:"),
-        "error must mention startup timeout, got: {msg}"
-    );
-}
-
 // ── T036: empty prompt is rejected by send_prompt ────────────────────────────
 
 /// S026 — `handshake::send_prompt` must return an error when the prompt is
@@ -170,9 +119,9 @@ async fn empty_prompt_is_rejected_by_send_prompt() {
     use agent_intercom::acp::handshake::send_prompt;
 
     // We need a writable stdin handle. Spawn a short-lived process to get one.
-    let mut cfg = echo_config(Duration::from_secs(5));
+    let mut cfg = echo_config();
     cfg.host_cli_args = echo_args();
-    let Ok(mut conn) = spawn_agent(&cfg, "sess-empty-prompt-test").await else {
+    let Ok(mut conn) = spawn_agent(&cfg, "sess-empty-prompt-test") else {
         // If the process can't be spawned in this test environment, skip.
         return;
     };

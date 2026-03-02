@@ -27,7 +27,6 @@ async fn acp_session_start_creates_session_with_acp_protocol_mode() {
         host_cli: "echo".to_owned(),
         host_cli_args: Vec::new(),
         workspace_root: std::env::temp_dir(),
-        startup_timeout: std::time::Duration::from_secs(5),
     };
 
     // Build a Session the way the ACP session-start handler does.

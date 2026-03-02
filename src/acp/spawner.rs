@@ -4,14 +4,14 @@
 //! - `kill_on_drop(true)` so processes are cleaned up automatically.
 //! - `env_clear()` + a safe variable allowlist to prevent Slack tokens and
 //!   other secrets from leaking into the child's environment (FR-029, S075).
-//! - A configurable startup timeout: if the agent does not emit its ready
-//!   signal (first stdout line) within the window, the process is killed and
-//!   `AppError::Acp("startup timeout")` is returned.
+//!
+//! The spawner does **not** wait for a ready signal on stdout — the caller
+//! verifies process readiness via the ACP handshake (`initialize` /
+//! `initialized` exchange).
 
 use std::path::PathBuf;
-use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::BufReader;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -50,17 +50,12 @@ pub const ALLOWED_ENV_VARS: &[&str] = &[
 /// Configuration for spawning an ACP agent process.
 #[derive(Debug, Clone)]
 pub struct SpawnConfig {
-    /// Host CLI binary (e.g., `claude`, `gh`, `python`).
+    /// Host CLI binary (e.g., `claude`, `gh`, `copilot`).
     pub host_cli: String,
-    /// Default arguments passed to the host CLI before the prompt.
+    /// Default arguments passed to the host CLI.
     pub host_cli_args: Vec<String>,
     /// Workspace root directory; the child process starts in this directory.
     pub workspace_root: PathBuf,
-    /// Maximum time to wait for the agent's ready signal (first stdout line).
-    ///
-    /// If no line is received within this window the spawner kills the
-    /// process and returns `AppError::Acp("startup timeout …")`.
-    pub startup_timeout: Duration,
 }
 
 // ── Connection handle ────────────────────────────────────────────────────────
@@ -85,16 +80,15 @@ pub struct AcpConnection {
 
 // ── Spawner ──────────────────────────────────────────────────────────────────
 
-/// Spawn an ACP agent process and wait for its ready signal.
+/// Spawn an ACP agent process.
 ///
 /// The spawner:
 /// 1. Validates that `session_id` is non-empty.
 /// 2. Builds a `tokio::process::Command` with `env_clear()` and only the
 ///    variables listed in [`ALLOWED_ENV_VARS`].
 /// 3. Passes `INTERCOM_SESSION_ID` as an explicit environment variable.
-/// 4. Waits up to `config.startup_timeout` for the first line of stdout
-///    (the agent's ready signal).
-/// 5. On timeout: kills the process and returns `AppError::Acp`.
+/// 4. Returns the connection handle immediately — readiness is verified
+///    by the caller via the ACP handshake (`initialize` / `initialized`).
 ///
 /// The initial prompt is **not** passed as a CLI argument. Instead, the caller
 /// must send it via `handshake::send_prompt` after the `initialize` /
@@ -103,9 +97,7 @@ pub struct AcpConnection {
 /// # Errors
 ///
 /// - `AppError::Acp("failed to spawn agent: …")` — OS spawn failure.
-/// - `AppError::Acp("startup timeout …")` — no ready line within the window.
-/// - `AppError::Acp("agent process exited before ready signal")` — early EOF.
-pub async fn spawn_agent(config: &SpawnConfig, session_id: &str) -> Result<AcpConnection> {
+pub fn spawn_agent(config: &SpawnConfig, session_id: &str) -> Result<AcpConnection> {
     let mut cmd = Command::new(&config.host_cli);
 
     for arg in &config.host_cli_args {
@@ -142,37 +134,9 @@ pub async fn spawn_agent(config: &SpawnConfig, session_id: &str) -> Result<AcpCo
         .take()
         .ok_or_else(|| AppError::Acp("failed to capture agent stdout".into()))?;
 
-    let mut reader = BufReader::new(stdout_raw);
-    let mut line = String::new();
+    let reader = BufReader::new(stdout_raw);
 
-    match tokio::time::timeout(config.startup_timeout, reader.read_line(&mut line)).await {
-        Ok(Ok(n)) if n > 0 => {
-            info!(
-                session_id,
-                ready_line = line.trim(),
-                "agent emitted ready signal"
-            );
-        }
-        Ok(Ok(_)) => {
-            // n == 0 means EOF — process exited before sending anything.
-            return Err(AppError::Acp(
-                "agent process exited before ready signal".into(),
-            ));
-        }
-        Ok(Err(err)) => {
-            return Err(AppError::Acp(format!(
-                "failed to read agent ready signal: {err}"
-            )));
-        }
-        Err(_elapsed) => {
-            // Kill the process before returning the error.
-            child.kill().await.ok();
-            return Err(AppError::Acp(format!(
-                "startup timeout: agent did not emit ready signal within {:?}",
-                config.startup_timeout
-            )));
-        }
-    }
+    info!(session_id, cli = %config.host_cli, "agent process spawned");
 
     Ok(AcpConnection {
         session_id: session_id.to_owned(),

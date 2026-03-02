@@ -503,10 +503,9 @@ async fn finish_acp_session_start(
         host_cli: state.config.host_cli.clone(),
         host_cli_args: state.config.host_cli_args.clone(),
         workspace_root: workspace_root.to_path_buf(),
-        startup_timeout: Duration::from_secs(state.config.acp.startup_timeout_seconds),
     };
 
-    let mut conn = crate::acp::spawner::spawn_agent(&spawn_cfg, session_id).await?;
+    let mut conn = crate::acp::spawner::spawn_agent(&spawn_cfg, session_id)?;
 
     // Perform the initialize / initialized handshake, then deliver the prompt.
     let handshake_timeout = Duration::from_secs(state.config.acp.startup_timeout_seconds);
