@@ -107,6 +107,9 @@ async fn steering_when_online_sends_directly() {
     let acp_driver = AcpDriver::new();
     let (writer_tx, mut writer_rx) = mpsc::channel::<serde_json::Value>(8);
     acp_driver.register_session(&session.id, writer_tx).await;
+    acp_driver
+        .register_agent_session_id(&session.id, "agent-sess-1")
+        .await;
 
     // Send a prompt directly via the driver (simulating store_from_slack Online path).
     acp_driver
@@ -120,10 +123,13 @@ async fn steering_when_online_sends_directly() {
         .expect("writer channel must have received the prompt");
     assert_eq!(
         msg["method"].as_str(),
-        Some("prompt/send"),
-        "online steering must produce a prompt/send message"
+        Some("session/prompt"),
+        "online steering must produce a session/prompt message"
     );
-    assert_eq!(msg["params"]["text"].as_str(), Some("status check"));
+    assert_eq!(
+        msg["params"]["prompt"][0]["text"].as_str(),
+        Some("status check")
+    );
 
     // Verify the steering repo is empty (no queuing for online sessions).
     let steering_repo = SteeringRepo::new(Arc::clone(&pool));

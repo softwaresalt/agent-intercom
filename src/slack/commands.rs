@@ -523,6 +523,9 @@ async fn finish_acp_session_start(
             handshake_timeout,
         )
         .await?;
+        // Persist the agent-assigned session ID for subsequent prompts.
+        repo.set_agent_session_id(session_id, &agent_session_id)
+            .await?;
         handshake::send_prompt(&mut conn.stdin, session_id, &agent_session_id, prompt).await
     }
     .await;
@@ -542,6 +545,16 @@ async fn finish_acp_session_start(
 
         let (msg_tx, msg_rx) = tokio::sync::mpsc::channel(256);
         acp_driver.register_session(session_id, msg_tx).await;
+
+        // Register the agent-assigned session ID so `send_prompt` can include
+        // it in `session/prompt` messages.
+        if let Ok(Some(sess)) = repo.get_by_id(session_id).await {
+            if let Some(ref asid) = sess.agent_session_id {
+                acp_driver
+                    .register_agent_session_id(session_id, asid)
+                    .await;
+            }
+        }
 
         let session_ct = CancellationToken::new();
         let reader_event_tx = event_tx.clone();

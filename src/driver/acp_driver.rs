@@ -44,14 +44,22 @@ struct PendingPromptAcp {
 /// Shared map type alias for session writer channels.
 type WriterMap = Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>;
 
+/// Shared map type alias for agent-assigned session IDs.
+type AgentSessionIdMap = Arc<Mutex<HashMap<String, String>>>;
+
+/// Atomic counter for generating unique JSON-RPC request IDs.
+static PROMPT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 // ── AcpDriver ─────────────────────────────────────────────────────────────────
 
 /// ACP protocol driver — routes operator actions to the correct agent stream.
 ///
-/// Maintains three shared maps protected by async mutexes:
+/// Maintains four shared maps protected by async mutexes:
 ///
 /// - `stream_writers`: `session_id` → [`mpsc::Sender<Value>`] registered when
 ///   an ACP session connects.
+/// - `agent_session_ids`: intercom `session_id` → ACP `agent_session_id`
+///   (from the `session/new` handshake result).
 /// - `pending_clearances`: `request_id` → owning `session_id`, populated by
 ///   the event consumer on `clearance/request` receipt.
 /// - `pending_prompts_acp`: `prompt_id` → owning `session_id`, populated by
@@ -63,6 +71,8 @@ type WriterMap = Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>;
 pub struct AcpDriver {
     /// Per-session writer channels: `session_id` → outbound message sender.
     stream_writers: WriterMap,
+    /// Intercom session ID → ACP agent-assigned session ID mapping.
+    agent_session_ids: AgentSessionIdMap,
     /// Pending clearance requests: `request_id` → owning session metadata.
     pending_clearances: Arc<Mutex<HashMap<String, PendingClearance>>>,
     /// Pending prompt-forward requests: `prompt_id` → owning session metadata.
@@ -75,6 +85,7 @@ impl AcpDriver {
     pub fn new() -> Self {
         Self {
             stream_writers: Arc::new(Mutex::new(HashMap::new())),
+            agent_session_ids: Arc::new(Mutex::new(HashMap::new())),
             pending_clearances: Arc::new(Mutex::new(HashMap::new())),
             pending_prompts_acp: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -93,11 +104,32 @@ impl AcpDriver {
         debug!(session_id, "acp driver: session writer registered");
     }
 
+    /// Register the ACP agent-assigned session ID for an intercom session.
+    ///
+    /// Must be called after `session/new` handshake completes. The agent
+    /// session ID is required for constructing `session/prompt` messages.
+    pub async fn register_agent_session_id(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+    ) {
+        self.agent_session_ids
+            .lock()
+            .await
+            .insert(session_id.to_owned(), agent_session_id.to_owned());
+        debug!(
+            session_id,
+            agent_session_id, "acp driver: agent session ID registered"
+        );
+    }
+
     /// Remove a session's writer channel on disconnection or termination.
     ///
-    /// Idempotent — removing an unknown `session_id` is a no-op.
+    /// Also removes the agent session ID mapping. Idempotent — removing an
+    /// unknown `session_id` is a no-op.
     pub async fn deregister_session(&self, session_id: &str) {
         self.stream_writers.lock().await.remove(session_id);
+        self.agent_session_ids.lock().await.remove(session_id);
         debug!(session_id, "acp driver: session writer deregistered");
     }
 
@@ -192,11 +224,14 @@ impl AgentDriver for AcpDriver {
 
     /// Send a new prompt or instruction to the agent's ACP stream.
     ///
-    /// Writes a `prompt/send` JSON message to the session's writer channel.
+    /// Writes a `session/prompt` JSON-RPC message containing the agent-assigned
+    /// session ID and the prompt text as an array element, matching the ACP
+    /// protocol format.
     ///
     /// # Errors
     ///
-    /// - [`AppError::NotFound`] if `session_id` is not registered.
+    /// - [`AppError::NotFound`] if `session_id` is not registered or has no
+    ///   agent session ID.
     /// - [`AppError::Acp`] if the writer channel is closed.
     fn send_prompt(
         &self,
@@ -206,9 +241,34 @@ impl AgentDriver for AcpDriver {
         let session_id = session_id.to_owned();
         let prompt = prompt.to_owned();
         Box::pin(async move {
+            let agent_sid = self
+                .agent_session_ids
+                .lock()
+                .await
+                .get(&session_id)
+                .cloned();
+
+            let Some(agent_sid) = agent_sid else {
+                return Err(AppError::NotFound(format!(
+                    "no ACP agent session ID registered for session '{session_id}'"
+                )));
+            };
+
+            let req_id = format!(
+                "intercom-prompt-{}",
+                PROMPT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
+
             let msg = json!({
-                "method": "prompt/send",
-                "params": { "text": prompt }
+                "jsonrpc": "2.0",
+                "method": "session/prompt",
+                "id": req_id,
+                "params": {
+                    "sessionId": agent_sid,
+                    "prompt": [
+                        { "type": "text", "text": prompt }
+                    ]
+                }
             });
             send_to_session(&self.stream_writers, &session_id, msg).await
         })
@@ -294,12 +354,14 @@ impl AgentDriver for AcpDriver {
 
     /// Resolve a pending wait-for-instruction (standby) by sending an instruction.
     ///
-    /// Writes a `prompt/send` message to the session's ACP stream containing
-    /// the operator's instruction, or `"continue"` if none is provided.
+    /// Writes a `session/prompt` JSON-RPC message to the session's ACP stream
+    /// containing the operator's instruction, or `"continue"` if none is
+    /// provided.
     ///
     /// # Errors
     ///
-    /// - [`AppError::NotFound`] if `session_id` is not registered.
+    /// - [`AppError::NotFound`] if `session_id` is not registered or has no
+    ///   agent session ID.
     /// - [`AppError::Acp`] if the writer channel is closed.
     fn resolve_wait(
         &self,
@@ -309,9 +371,35 @@ impl AgentDriver for AcpDriver {
         let session_id = session_id.to_owned();
         Box::pin(async move {
             let text = instruction.unwrap_or_else(|| "continue".to_owned());
+
+            let agent_sid = self
+                .agent_session_ids
+                .lock()
+                .await
+                .get(&session_id)
+                .cloned();
+
+            let Some(agent_sid) = agent_sid else {
+                return Err(AppError::NotFound(format!(
+                    "no ACP agent session ID registered for session '{session_id}'"
+                )));
+            };
+
+            let req_id = format!(
+                "intercom-prompt-{}",
+                PROMPT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
+
             let msg = json!({
-                "method": "prompt/send",
-                "params": { "text": text }
+                "jsonrpc": "2.0",
+                "method": "session/prompt",
+                "id": req_id,
+                "params": {
+                    "sessionId": agent_sid,
+                    "prompt": [
+                        { "type": "text", "text": text }
+                    ]
+                }
             });
             send_to_session(&self.stream_writers, &session_id, msg).await
         })

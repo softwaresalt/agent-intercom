@@ -312,6 +312,9 @@ async fn acp_nudge_delivered_via_stream() {
     let acp_driver = AcpDriver::new();
     let (writer_tx, mut writer_rx) = mpsc::channel::<serde_json::Value>(8);
     acp_driver.register_session(session_id, writer_tx).await;
+    acp_driver
+        .register_agent_session_id(session_id, "agent-nudge-sess")
+        .await;
 
     // Simulate the stall consumer calling driver.send_prompt for ACP nudge.
     acp_driver
@@ -325,16 +328,16 @@ async fn acp_nudge_delivered_via_stream() {
         .expect("writer channel must have received the nudge");
     assert_eq!(
         msg["method"].as_str(),
-        Some("prompt/send"),
-        "ACP nudge must be delivered as a prompt/send message on the stream"
+        Some("session/prompt"),
+        "ACP nudge must be delivered as a session/prompt message on the stream"
     );
     assert!(
-        msg["params"]["text"]
+        msg["params"]["prompt"][0]["text"]
             .as_str()
             .unwrap_or_default()
             .contains("stalled"),
         "nudge text must reference the stall; got: {:?}",
-        msg["params"]["text"]
+        msg["params"]["prompt"][0]["text"]
     );
 }
 

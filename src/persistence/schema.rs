@@ -90,6 +90,14 @@ async fn migrate_session_columns(pool: &SqlitePool) -> Result<()> {
     )
     .await?;
 
+    add_column_if_missing(
+        pool,
+        "session",
+        "agent_session_id",
+        "ALTER TABLE session ADD COLUMN agent_session_id TEXT",
+    )
+    .await?;
+
     sqlx::raw_sql(
         "CREATE INDEX IF NOT EXISTS idx_session_channel ON session(channel_id, status);
          CREATE INDEX IF NOT EXISTS idx_session_channel_thread ON session(channel_id, thread_ts);",

@@ -104,7 +104,7 @@ pub trait AgentDriver: Send + Sync {
     /// Send a new prompt or instruction to the agent.
     ///
     /// In MCP: Posts an MCP `intercom/nudge` notification.
-    /// In ACP: Writes a `prompt/send` message to the agent stream.
+    /// In ACP: Writes a `session/prompt` JSON-RPC message to the agent stream.
     ///
     /// # Errors
     ///

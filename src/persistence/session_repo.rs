@@ -41,6 +41,7 @@ struct SessionRow {
     connectivity_status: String,
     last_activity_at: Option<String>,
     restart_of: Option<String>,
+    agent_session_id: Option<String>,
 }
 
 impl SessionRow {
@@ -108,6 +109,7 @@ impl SessionRow {
             connectivity_status,
             last_activity_at,
             restart_of: self.restart_of,
+            agent_session_id: self.agent_session_id,
         })
     }
 }
@@ -242,9 +244,9 @@ impl SessionRepo {
             "INSERT INTO session (id, owner_user_id, workspace_root, status, prompt, mode,
              created_at, updated_at, terminated_at, last_tool, nudge_count, stall_paused,
              progress_snapshot, protocol_mode, channel_id, thread_ts, connectivity_status,
-             last_activity_at, restart_of)
+             last_activity_at, restart_of, agent_session_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-             ?17, ?18, ?19)",
+             ?17, ?18, ?19, ?20)",
         )
         .bind(&session.id)
         .bind(&session.owner_user_id)
@@ -265,6 +267,7 @@ impl SessionRepo {
         .bind(connectivity_status)
         .bind(&last_activity_at)
         .bind(&session.restart_of)
+        .bind(&session.agent_session_id)
         .execute(self.db.as_ref())
         .await?;
 
@@ -569,6 +572,33 @@ impl SessionRepo {
              WHERE id = ?3 AND thread_ts IS NULL",
         )
         .bind(thread_ts)
+        .bind(&now)
+        .bind(session_id)
+        .execute(self.db.as_ref())
+        .await?;
+
+        Ok(())
+    }
+
+    /// Set the ACP agent-assigned session ID.
+    ///
+    /// Persists the `sessionId` returned by the ACP `session/new` handshake so
+    /// that subsequent `session/prompt` messages can include the correct ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn set_agent_session_id(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+
+        sqlx::query(
+            "UPDATE session SET agent_session_id = ?1, updated_at = ?2 WHERE id = ?3",
+        )
+        .bind(agent_session_id)
         .bind(&now)
         .bind(session_id)
         .execute(self.db.as_ref())

@@ -154,6 +154,9 @@ async fn queued_messages_delivered_on_reconnect() {
     let acp_driver = Arc::new(AcpDriver::new());
     let (writer_tx, mut writer_rx) = mpsc::channel::<serde_json::Value>(16);
     acp_driver.register_session(&created.id, writer_tx).await;
+    acp_driver
+        .register_agent_session_id(&created.id, "agent-reconnect-sess")
+        .await;
 
     // Build reconnect flush context (simulates agent reconnecting).
     let flush_ctx = ReconnectFlushContext {
@@ -186,11 +189,17 @@ async fn queued_messages_delivered_on_reconnect() {
         .try_recv()
         .expect("second queued message must arrive");
 
-    assert_eq!(msg1["method"].as_str(), Some("prompt/send"));
-    assert_eq!(msg1["params"]["text"].as_str(), Some("queued message 1"));
+    assert_eq!(msg1["method"].as_str(), Some("session/prompt"));
+    assert_eq!(
+        msg1["params"]["prompt"][0]["text"].as_str(),
+        Some("queued message 1")
+    );
 
-    assert_eq!(msg2["method"].as_str(), Some("prompt/send"));
-    assert_eq!(msg2["params"]["text"].as_str(), Some("queued message 2"));
+    assert_eq!(msg2["method"].as_str(), Some("session/prompt"));
+    assert_eq!(
+        msg2["params"]["prompt"][0]["text"].as_str(),
+        Some("queued message 2")
+    );
 
     // Verify messages are now marked consumed in the DB.
     let remaining = steering_repo

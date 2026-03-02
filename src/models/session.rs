@@ -100,6 +100,11 @@ pub struct Session {
     pub last_activity_at: Option<DateTime<Utc>>,
     /// Session ID of the predecessor session if this is a restart, otherwise `None`.
     pub restart_of: Option<String>,
+    /// ACP-assigned session identifier returned by `session/new`.
+    ///
+    /// Only populated for ACP sessions after the handshake completes. Required
+    /// for sending `session/prompt` messages to the agent.
+    pub agent_session_id: Option<String>,
 }
 
 impl Session {
@@ -132,6 +137,7 @@ impl Session {
             connectivity_status: ConnectivityStatus::Online,
             last_activity_at: None,
             restart_of: None,
+            agent_session_id: None,
         }
     }
 
