@@ -1,13 +1,14 @@
-//! Slack slash command router for `/intercom` commands.
+//! Slack slash command router for `/acom` (MCP) and `/arc` (ACP) commands.
 //!
-//! Parses `/intercom <command> [args]` from Slack slash command events,
+//! Parses `/<prefix> <command> [args]` from Slack slash command events,
 //! dispatches to handlers by command name, and verifies user authorization
 //! (FR-013). Session-scoped commands also verify session ownership.
 //!
-//! Also provides remote file browsing (`list-files`, `show-file`) and
-//! pre-approved command execution (FR-014) for User Story 8.
+//! ACP-only commands (`session-start`, `session-stop`, `session-restart`)
+//! are gated behind `ServerMode::Acp` and rejected in MCP mode.
+//!
+//! Also provides remote file browsing (`list-files`, `show-file`).
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,7 +36,7 @@ use crate::slack::client::SlackMessage;
 use crate::slack::handlers::steer as steer_handler;
 use crate::slack::handlers::task as task_handler;
 
-/// Handle incoming `/intercom` slash commands routed via Socket Mode.
+/// Handle incoming `/acom` or `/arc` slash commands routed via Socket Mode.
 ///
 /// # Errors
 ///
@@ -93,13 +94,15 @@ async fn dispatch_command(
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let db = &state.db;
+    let prefix = slash_prefix(state.server_mode);
 
     match command {
-        "help" => Ok(handle_help(args.first().copied())),
+        "help" => Ok(handle_help(args.first().copied(), state.server_mode)),
 
         "sessions" => handle_sessions(db).await,
 
-        "session-start" => {
+        // ACP-only session lifecycle commands.
+        "session-start" if state.server_mode == ServerMode::Acp => {
             let prompt = if args.is_empty() {
                 return Err(crate::AppError::Config(
                     "usage: session-start <prompt>".into(),
@@ -110,15 +113,19 @@ async fn dispatch_command(
             handle_session_start(&prompt, user_id, channel_id, state).await
         }
 
-        "session-stop" => {
+        "session-stop" if state.server_mode == ServerMode::Acp => {
             let session_id = args.first().copied();
             handle_session_stop(session_id, user_id, channel_id, state).await
         }
 
-        "session-restart" => {
+        "session-restart" if state.server_mode == ServerMode::Acp => {
             let session_id = args.first().copied();
             handle_session_restart(session_id, user_id, channel_id, state).await
         }
+
+        "session-start" | "session-stop" | "session-restart" => Ok(format!(
+            "`{command}` is only available in ACP mode. Use `/{prefix} help` for commands."
+        )),
 
         "session-pause" => {
             let session_id = args.first().copied();
@@ -176,92 +183,130 @@ async fn dispatch_command(
             task_handler::store_from_slack(&text, Some(channel_id), state).await
         }
 
-        other => {
-            let result = validate_command_alias(other, &state.config.commands);
-            match result {
-                Ok(shell_command) => {
-                    handle_run_command(other, &shell_command, user_id, channel_id, state).await
-                }
-                Err(_) => Ok(format!(
-                    "Unknown command: `{other}`. Use `/intercom help` for available commands."
-                )),
-            }
-        }
+        other => Ok(format!(
+            "Unknown command: `{other}`. Use `/{prefix} help` for available commands."
+        )),
+    }
+}
+
+// ── Slash prefix helper ──────────────────────────────────────────────
+
+/// Return the slash command prefix for the current server mode.
+fn slash_prefix(mode: ServerMode) -> &'static str {
+    match mode {
+        ServerMode::Mcp => "acom",
+        ServerMode::Acp => "arc",
     }
 }
 
 // ── Help command (T073) ──────────────────────────────────────────────
 
-/// Generate help text grouped by category.
-fn handle_help(category: Option<&str>) -> String {
+/// Generate help text grouped by category, scoped to the active server mode.
+fn handle_help(category: Option<&str>, mode: ServerMode) -> String {
+    let prefix = slash_prefix(mode);
     match category {
-        Some("session" | "sessions") => SESSION_HELP.to_owned(),
-        Some("checkpoint" | "checkpoints") => CHECKPOINT_HELP.to_owned(),
-        Some("file" | "files") => FILES_HELP.to_owned(),
-        Some("steering" | "steer" | "task" | "tasks") => STEERING_HELP.to_owned(),
-        _ => FULL_HELP.to_owned(),
+        Some("session" | "sessions") => format_session_help(prefix, mode),
+        Some("checkpoint" | "checkpoints") => format_checkpoint_help(prefix),
+        Some("file" | "files") => format_files_help(prefix),
+        Some("steering" | "steer" | "task" | "tasks") => format_steering_help(prefix),
+        _ => format_full_help(prefix, mode),
     }
 }
 
-const FULL_HELP: &str = "\
-*Available `/intercom` commands:*
+fn format_full_help(prefix: &str, mode: ServerMode) -> String {
+    let mut text = format!("*Available `/{prefix}` commands:*\n\n");
 
-*Agent Steering*
-• `steer <message>` — Send a steering message to the agent (delivered on next ping)
-• `task <message>` — Queue a task for the agent (delivered on next session recovery)
+    text.push_str(
+        "*Agent Steering*\n\
+         • `steer <message>` — Send a steering message to the agent (delivered on next ping)\n\
+         • `task <message>` — Queue a task for the agent (delivered on next session recovery)\n\n",
+    );
 
-*Session Management*
-• `session-start <prompt>` — Start a new agent session
-• `session-stop [session_id]` — Gracefully stop a running ACP session (sends interrupt first)
-• `session-pause [session_id]` — Pause a running session
-• `session-resume [session_id]` — Resume a paused session
-• `session-clear [session_id]` — Force-terminate and clean up a session
-• `sessions` — List all tracked sessions
+    text.push_str("*Session Management*\n");
+    if mode == ServerMode::Acp {
+        text.push_str(
+            "• `session-start <prompt>` — Start a new agent session\n\
+             • `session-stop [session_id]` — Gracefully stop a running session\n\
+             • `session-restart [session_id]` — Restart a session with its original prompt\n",
+        );
+    }
+    text.push_str(
+        "• `session-pause [session_id]` — Pause a running session\n\
+         • `session-resume [session_id]` — Resume a paused session\n\
+         • `session-clear [session_id]` — Force-terminate and clean up a session\n\
+         • `sessions` — List all tracked sessions\n\n",
+    );
 
-*Checkpoints*
-• `session-checkpoint [session_id] [label]` — Create a checkpoint
-• `session-restore <checkpoint_id>` — Restore a checkpoint
-• `session-checkpoints [session_id]` — List checkpoints
+    text.push_str(
+        "*Checkpoints*\n\
+         • `session-checkpoint [session_id] [label]` — Create a checkpoint\n\
+         • `session-restore <checkpoint_id>` — Restore a checkpoint\n\
+         • `session-checkpoints [session_id]` — List checkpoints\n\n",
+    );
 
-*File Browsing*
-• `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)
-• `show-file <path> [--lines START:END]` — Display file contents with syntax highlighting
+    text.push_str(
+        "*File Browsing*\n\
+         • `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)\n\
+         • `show-file <path> [--lines START:END]` — Display file contents with syntax \
+         highlighting\n\n",
+    );
 
-*Custom Commands*
-• Any registered command alias — Run a pre-approved command from config
+    text.push_str(
+        "*General*\n\
+         • `help [category]` — Show this help (categories: session, checkpoint, files, steering)",
+    );
 
-*General*
-• `help [category]` — Show this help (categories: session, checkpoint, files, steering)";
+    text
+}
 
-const SESSION_HELP: &str = "\
-*Session commands:*
-• `session-start <prompt>` — Start a new agent session with the given prompt
-• `session-stop [session_id]` — Gracefully stop a running ACP session (sends interrupt first)
-• `session-pause [session_id]` — Pause a running session (defaults to active session)
-• `session-resume [session_id]` — Resume a paused session
-• `session-clear [session_id]` — Force-terminate and clean up a session
-• `sessions` — List all tracked sessions with state and timestamps";
+fn format_session_help(prefix: &str, mode: ServerMode) -> String {
+    let mut text = String::from("*Session commands:*\n");
+    if mode == ServerMode::Acp {
+        text.push_str(
+            "• `session-start <prompt>` — Start a new agent session with the given prompt\n\
+             • `session-stop [session_id]` — Gracefully stop a running session (sends interrupt \
+             first)\n\
+             • `session-restart [session_id]` — Restart a session with its original prompt\n",
+        );
+    }
+    text.push_str(
+        "• `session-pause [session_id]` — Pause a running session (defaults to active session)\n\
+         • `session-resume [session_id]` — Resume a paused session\n\
+         • `session-clear [session_id]` — Force-terminate and clean up a session\n\
+         • `sessions` — List all tracked sessions with state and timestamps",
+    );
+    let _ = prefix; // used by callers for consistency; format kept static
+    text
+}
 
-const CHECKPOINT_HELP: &str = "\
-*Checkpoint commands:*
-• `session-checkpoint [session_id] [label]` — Snapshot session state and file hashes
-• `session-restore <checkpoint_id>` — Restore a checkpoint (warns of diverged files)
-• `session-checkpoints [session_id]` — List all checkpoints for a session";
+fn format_checkpoint_help(prefix: &str) -> String {
+    let _ = prefix;
+    "*Checkpoint commands:*\n\
+     • `session-checkpoint [session_id] [label]` — Snapshot session state and file hashes\n\
+     • `session-restore <checkpoint_id>` — Restore a checkpoint (warns of diverged files)\n\
+     • `session-checkpoints [session_id]` — List all checkpoints for a session"
+        .to_owned()
+}
 
-const FILES_HELP: &str = "\
-*File browsing and command commands:*
-• `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)
-• `show-file <path> [--lines START:END]` — Display file contents with syntax highlighting
-• Any registered command alias — Run a pre-approved command from config";
+fn format_files_help(prefix: &str) -> String {
+    let _ = prefix;
+    "*File browsing commands:*\n\
+     • `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)\n\
+     • `show-file <path> [--lines START:END]` — Display file contents with syntax highlighting"
+        .to_owned()
+}
 
-const STEERING_HELP: &str = "\
-*Agent steering commands:*
-• `steer <message>` — Send a steering message to the active agent session. The message is \
-queued and delivered on the agent's next `ping` call. Use this to redirect focus or provide \
-guidance without interrupting the current operation.
-• `task <message>` — Queue a task item for the agent. Tasks are delivered in bulk on the \
-agent's next session recovery (`reboot` call), making them ideal for asynchronous to-do \
-items that the agent should pick up at the start of its next session.";
+fn format_steering_help(prefix: &str) -> String {
+    let _ = prefix;
+    "*Agent steering commands:*\n\
+     • `steer <message>` — Send a steering message to the active agent session. The message is \
+     queued and delivered on the agent's next `ping` call. Use this to redirect focus or provide \
+     guidance without interrupting the current operation.\n\
+     • `task <message>` — Queue a task item for the agent. Tasks are delivered in bulk on the \
+     agent's next session recovery (`reboot` call), making them ideal for asynchronous to-do \
+     items that the agent should pick up at the start of its next session."
+        .to_owned()
+}
 
 // ── Session commands (T067, T072) ────────────────────────────────────
 
@@ -296,7 +341,7 @@ async fn resolve_command_session(
 
     // T068: No session in this channel — return a channel-specific error (S045).
     Err(crate::AppError::NotFound(
-        "no active session in this channel — use `/intercom sessions` to see all sessions".into(),
+        "no active session in this channel — use `sessions` to see all sessions".into(),
     ))
 }
 
@@ -954,83 +999,7 @@ async fn handle_show_file(
     }
 }
 
-// ── Custom command execution (T078) ──────────────────────────────────
-
-/// Handle execution of a registered command alias (T078).
-///
-/// Looks up the alias in `config.commands`, executes the shell command
-/// in the session's workspace root, and posts output to Slack.
-async fn handle_run_command(
-    alias: &str,
-    shell_command: &str,
-    user_id: &str,
-    channel_id: &str,
-    state: &Arc<AppState>,
-) -> crate::Result<String> {
-    let span = info_span!("run_command", alias, user = %user_id);
-    let _guard = span.enter();
-
-    let db = &state.db;
-    let session_repo = SessionRepo::new(Arc::clone(db));
-    let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
-
-    let workspace_root = PathBuf::from(&session.workspace_root);
-
-    info!(alias, shell_command, workspace_root = %workspace_root.display(), "executing registered command");
-
-    // Pause stall timer during execution (FR-025).
-    if let Some(ref detectors) = state.stall_detectors {
-        let lock = detectors.lock().await;
-        if let Some(handle) = lock.get(&session.id) {
-            handle.pause();
-        }
-    }
-
-    let output = execute_shell_command(shell_command, &workspace_root).await;
-
-    // Resume stall timer after execution.
-    if let Some(ref detectors) = state.stall_detectors {
-        let lock = detectors.lock().await;
-        if let Some(handle) = lock.get(&session.id) {
-            handle.resume();
-        }
-    }
-
-    match output {
-        Ok((stdout, stderr, exit_code)) => {
-            let mut result_lines = vec![format!("*`{alias}`* exited with code `{exit_code}`")];
-            if !stdout.is_empty() {
-                let display_out = truncate_output(&stdout, 3000);
-                result_lines.push(format!("```\n{display_out}\n```"));
-            }
-            if !stderr.is_empty() {
-                let display_err = truncate_output(&stderr, 1000);
-                result_lines.push(format!("*stderr:*\n```\n{display_err}\n```"));
-            }
-            Ok(result_lines.join("\n"))
-        }
-        Err(err) => Ok(format!("Failed to execute `{alias}`: {err}")),
-    }
-}
-
 // ── Public helpers (testable) ────────────────────────────────────────
-
-/// Validate that a command alias exists in the global allowlist (FR-014).
-///
-/// Returns the resolved shell command string if found.
-///
-/// # Errors
-///
-/// Returns `AppError::NotFound` if the alias is not in the registry.
-pub fn validate_command_alias<S: ::std::hash::BuildHasher>(
-    alias: &str,
-    commands: &HashMap<String, String, S>,
-) -> crate::Result<String> {
-    commands
-        .get(alias)
-        .cloned()
-        .ok_or_else(|| crate::AppError::NotFound(format!("command not found: {alias}")))
-}
 
 /// Validate a listing path against the workspace root (FR-006).
 ///
@@ -1235,63 +1204,6 @@ fn build_directory_tree(
     }
 
     Ok(result)
-}
-
-/// Execute a shell command and capture output.
-async fn execute_shell_command(
-    command: &str,
-    working_dir: &Path,
-) -> crate::Result<(String, String, i32)> {
-    let parts: Vec<&str> = command.split_whitespace().collect();
-    if parts.is_empty() {
-        return Err(crate::AppError::Config("empty command".into()));
-    }
-
-    let program = parts[0];
-    let args = &parts[1..];
-
-    let output = tokio::process::Command::new(program)
-        .args(args)
-        .current_dir(working_dir)
-        .kill_on_drop(true)
-        .output()
-        .await
-        .map_err(|err| crate::AppError::Config(format!("failed to execute command: {err}")))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit_code = output.status.code().unwrap_or(-1);
-
-    info!(
-        command,
-        exit_code,
-        stdout_len = stdout.len(),
-        stderr_len = stderr.len(),
-        "command execution complete"
-    );
-
-    Ok((stdout, stderr, exit_code))
-}
-
-/// Truncate output to a maximum length, appending an indicator if truncated.
-fn truncate_output(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_owned()
-    } else {
-        // Find the largest char boundary ≤ max_len to avoid splitting
-        // multi-byte UTF-8 sequences.
-        let boundary = s
-            .char_indices()
-            .map(|(i, _)| i)
-            .take_while(|&i| i <= max_len)
-            .last()
-            .unwrap_or(0);
-        let truncated = &s[..boundary];
-        format!(
-            "{truncated}\n... (truncated, {total} bytes total)",
-            total = s.len()
-        )
-    }
 }
 
 /// Build an ephemeral Slack command response.

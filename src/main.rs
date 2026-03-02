@@ -358,7 +358,7 @@ async fn run(args: Cli) -> Result<()> {
         );
         // T084: ACP infrastructure is now fully wired. The acp_event_tx and
         // acp_driver fields are set in AppState. When an operator runs
-        // `/intercom session-start`, handle_acp_session_start in commands.rs
+        // `/arc session-start`, handle_acp_session_start in commands.rs
         // spawns run_reader and run_writer tasks for the new session.
     }
 

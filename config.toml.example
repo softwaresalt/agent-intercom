@@ -18,8 +18,11 @@
 #
 # ── Per-workspace Slack channel ──────────────────────────────────────────────
 #
-# Each VS Code workspace specifies its target Slack channel via the MCP URL
-# in .vscode/mcp.json. There is no global channel fallback.
+# Each VS Code workspace connects with ?workspace_id= in the MCP URL.
+# The server resolves the workspace_id to a Slack channel_id via the
+# [[workspace]] entries defined later in this file.  This decouples
+# workspaces from raw channel IDs so channels can be changed here
+# without touching every .vscode/mcp.json.
 #
 # Example .vscode/mcp.json:
 #
@@ -27,10 +30,12 @@
 #     "servers": {
 #       "intercom": {
 #         "type": "http",
-#         "url": "http://127.0.0.1:3000/mcp?channel_id=C0123YOURCHANNEL"
+#         "url": "http://127.0.0.1:3000/mcp?workspace_id=my-repo"
 #       }
 #     }
 #   }
+#
+# Note: bare ?channel_id= is deprecated and logs a warning.  Use workspace_id.
 
 # **Absolute path** (NOT relative path) to your primary Git workspace root.
 # The MCP agent will operate within this directory as a default backup.

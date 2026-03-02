@@ -88,7 +88,7 @@ pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 /// line (FR-022).
 pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
 
-/// Live child processes spawned by the `/intercom session-start` slash command,
+/// Live child processes spawned by the `session-start` slash command,
 /// keyed by `session_id`. Keeping them here prevents `kill_on_drop` from
 /// terminating the process the moment `spawn_session` returns.
 pub type ActiveChildren = Arc<Mutex<HashMap<String, Child>>>;
