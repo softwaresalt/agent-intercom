@@ -94,29 +94,14 @@ struct HeartbeatParams {
 }
 
 /// Parameters for the ACP `session/update` method (streaming content).
+///
+/// Uses `serde_json::Value` for the `update` field because the shape varies
+/// significantly by `sessionUpdate` type (e.g., `agent_message_chunk` has a
+/// single `content` object while `tool_call_update` has a `content` array
+/// plus `rawOutput`).
 #[derive(Debug, Deserialize)]
 struct SessionUpdateParams {
-    update: SessionUpdatePayload,
-}
-
-/// Payload within a `session/update` message.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionUpdatePayload {
-    /// Update type (e.g., `agent_message_chunk`, `agent_tool_use`, etc.).
-    session_update: String,
-    /// Content block (present for `agent_message_chunk` updates).
-    content: Option<SessionUpdateContent>,
-}
-
-/// Content block within a `session/update` payload.
-#[derive(Debug, Deserialize)]
-struct SessionUpdateContent {
-    /// Content type (e.g., `text`, `tool_use`).
-    #[serde(rename = "type")]
-    _content_type: Option<String>,
-    /// Text content (present for `text` type updates).
-    text: Option<String>,
+    update: serde_json::Value,
 }
 
 // ── Reconnect flush context ───────────────────────────────────────────────────
@@ -467,6 +452,10 @@ fn parse_heartbeat(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEve
 /// The `session/update` notification is the primary streaming mechanism in the
 /// ACP protocol.  Text chunks from the agent are surfaced as status updates so
 /// the operator can follow progress in the Slack thread.
+///
+/// Only `agent_message_chunk` updates with non-empty text content are emitted
+/// as events.  All other update types (`tool_call`, `tool_call_update`,
+/// `agent_thought_chunk`, etc.) are silently skipped.
 fn parse_session_update(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEvent>> {
     let params: SessionUpdateParams = serde_json::from_value(env.params).map_err(|e| {
         AppError::Acp(format!(
@@ -474,18 +463,24 @@ fn parse_session_update(session_id: &str, env: AcpEnvelope) -> Result<Option<Age
         ))
     })?;
 
-    let update_type = &params.update.session_update;
+    let update = &params.update;
+    let update_type = update
+        .get("sessionUpdate")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
 
     // Extract text content from agent_message_chunk updates.
     if update_type == "agent_message_chunk" {
-        if let Some(ref content) = params.update.content {
-            if let Some(ref text) = content.text {
-                if !text.is_empty() {
-                    return Ok(Some(AgentEvent::StatusUpdated {
-                        session_id: session_id.to_owned(),
-                        message: text.clone(),
-                    }));
-                }
+        if let Some(text) = update
+            .get("content")
+            .and_then(|c| c.get("text"))
+            .and_then(serde_json::Value::as_str)
+        {
+            if !text.is_empty() {
+                return Ok(Some(AgentEvent::StatusUpdated {
+                    session_id: session_id.to_owned(),
+                    message: text.to_owned(),
+                }));
             }
         }
     }
