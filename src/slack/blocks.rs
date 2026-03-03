@@ -327,8 +327,12 @@ pub fn session_started_blocks(session: &Session) -> Vec<SlackBlock> {
         SessionMode::Hybrid => "hybrid",
     };
     let started = session.created_at.format("%Y-%m-%d %H:%M UTC");
+    let emoji = match session.protocol_mode {
+        ProtocolMode::Acp => "\u{1f916}",
+        ProtocolMode::Mcp => "\u{1f680}",
+    };
     let text = format!(
-        "\u{1f680} *Session started*\n\
+        "{emoji} *Session started*\n\
          *ID:* `{short_id}\u{2026}` | *Protocol:* {protocol} | *Mode:* {mode}\n\
          *Workspace:* `{workspace}`\n\
          *Started:* {started}",

@@ -614,7 +614,7 @@ async fn finish_acp_session_start(
         let msg = SlackMessage {
             channel: SlackChannelId(channel_id.to_owned()),
             text: Some(format!(
-                "\u{1f680} ACP session `{}` started in `{workspace_name}`",
+                "\u{1f916} ACP session `{}` started in `{workspace_name}`",
                 active.id.chars().take(8).collect::<String>()
             )),
             blocks: Some(started_blocks),
