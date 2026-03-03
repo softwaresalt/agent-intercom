@@ -586,7 +586,9 @@ async fn finish_acp_session_start(
         use tokio_util::sync::CancellationToken;
 
         let (msg_tx, msg_rx) = tokio::sync::mpsc::channel(256);
-        acp_driver.register_session(session_id, msg_tx).await;
+        // T132: register_session now returns the per-session sequence counter
+        // shared with run_writer.
+        let seq_counter = acp_driver.register_session(session_id, msg_tx).await;
 
         // Register the agent-assigned session ID so `send_prompt` can include
         // it in `session/prompt` messages.
@@ -621,11 +623,16 @@ async fn finish_acp_session_start(
 
         let writer_session_id = session_id.to_owned();
         let writer_ct = session_ct.clone();
+        let writer_db = Arc::clone(&state.db);
+        // T133/T134: pass seq_counter and db so the writer can stamp sequence
+        // numbers and mark sessions Interrupted on broken-pipe failures.
         tokio::spawn(crate::acp::writer::run_writer(
             writer_session_id,
             conn.stdin,
             msg_rx,
             writer_ct,
+            seq_counter,
+            writer_db,
         ));
 
         state
@@ -784,6 +791,19 @@ async fn handle_session_stop(
     }
 
     let mut child = state.active_children.lock().await.remove(&session.id);
+
+    // Kill the entire process tree before terminate_session sends kill_on_drop
+    // to the direct child.  This ensures grandchild processes (e.g. model
+    // runners forked by the agent) are also terminated (ES-004, FR-037).
+    if let Some(ref c) = child {
+        if let Some(pid) = c.id() {
+            #[cfg(windows)]
+            crate::acp::spawner::kill_process_tree(pid).await;
+            #[cfg(unix)]
+            crate::acp::spawner::kill_process_group(pid).await;
+        }
+    }
+
     let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
 
     // Deregister the ACP driver's in-memory state for this session so

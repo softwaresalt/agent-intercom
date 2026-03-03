@@ -605,6 +605,129 @@ impl GlobalConfig {
         }
         Ok(())
     }
+
+    /// Validate `host_cli` path security and log a warning if the binary is
+    /// outside the standard system locations or not found on `PATH` (FR-038,
+    /// FR-039).
+    ///
+    /// - For **absolute paths**: returns `AppError::Config` if the file does
+    ///   not exist; logs `WARN` if the path is outside known-good directories.
+    /// - For **relative names**: logs `WARN` if the name cannot be located on
+    ///   `PATH` (allows deferred PATH setup without hard-failing).
+    ///
+    /// This function is additive to [`validate_for_acp_mode`], which performs
+    /// the mandatory existence and non-empty checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` when `host_cli` is an absolute path that
+    /// does not exist on the filesystem.
+    pub fn validate_host_cli_path(&self) -> Result<()> {
+        let cli = &self.host_cli;
+        let path = std::path::Path::new(cli.as_str());
+
+        if path.is_absolute() {
+            if !path.exists() {
+                return Err(AppError::Config(format!("host_cli '{cli}' does not exist")));
+            }
+            if !is_standard_host_cli_location(path) {
+                tracing::warn!(
+                    host_cli = %cli,
+                    "host_cli is not in a standard system directory — verify this is the intended binary"
+                );
+            }
+        } else {
+            // Relative name — check whether it can be found on PATH.
+            if !is_host_cli_on_path(cli) {
+                tracing::warn!(
+                    host_cli = %cli,
+                    "host_cli '{}' was not found on PATH — agent spawn may fail at runtime",
+                    cli
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Return `true` if `name` (a relative binary name) can be located in one of
+/// the directories on `PATH`.
+///
+/// On Windows also checks `.exe`, `.cmd`, and `.bat` extensions.
+fn is_host_cli_on_path(name: &str) -> bool {
+    let binary = std::path::Path::new(name)
+        .file_name()
+        .map_or_else(|| name.to_owned(), |n| n.to_string_lossy().into_owned());
+
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path_var).any(|dir| {
+        if dir.join(&binary).exists() {
+            return true;
+        }
+        #[cfg(windows)]
+        for ext in &[".exe", ".cmd", ".bat"] {
+            if dir.join(format!("{binary}{ext}")).exists() {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+/// Return `true` if `path` resides inside one of the standard system
+/// installation directories for the current platform.
+///
+/// Paths outside these directories are not inherently unsafe, but warrant
+/// operator verification that the intended binary is being invoked.
+fn is_standard_host_cli_location(path: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        let lower = path.to_string_lossy().to_lowercase();
+        if lower.starts_with(r"c:\windows")
+            || lower.starts_with(r"c:\program files")
+            || lower.starts_with(r"c:\program files (x86)")
+        {
+            return true;
+        }
+        // User-profile install locations (AppData, USERPROFILE).
+        for var in &["APPDATA", "LOCALAPPDATA", "USERPROFILE"] {
+            if let Ok(p) = std::env::var(var) {
+                if lower.starts_with(&p.to_lowercase()) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    #[cfg(unix)]
+    {
+        const STANDARD: &[&str] = &[
+            "/usr/bin",
+            "/usr/local/bin",
+            "/bin",
+            "/sbin",
+            "/usr/sbin",
+            "/opt/homebrew/bin",
+            "/snap/bin",
+        ];
+        if STANDARD.iter().any(|dir| path.starts_with(dir)) {
+            return true;
+        }
+        // User-specific common install locations.
+        if let Ok(home) = std::env::var("HOME") {
+            for suffix in &[".local/bin", ".cargo/bin", ".nix-profile/bin"] {
+                if path.starts_with(format!("{home}/{suffix}")) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = path;
+        true // Unknown platform — assume standard.
+    }
 }
 
 /// Keychain service identifier used for credential storage (shared/default).

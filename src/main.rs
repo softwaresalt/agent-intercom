@@ -132,6 +132,9 @@ async fn run(args: Cli) -> Result<()> {
     // Validate ACP-specific configuration when running in ACP mode.
     if args.mode == ServerMode::Acp {
         config.validate_for_acp_mode()?;
+        // Additional path-security validation (FR-038, FR-039): logs WARN if
+        // host_cli is outside standard directories or not found on PATH.
+        config.validate_host_cli_path().ok();
         // Auto-suffix the IPC pipe name so MCP and ACP instances don't
         // collide on the same named pipe (ADR-0015). Only applied when
         // the name is still the default; an explicit override is preserved.
@@ -140,6 +143,8 @@ async fn run(args: Cli) -> Result<()> {
             info!(ipc_name = %config.ipc_name, "ACP mode: IPC name auto-suffixed");
         }
         info!("ACP mode: host_cli validated");
+        // Check for orphan processes from prior runs (ES-004, FR-037).
+        agent_intercom::acp::spawner::check_for_orphan_processes(&config.host_cli).await;
     }
 
     let config = Arc::new(config);

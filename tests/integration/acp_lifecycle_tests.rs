@@ -153,7 +153,7 @@ async fn queued_messages_delivered_on_reconnect() {
     // Set up ACP driver with a registered writer channel.
     let acp_driver = Arc::new(AcpDriver::new());
     let (writer_tx, mut writer_rx) = mpsc::channel::<serde_json::Value>(16);
-    acp_driver.register_session(&created.id, writer_tx).await;
+    let _seq_counter = acp_driver.register_session(&created.id, writer_tx).await;
     acp_driver
         .register_agent_session_id(&created.id, "agent-reconnect-sess")
         .await;
@@ -210,5 +210,73 @@ async fn queued_messages_delivered_on_reconnect() {
         remaining.len(),
         0,
         "all queued messages must be consumed after reconnect flush"
+    );
+}
+
+// ── T122 (S089): Windows process tree termination ────────────────────────────
+
+/// S089 — `kill_process_tree` terminates a Windows process and all descendants
+/// by invoking `taskkill /F /T /PID` (ES-004, FR-037).
+///
+/// Spawns a long-running `ping` process and verifies it exits after the kill.
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_kill_process_tree_terminates_child() {
+    use agent_intercom::acp::spawner::kill_process_tree;
+    use std::time::Duration;
+
+    // Spawn a long-running Windows process to act as the "agent".
+    let mut child = tokio::process::Command::new("ping")
+        .args(["-n", "100", "127.0.0.1"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("ping must be spawnable on Windows");
+
+    let pid = child.id().expect("child must have a PID before kill");
+
+    // Kill the process tree — should terminate ping and any children.
+    kill_process_tree(pid).await;
+
+    // Process must exit within 5 s of the tree kill.
+    let result = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    assert!(
+        result.is_ok(),
+        "process must exit within 5s after kill_process_tree"
+    );
+}
+
+// ── T123 (S090): Unix process group termination ──────────────────────────────
+
+/// S090 — `kill_process_group` terminates all processes in a Unix process group
+/// by sending `SIGTERM` to the negative PGID (ES-004, FR-037).
+///
+/// Spawns a `sleep` process in its own process group and verifies it exits
+/// after the group kill.
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_kill_process_group_terminates_child() {
+    use agent_intercom::acp::spawner::kill_process_group;
+    use std::time::Duration;
+
+    // Spawn a long-running process in its own process group (PGID = child PID).
+    let mut child = tokio::process::Command::new("sleep")
+        .arg("100")
+        .process_group(0)
+        .kill_on_drop(true)
+        .spawn()
+        .expect("sleep must be spawnable on Unix");
+
+    let pid = child.id().expect("child must have a PID before kill");
+
+    // Kill the entire process group.
+    kill_process_group(pid).await;
+
+    // Process must exit within 5 s of the group kill.
+    let result = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    assert!(
+        result.is_ok(),
+        "process must exit within 5s after kill_process_group"
     );
 }

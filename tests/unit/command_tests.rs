@@ -15,11 +15,11 @@ use agent_intercom::slack::commands::parse_checkpoint_args;
 // ── T113 / S081 ────────────────────────────────────────────────────────────────
 
 /// A single argument that contains dashes and looks like a label (not a UUID)
-/// must be treated as a session_id (first positional arg is ALWAYS session_id).
+/// must be treated as a `session_id` (first positional arg is ALWAYS `session_id`).
 ///
 /// This was HITL-005: the old heuristic treated "phase-13-checkpoint" as a label
 /// because it contains dashes but is not long enough to be a UUID, but the correct
-/// behaviour is for 1-arg to always mean session_id.
+/// behaviour is for 1-arg to always mean `session_id`.
 #[test]
 fn parse_checkpoint_args_single_dash_arg_is_session_id() {
     // Any single arg is treated as session_id — no heuristic guessing.
@@ -35,7 +35,7 @@ fn parse_checkpoint_args_single_dash_arg_is_session_id() {
     );
 }
 
-/// A dash-heavy label-like string (the old buggy case) is also treated as session_id.
+/// A dash-heavy label-like string (the old buggy case) is also treated as `session_id`.
 #[test]
 fn parse_checkpoint_args_long_dash_label_is_session_id() {
     let (session_id, label) = parse_checkpoint_args(&["my-checkpoint-backup-2024"]);
@@ -45,7 +45,7 @@ fn parse_checkpoint_args_long_dash_label_is_session_id() {
 
 // ── T114 / S082 ────────────────────────────────────────────────────────────────
 
-/// Zero arguments: no session_id and no label → fall back to most-recent session.
+/// Zero arguments: no `session_id` and no label → fall back to most-recent session.
 #[test]
 fn parse_checkpoint_args_no_args_is_none_none() {
     let (session_id, label) = parse_checkpoint_args(&[]);
@@ -53,7 +53,7 @@ fn parse_checkpoint_args_no_args_is_none_none() {
     assert!(label.is_none(), "no args → label must be None");
 }
 
-/// Two arguments: first is session_id, second is label.
+/// Two arguments: first is `session_id`, second is label.
 #[test]
 fn parse_checkpoint_args_two_args_session_then_label() {
     let (session_id, label) = parse_checkpoint_args(&["my-session-id", "my-label"]);

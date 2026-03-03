@@ -5,8 +5,8 @@
 //!
 //! Covers:
 //! - T107 / S077: ACP mode HTTP server is accessible (health endpoint returns 200)
-//! - T108 / S078: Requests without a valid session_id are rejected with 401
-//! - T109 / S079: Requests with a valid active session_id are allowed through
+//! - T108 / S078: Requests without a valid `session_id` are rejected with 401
+//! - T109 / S079: Requests with a valid active `session_id` are allowed through
 
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::test_helpers::{test_app_state, test_config};
 
-/// Spawn an HTTP server in ACP mode and return (base_url, ct, state).
+/// Spawn an HTTP server in ACP mode and return (`base_url`, ct, state).
 async fn spawn_acp_http_server() -> (
     String,
     CancellationToken,
@@ -81,7 +81,7 @@ async fn spawn_acp_http_server() -> (
 // ── T107 / S077 ────────────────────────────────────────────────────────────────
 
 /// ACP mode: the HTTP MCP transport MUST start so that ACP subprocesses can
-/// call MCP tools like check_clearance.
+/// call MCP tools like `check_clearance`.
 ///
 /// The /health endpoint serves as a simple liveness probe — if it returns 200,
 /// the HTTP server is up and the transport is running in ACP mode.
@@ -106,7 +106,7 @@ async fn acp_mode_http_transport_is_accessible() {
 
 // ── T108 / S078 ────────────────────────────────────────────────────────────────
 
-/// ACP mode: requests to /mcp without a session_id query parameter MUST be
+/// ACP mode: requests to /mcp without a `session_id` query parameter MUST be
 /// rejected with HTTP 401 (HITL-003 security requirement).
 #[tokio::test]
 async fn acp_mode_mcp_request_without_session_id_is_rejected() {
@@ -132,7 +132,7 @@ async fn acp_mode_mcp_request_without_session_id_is_rejected() {
     ct.cancel();
 }
 
-/// ACP mode: requests to /mcp with an invalid/unknown session_id MUST be
+/// ACP mode: requests to /mcp with an invalid/unknown `session_id` MUST be
 /// rejected with HTTP 401 (HITL-003 security requirement).
 #[tokio::test]
 async fn acp_mode_mcp_request_with_invalid_session_id_is_rejected() {
@@ -159,7 +159,7 @@ async fn acp_mode_mcp_request_with_invalid_session_id_is_rejected() {
 
 // ── T109 / S079 ────────────────────────────────────────────────────────────────
 
-/// ACP mode: requests to /mcp with a valid active session_id MUST be allowed
+/// ACP mode: requests to /mcp with a valid active `session_id` MUST be allowed
 /// through to the MCP layer.
 ///
 /// We can't verify a full MCP tool call here (requires the whole rmcp

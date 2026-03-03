@@ -414,3 +414,132 @@ fn env_var_prefix_is_intercom() {
         "ipc_name should not contain 'monocoque'"
     );
 }
+
+// ── T127 (S092–S094): host_cli path validation ───────────────────────────────
+
+/// S094 — `validate_host_cli_path` returns `AppError::Config` when `host_cli`
+/// is an absolute path that does not exist on the filesystem (FR-039).
+#[test]
+fn validate_host_cli_path_nonexistent_absolute_returns_error() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    // Build a path that is absolute but does not exist.
+    let nonexistent = temp.path().join("zzz_nonexistent_cli_binary");
+    // Explicitly do NOT create the file.
+    let toml = format!(
+        r#"
+default_workspace_root = '{workspace}'
+http_port = 3000
+ipc_name = "test"
+max_concurrent_sessions = 1
+host_cli = '{cli}'
+
+[slack]
+channel_id = "C123"
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = false
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "continue"
+"#,
+        workspace = temp.path().to_str().expect("utf8"),
+        cli = nonexistent.to_str().expect("utf8"),
+    );
+
+    let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
+    let result = config.validate_host_cli_path();
+    assert!(
+        matches!(result, Err(AppError::Config(_))),
+        "nonexistent absolute host_cli must return Err(AppError::Config), got: {result:?}"
+    );
+}
+
+/// S092 — `validate_host_cli_path` returns `Ok(())` for a relative name even
+/// when the binary is not on PATH. A warning is logged but no error is
+/// returned, allowing for deferred PATH setup (FR-038).
+#[test]
+fn validate_host_cli_path_relative_name_not_on_path_returns_ok() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let toml = format!(
+        r#"
+default_workspace_root = '{workspace}'
+http_port = 3000
+ipc_name = "test"
+max_concurrent_sessions = 1
+host_cli = "zzz_clearly_not_a_real_binary_xyz"
+
+[slack]
+channel_id = "C123"
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = false
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "continue"
+"#,
+        workspace = temp.path().to_str().expect("utf8"),
+    );
+
+    let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
+    let result = config.validate_host_cli_path();
+    assert!(
+        result.is_ok(),
+        "relative host_cli not on PATH must return Ok(()) (warning logged), got: {result:?}"
+    );
+}
+
+/// S093 — `validate_host_cli_path` returns `Ok(())` for an absolute path that
+/// exists on the filesystem (FR-039).
+#[test]
+fn validate_host_cli_path_existing_absolute_returns_ok() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cli_path = temp.path().join("test_cli_binary");
+    // Create a minimal file so the path exists.
+    std::fs::write(&cli_path, b"placeholder").expect("write placeholder binary");
+
+    let toml = format!(
+        r#"
+default_workspace_root = '{workspace}'
+http_port = 3000
+ipc_name = "test"
+max_concurrent_sessions = 1
+host_cli = '{cli}'
+
+[slack]
+channel_id = "C123"
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = false
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "continue"
+"#,
+        workspace = temp.path().to_str().expect("utf8"),
+        cli = cli_path.to_str().expect("utf8"),
+    );
+
+    let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
+    let result = config.validate_host_cli_path();
+    assert!(
+        result.is_ok(),
+        "existing absolute host_cli must return Ok(()), got: {result:?}"
+    );
+}

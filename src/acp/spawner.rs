@@ -4,6 +4,8 @@
 //! - `kill_on_drop(true)` so processes are cleaned up automatically.
 //! - `env_clear()` + a safe variable allowlist to prevent Slack tokens and
 //!   other secrets from leaking into the child's environment (FR-029, S075).
+//! - Platform-specific process-tree isolation: Windows `CREATE_NEW_PROCESS_GROUP`
+//!   flag, Unix `process_group(0)`, and corresponding kill helpers (FR-037).
 //!
 //! The spawner does **not** wait for a ready signal on stdout — the caller
 //! verifies process readiness via the ACP handshake (`initialize` /
@@ -121,6 +123,23 @@ pub fn spawn_agent(config: &SpawnConfig, session_id: &str) -> Result<AcpConnecti
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
 
+    // ── Platform-specific process-group isolation (FR-037) ───────────────────
+    // On Unix, place the child in its own process group (PGID = child PID).
+    // On Windows, set CREATE_NEW_PROCESS_GROUP so taskkill /T can reach all
+    // descendants. Both ensure the entire agent process tree is reachable for
+    // kill on session termination.
+    #[cfg(unix)]
+    cmd.process_group(0);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NEW_PROCESS_GROUP (0x00000200): child starts in a new process
+        // group, enabling `taskkill /T` to reach all descendants.
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.as_std_mut().creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+
     let mut child = cmd
         .spawn()
         .map_err(|err| AppError::Acp(format!("failed to spawn agent: {err}")))?;
@@ -146,9 +165,7 @@ pub fn spawn_agent(config: &SpawnConfig, session_id: &str) -> Result<AcpConnecti
     })
 }
 
-// ── Exit monitor ─────────────────────────────────────────────────────────────
-
-/// Spawn a background task that awaits child-process exit and emits
+// ── Exit monitor ─────────────────────────────────────────────────────────────/// Spawn a background task that awaits child-process exit and emits
 /// [`AgentEvent::SessionTerminated`] when it happens.
 ///
 /// The task respects `cancel`: when the token is cancelled the task exits
@@ -203,4 +220,149 @@ pub fn monitor_exit(
             }
         }
     })
+}
+
+// ── Process tree termination (FR-037) ────────────────────────────────────────
+
+/// Kill a process and all its descendants on Windows.
+///
+/// Invokes `taskkill /F /T /PID <pid>` which recursively terminates the
+/// entire process tree rooted at `pid`.  This complements `kill_on_drop(true)`
+/// (which only kills the direct child) by ensuring grandchild processes are
+/// also terminated when a session ends.
+///
+/// The function is best-effort: if `taskkill` is unavailable or fails, a
+/// warning is logged but no error is returned.
+#[cfg(windows)]
+pub async fn kill_process_tree(pid: u32) {
+    use tokio::process::Command;
+    let result = Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    match result {
+        Ok(status) if status.success() => {
+            info!(pid, "process tree killed via taskkill /T");
+        }
+        Ok(status) => {
+            warn!(
+                pid,
+                exit_code = ?status.code(),
+                "taskkill exited with non-zero status — some children may survive"
+            );
+        }
+        Err(err) => {
+            warn!(pid, %err, "failed to invoke taskkill for process tree termination");
+        }
+    }
+}
+
+/// Kill a process group and all its members on Unix.
+///
+/// Sends `SIGTERM` to the negative PGID (`kill -TERM -<pid>`), terminating
+/// every process in the group.  When the agent was spawned with
+/// `process_group(0)`, the child's PGID equals its own PID, so this kills
+/// the child and all its descendants.
+///
+/// The function is best-effort: if the `kill` binary is unavailable or
+/// fails, a warning is logged but no error is returned.
+#[cfg(unix)]
+pub async fn kill_process_group(pid: u32) {
+    use tokio::process::Command;
+    let result = Command::new("kill")
+        .args(["-TERM", &format!("-{pid}")])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    match result {
+        Ok(status) if status.success() => {
+            info!(pid, "process group terminated via kill -TERM");
+        }
+        Ok(status) => {
+            warn!(
+                pid,
+                exit_code = ?status.code(),
+                "kill -TERM exited with non-zero status — some children may survive"
+            );
+        }
+        Err(err) => {
+            warn!(pid, %err, "failed to invoke kill for process group termination");
+        }
+    }
+}
+
+// ── Orphan process detection (FR-037, T126) ───────────────────────────────────
+
+/// Check for orphan agent processes left over from a previous server run.
+///
+/// Queries the OS process list for processes matching the `host_cli` binary
+/// name.  If any are found, logs `WARN` suggesting the operator verify the
+/// previous shutdown was clean.  **No auto-kill is performed** — the warning
+/// is informational only.
+///
+/// This function is best-effort: errors from the underlying OS commands (e.g.
+/// `pgrep` or `tasklist` not available) are silently ignored.
+pub async fn check_for_orphan_processes(host_cli: &str) {
+    #[cfg(windows)]
+    {
+        use tokio::process::Command;
+
+        // Build the image name: append ".exe" for the tasklist IMAGENAME filter.
+        let mut name = std::path::Path::new(host_cli)
+            .file_name()
+            .map_or_else(|| host_cli.to_owned(), |n| n.to_string_lossy().into_owned());
+        if !std::path::Path::new(&name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        {
+            name.push_str(".exe");
+        }
+
+        let Ok(output) = Command::new("tasklist")
+            .args(["/FI", &format!("IMAGENAME eq {name}"), "/NH"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await
+        else {
+            return;
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains(&*name) {
+            warn!(
+                host_cli,
+                "orphan agent processes detected — verify previous server shutdown was clean"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        use tokio::process::Command;
+
+        let Ok(output) = Command::new("pgrep")
+            .args(["-f", host_cli])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await
+        else {
+            return;
+        };
+
+        if output.status.success() {
+            warn!(
+                host_cli,
+                "orphan agent processes detected — verify previous server shutdown was clean"
+            );
+        }
+    }
+
+    // On platforms where neither check applies, silently no-op.
+    #[cfg(not(any(windows, unix)))]
+    let _ = host_cli;
 }

@@ -256,3 +256,123 @@ fn empty_line_is_silently_skipped() {
         "whitespace-only line must be silently skipped, got: {result:?}"
     );
 }
+
+// ── T130 (S095, S096): Outbound messages include monotonic sequence numbers ──
+
+/// Outbound messages written by `run_writer` include a monotonically increasing
+/// `seq` field starting at 0 (ES-008, FR-040).
+#[tokio::test]
+async fn outbound_messages_have_monotonic_sequence_numbers() {
+    use agent_intercom::acp::writer::run_writer;
+    use agent_intercom::persistence::db;
+    use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    };
+    use tokio::io::AsyncBufReadExt;
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    let pool = Arc::new(db::connect_memory().await.expect("in-memory db"));
+    let (read_side, write_side) = tokio::io::duplex(4096);
+    let (msg_tx, msg_rx) = mpsc::channel(10);
+    let counter = Arc::new(AtomicU64::new(0));
+    let cancel = CancellationToken::new();
+
+    let writer_handle = tokio::spawn(run_writer(
+        "sess-seq".to_owned(),
+        write_side,
+        msg_rx,
+        cancel,
+        Arc::clone(&counter),
+        Arc::clone(&pool),
+    ));
+
+    let reader_handle = tokio::spawn(async move {
+        let mut reader = tokio::io::BufReader::new(read_side);
+        let mut seq_values: Vec<u64> = Vec::new();
+        let mut line = String::new();
+        while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
+            let v: serde_json::Value = serde_json::from_str(line.trim()).expect("valid JSON line");
+            if let Some(seq) = v["seq"].as_u64() {
+                seq_values.push(seq);
+            }
+            line.clear();
+        }
+        seq_values
+    });
+
+    for i in 0..3_u64 {
+        msg_tx
+            .send(json!({"method": "test", "id": i}))
+            .await
+            .expect("send must succeed");
+    }
+    drop(msg_tx);
+
+    writer_handle
+        .await
+        .expect("writer task join")
+        .expect("writer must return Ok(())");
+    let seq_values = reader_handle.await.expect("reader task join");
+
+    assert_eq!(
+        seq_values,
+        vec![0, 1, 2],
+        "sequence numbers must start at 0 and increment monotonically"
+    );
+
+    // Counter must equal the number of messages sent.
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        3,
+        "counter must reflect total messages written"
+    );
+}
+
+// ── T131 (S097): Write failure returns AppError::Acp ────────────────────────
+
+/// When the write to stdin fails (broken pipe / disconnected agent), `run_writer`
+/// logs WARN and returns `AppError::Acp("write failed: …")` (ES-008, FR-041).
+#[tokio::test]
+async fn write_failure_returns_acp_error() {
+    use agent_intercom::acp::writer::run_writer;
+    use agent_intercom::persistence::db;
+    use agent_intercom::AppError;
+    use serde_json::json;
+    use std::sync::{atomic::AtomicU64, Arc};
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    let pool = Arc::new(db::connect_memory().await.expect("in-memory db"));
+
+    // Drop the read side so writes to write_side return BrokenPipe.
+    let (read_side, write_side) = tokio::io::duplex(1);
+    drop(read_side);
+
+    let (msg_tx, msg_rx) = mpsc::channel(10);
+    let counter = Arc::new(AtomicU64::new(0));
+    let cancel = CancellationToken::new();
+
+    msg_tx
+        .send(json!({"method": "test/failure"}))
+        .await
+        .expect("send must succeed before writer starts");
+    drop(msg_tx);
+
+    let result = run_writer(
+        "sess-fail".to_owned(),
+        write_side,
+        msg_rx,
+        cancel,
+        counter,
+        Arc::clone(&pool),
+    )
+    .await;
+
+    assert!(
+        matches!(result, Err(AppError::Acp(ref msg)) if msg.contains("write failed")),
+        "write failure must return AppError::Acp containing 'write failed', got: {result:?}"
+    );
+}

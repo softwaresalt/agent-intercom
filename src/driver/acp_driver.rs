@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU64, Arc};
 
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Mutex};
@@ -47,6 +47,9 @@ type WriterMap = Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>;
 /// Shared map type alias for agent-assigned session IDs.
 type AgentSessionIdMap = Arc<Mutex<HashMap<String, String>>>;
 
+/// Shared map type alias for per-session outbound sequence counters.
+type SeqCounterMap = Arc<Mutex<HashMap<String, Arc<AtomicU64>>>>;
+
 /// Atomic counter for generating unique JSON-RPC request IDs.
 static PROMPT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -54,12 +57,14 @@ static PROMPT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 
 /// ACP protocol driver — routes operator actions to the correct agent stream.
 ///
-/// Maintains four shared maps protected by async mutexes:
+/// Maintains five shared maps protected by async mutexes:
 ///
 /// - `stream_writers`: `session_id` → [`mpsc::Sender<Value>`] registered when
 ///   an ACP session connects.
 /// - `agent_session_ids`: intercom `session_id` → ACP `agent_session_id`
 ///   (from the `session/new` handshake result).
+/// - `seq_counters`: `session_id` → [`Arc<AtomicU64>`] shared with the
+///   [`run_writer`] task for monotonic outbound sequence numbers (ES-008).
 /// - `pending_clearances`: `request_id` → owning `session_id`, populated by
 ///   the event consumer on `clearance/request` receipt.
 /// - `pending_prompts_acp`: `prompt_id` → owning `session_id`, populated by
@@ -73,6 +78,8 @@ pub struct AcpDriver {
     stream_writers: WriterMap,
     /// Intercom session ID → ACP agent-assigned session ID mapping.
     agent_session_ids: AgentSessionIdMap,
+    /// Per-session outbound sequence counters shared with each `run_writer` task.
+    seq_counters: SeqCounterMap,
     /// Pending clearance requests: `request_id` → owning session metadata.
     pending_clearances: Arc<Mutex<HashMap<String, PendingClearance>>>,
     /// Pending prompt-forward requests: `prompt_id` → owning session metadata.
@@ -86,6 +93,7 @@ impl AcpDriver {
         Self {
             stream_writers: Arc::new(Mutex::new(HashMap::new())),
             agent_session_ids: Arc::new(Mutex::new(HashMap::new())),
+            seq_counters: Arc::new(Mutex::new(HashMap::new())),
             pending_clearances: Arc::new(Mutex::new(HashMap::new())),
             pending_prompts_acp: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -93,15 +101,32 @@ impl AcpDriver {
 
     /// Register a new session's outbound writer channel.
     ///
-    /// Must be called after the ACP reader/writer tasks are spawned for the
-    /// session.  If a session with the same `session_id` is already registered,
-    /// the old sender is replaced with the new one.
-    pub async fn register_session(&self, session_id: &str, tx: mpsc::Sender<Value>) {
-        self.stream_writers
-            .lock()
-            .await
-            .insert(session_id.to_owned(), tx);
+    /// Creates a fresh [`AtomicU64`] sequence counter for the session, stores
+    /// it in the driver's counter map, and returns it so the caller can pass
+    /// it directly to [`run_writer`].
+    ///
+    /// If a session with the same `session_id` is already registered, the old
+    /// sender and counter are replaced with the new ones.
+    pub async fn register_session(
+        &self,
+        session_id: &str,
+        tx: mpsc::Sender<Value>,
+    ) -> Arc<AtomicU64> {
+        let counter = Arc::new(AtomicU64::new(0));
+        {
+            self.stream_writers
+                .lock()
+                .await
+                .insert(session_id.to_owned(), tx);
+        }
+        {
+            self.seq_counters
+                .lock()
+                .await
+                .insert(session_id.to_owned(), Arc::clone(&counter));
+        }
         debug!(session_id, "acp driver: session writer registered");
+        counter
     }
 
     /// Register the ACP agent-assigned session ID for an intercom session.
@@ -121,11 +146,12 @@ impl AcpDriver {
 
     /// Remove a session's writer channel on disconnection or termination.
     ///
-    /// Also removes the agent session ID mapping. Idempotent — removing an
-    /// unknown `session_id` is a no-op.
+    /// Also removes the agent session ID mapping and sequence counter.
+    /// Idempotent — removing an unknown `session_id` is a no-op.
     pub async fn deregister_session(&self, session_id: &str) {
         self.stream_writers.lock().await.remove(session_id);
         self.agent_session_ids.lock().await.remove(session_id);
+        self.seq_counters.lock().await.remove(session_id);
         debug!(session_id, "acp driver: session writer deregistered");
     }
 
