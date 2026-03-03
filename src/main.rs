@@ -344,22 +344,19 @@ async fn run(args: Cli) -> Result<()> {
     }
 
     // ── Start transports ────────────────────────────────
-    // In ACP mode, MCP transports are not started. The ACP stream processor
-    // will be wired in a later phase.
+    // The HTTP transport starts in BOTH MCP and ACP modes. In ACP mode,
+    // the endpoint lets agent subprocesses call MCP tools (check_clearance,
+    // transmit, auto_check, etc.) via HTTP. Without it, tools are unreachable
+    // from spawned ACP sessions (HITL-003 / FR-032).
     let start_stdio = args.mode == ServerMode::Mcp
         && matches!(args.transport, Transport::Stdio | Transport::Both);
-    let start_sse =
-        args.mode == ServerMode::Mcp && matches!(args.transport, Transport::Sse | Transport::Both);
+    let start_sse = matches!(args.transport, Transport::Sse | Transport::Both);
 
     if args.mode == ServerMode::Acp {
         info!(
-            "ACP mode: MCP transports disabled — ACP event consumer running, \
-             reader/writer tasks spawned per session via session-start"
+            "ACP mode: stdio transport disabled; HTTP transport starting for MCP tool access \
+             by ACP subprocesses (HITL-003)"
         );
-        // T084: ACP infrastructure is now fully wired. The acp_event_tx and
-        // acp_driver fields are set in AppState. When an operator runs
-        // `/arc session-start`, handle_acp_session_start in commands.rs
-        // spawns run_reader and run_writer tasks for the new session.
     }
 
     let stdio_handle = if start_stdio {

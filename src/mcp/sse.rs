@@ -33,6 +33,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::handler::{AppState, IntercomServer};
+use crate::mode::ServerMode;
+use crate::models::session::SessionStatus;
+use crate::persistence::session_repo::SessionRepo;
 use crate::{AppError, Result};
 
 /// Handler for `GET /health` — returns 200 OK with a plain-text body.
@@ -40,6 +43,69 @@ use crate::{AppError, Result};
 /// Useful for probing liveness without initiating an MCP session.
 async fn health() -> &'static str {
     "ok"
+}
+
+/// ACP mode session authentication guard (HITL-003 / FR-033).
+///
+/// When the server is running in ACP mode, every new MCP connection to `/mcp`
+/// MUST include a valid `?session_id=<id>` query parameter that matches an
+/// active ACP session in the database.  Requests with missing or invalid
+/// session IDs are rejected with `401 Unauthorized`.
+///
+/// Established MCP connections (which carry the `Mcp-Session-Id` header set
+/// by rmcp for subsequent requests) bypass this check so that tool calls
+/// after the initial handshake are not blocked.
+///
+/// In MCP mode this middleware is a no-op — all connections are accepted.
+async fn acp_session_guard(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    // Only apply the guard in ACP mode.
+    if state.server_mode != ServerMode::Acp {
+        return next.run(request).await;
+    }
+
+    // Allow established MCP connections through (they carry Mcp-Session-Id).
+    if request.headers().contains_key("Mcp-Session-Id") {
+        return next.run(request).await;
+    }
+
+    // New connection — require a valid session_id query parameter.
+    let session_id = extract_query_param(request.uri(), "session_id");
+    let Some(ref id) = session_id else {
+        debug!("ACP session guard: missing session_id query parameter — rejecting");
+        return (
+            StatusCode::UNAUTHORIZED,
+            "ACP mode requires ?session_id=<id> query parameter",
+        )
+            .into_response();
+    };
+
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+    match repo.get_by_id(id).await {
+        Ok(Some(session)) if session.status == SessionStatus::Active => {
+            // Valid active session — allow the request through.
+            next.run(request).await
+        }
+        Ok(_) => {
+            debug!(session_id = %id, "ACP session guard: invalid or inactive session_id");
+            (
+                StatusCode::UNAUTHORIZED,
+                "ACP mode: invalid or inactive session_id",
+            )
+                .into_response()
+        }
+        Err(err) => {
+            warn!(%err, "ACP session guard: DB lookup failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal server error during session validation",
+            )
+                .into_response()
+        }
+    }
 }
 
 /// Pending URL parameters extracted by the middleware for the rmcp session factory.
@@ -463,16 +529,20 @@ pub async fn serve_with_listener(
         config,
     );
 
-    // Wrap the MCP endpoint with middleware that fixes missing Accept
-    // headers so that VS Code's initial POST probe succeeds without
-    // falling back to legacy SSE transport and the OAuth dance.
-    let mcp_service =
-        axum::Router::new()
-            .fallback_service(service)
-            .layer(middleware::from_fn_with_state(
-                pending_params,
-                ensure_accept_header,
-            ));
+    // Wrap the MCP endpoint with middleware:
+    // 1. ensure_accept_header — fixes Accept headers and stores query params
+    // 2. acp_session_guard (outermost, runs first) — rejects invalid ACP sessions
+    // Layer order: last `.layer()` call wraps outermost (runs first).
+    let mcp_service = axum::Router::new()
+        .fallback_service(service)
+        .layer(middleware::from_fn_with_state(
+            pending_params,
+            ensure_accept_header,
+        ))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            acp_session_guard,
+        ));
 
     let router = axum::Router::new()
         .nest("/mcp", mcp_service)

@@ -256,6 +256,20 @@ impl IntercomServer {
         })
     }
 
+    /// Return the pre-existing DB session ID override for this connection (T112 / HITL-003).
+    ///
+    /// In ACP mode, spawned agent subprocesses connect to the HTTP MCP endpoint
+    /// with `?session_id=<id>` to associate their tool calls with a specific
+    /// ACP session.  This accessor exposes that override so MCP tool handlers
+    /// can route requests to the correct session without relying on
+    /// `list_active()`, which is ambiguous when multiple ACP sessions are running.
+    ///
+    /// Returns `None` in MCP mode or when the query parameter was not supplied.
+    #[must_use]
+    pub fn session_id_override(&self) -> Option<&str> {
+        self.session_id_override.as_deref()
+    }
+
     /// Access the shared application state.
     #[must_use]
     pub fn state(&self) -> &Arc<AppState> {

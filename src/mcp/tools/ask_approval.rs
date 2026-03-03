@@ -125,14 +125,31 @@ pub async fn handle(
         }
 
         // ── Resolve session ──────────────────────────────────
+        // In ACP mode the agent subprocess supplies `?session_id=<id>` so we
+        // can pin the tool call to the exact session (T112 / HITL-003).
+        // Fall back to the first active session for backwards-compatible MCP
+        // mode where there is always exactly one session.
         let session_repo = SessionRepo::new(Arc::clone(&state.db));
-        let sessions = session_repo.list_active().await.map_err(|err| {
-            rmcp::ErrorData::internal_error(format!("failed to query active sessions: {err}"), None)
-        })?;
-        let session = sessions
-            .into_iter()
-            .next()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
+        let session = if let Some(sid) = context.service.session_id_override() {
+            session_repo
+                .get_by_id(sid)
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(format!("failed to query session: {err}"), None)
+                })?
+                .ok_or_else(|| rmcp::ErrorData::internal_error("session not found", None))?
+        } else {
+            let sessions = session_repo.list_active().await.map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to query active sessions: {err}"),
+                    None,
+                )
+            })?;
+            sessions
+                .into_iter()
+                .next()
+                .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?
+        };
 
         // Capture thread_ts early so it can be passed to all outgoing messages
         // for this session (S037 — subsequent messages use the thread).

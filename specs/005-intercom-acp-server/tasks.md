@@ -311,39 +311,39 @@
 
 #### Tests (S077–S080)
 
-- [ ] T107 [P] Write integration test for ACP subprocess calling check_clearance via HTTP transport in `tests/integration/acp_mcp_bridge_tests.rs` — covers S077
-- [ ] T108 [P] Write security test for invalid session_id rejection in `tests/integration/acp_mcp_bridge_tests.rs` — covers S078, S079
-- [ ] T109 [P] Write end-to-end test for full approval workflow via ACP subprocess in `tests/integration/acp_mcp_bridge_tests.rs` — covers S080
+- [x] T107 [P] Write integration test for ACP subprocess calling check_clearance via HTTP transport in `tests/integration/acp_mcp_bridge_tests.rs` — covers S077
+- [x] T108 [P] Write security test for invalid session_id rejection in `tests/integration/acp_mcp_bridge_tests.rs` — covers S078, S079
+- [x] T109 [P] Write end-to-end test for full approval workflow via ACP subprocess in `tests/integration/acp_mcp_bridge_tests.rs` — covers S080
 
 #### Implementation
 
-- [ ] T110 Remove the conditional that disables MCP HTTP transport in ACP mode in `src/main.rs` — transport MUST start in both modes
-- [ ] T111 Add session_id query parameter extraction and validation middleware in `src/mcp/sse.rs` — reject requests with missing/invalid session_id when in ACP mode with HTTP 401
-- [ ] T112 Wire ACP session authentication: when session_id is present, resolve the session from DB, verify it is active, and set the session context for tool routing through `AcpDriver`
+- [x] T110 Remove the conditional that disables MCP HTTP transport in ACP mode in `src/main.rs` — transport MUST start in both modes
+- [x] T111 Add session_id query parameter extraction and validation middleware in `src/mcp/sse.rs` — reject requests with missing/invalid session_id when in ACP mode with HTTP 401
+- [x] T112 Wire ACP session authentication: when session_id is present, resolve the session from DB, verify it is active, and set the session context for tool routing through `AcpDriver`
 
 ### HITL-005 — session-checkpoint Wrong Session (FR-034)
 
 #### Tests (S081–S082)
 
-- [ ] T113 [P] Write unit test for `parse_checkpoint_args` correctly extracting session_id and label in `tests/unit/command_tests.rs` — covers S081
-- [ ] T114 [P] Write unit test for checkpoint fallback to most-recent when no session_id in `tests/unit/command_tests.rs` — covers S082
+- [x] T113 [P] Write unit test for `parse_checkpoint_args` correctly extracting session_id and label in `tests/unit/command_tests.rs` — covers S081
+- [x] T114 [P] Write unit test for checkpoint fallback to most-recent when no session_id in `tests/unit/command_tests.rs` — covers S082
 
 #### Implementation
 
-- [ ] T115 Fix `parse_checkpoint_args` in `src/slack/commands.rs` to correctly extract session ID (first arg) and label (second arg), using `resolve_command_session` only when no explicit session ID provided
+- [x] T115 Fix `parse_checkpoint_args` in `src/slack/commands.rs` to correctly extract session ID (first arg) and label (second arg), using `resolve_command_session` only when no explicit session ID provided
 
 ### HITL-006 — Interrupted Sessions Unmanageable (FR-035, FR-036)
 
 #### Tests (S083–S088)
 
-- [ ] T116 [P] Write unit test for `resolve_command_session` resolving Interrupted sessions by explicit ID in `tests/unit/command_tests.rs` — covers S083, S084
-- [ ] T117 [P] Write unit test for `session-cleanup` command in `tests/unit/command_tests.rs` — covers S085, S086
+- [x] T116 [P] Write unit test for `resolve_command_session` resolving Interrupted sessions by explicit ID in `tests/unit/command_tests.rs` — covers S083, S084
+- [x] T117 [P] Write unit test for `session-cleanup` command in `tests/unit/command_tests.rs` — covers S085, S086
 - [ ] T118 [P] Write integration test for startup interrupted session notification in `tests/integration/session_lifecycle_tests.rs` — covers S087, S088
 
 #### Implementation
 
-- [ ] T119 Update `resolve_command_session` in `src/slack/commands.rs` to also query `find_by_id` when an explicit session ID is provided, accepting Interrupted status
-- [ ] T120 Add `session-cleanup` slash command handler in `src/slack/commands.rs` — queries all Interrupted sessions in channel, terminates each, posts confirmation
+- [x] T119 Update `resolve_command_session` in `src/slack/commands.rs` to also query `find_by_id` when an explicit session ID is provided, accepting Interrupted status
+- [x] T120 Add `session-cleanup` slash command handler in `src/slack/commands.rs` — queries all Interrupted sessions in channel, terminates each, posts confirmation
 - [ ] T121 Update `check_interrupted_on_startup` in `src/main.rs` to post Slack message listing interrupted sessions with "Clear All" Block Kit button
 
 **Checkpoint**: ACP subprocesses can reach MCP tools; checkpoint and interrupted session commands work correctly

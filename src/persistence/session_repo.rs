@@ -544,6 +544,27 @@ impl SessionRepo {
         rows.into_iter().map(SessionRow::into_session).collect()
     }
 
+    /// Return all interrupted sessions associated with a Slack channel (HITL-006).
+    ///
+    /// Used as a fallback when `find_active_by_channel` returns no results,
+    /// allowing operators to manage sessions that became `Interrupted` after a
+    /// server restart (e.g., via `session-stop`, `session-cleanup`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn find_interrupted_by_channel(&self, channel_id: &str) -> Result<Vec<Session>> {
+        let rows: Vec<SessionRow> = sqlx::query_as(
+            "SELECT * FROM session WHERE channel_id = ?1 AND status = 'interrupted' \
+             ORDER BY updated_at DESC",
+        )
+        .bind(channel_id)
+        .fetch_all(self.db.as_ref())
+        .await?;
+
+        rows.into_iter().map(SessionRow::into_session).collect()
+    }
+
     /// Find a session by Slack channel and thread timestamp.
     ///
     /// Returns `None` if no matching session exists.

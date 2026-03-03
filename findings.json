@@ -1,6 +1,7 @@
 [
   {
     "id": "ES-001",
+    "status": "open",
     "severity": "CRITICAL",
     "category": "security",
     "title": "Credential Leakage to Untrusted Agent Process",
@@ -10,6 +11,7 @@
   },
   {
     "id": "ES-002",
+    "status": "open",
     "severity": "HIGH",
     "category": "security",
     "title": "Potential Command Injection via Session Prompt",
@@ -19,6 +21,7 @@
   },
   {
     "id": "ES-003",
+    "status": "open",
     "severity": "HIGH",
     "category": "authorization",
     "title": "Cross-Session Interference by Authorized Users",
@@ -28,6 +31,7 @@
   },
   {
     "id": "ES-004",
+    "status": "open",
     "severity": "MEDIUM",
     "category": "resource",
     "title": "Orphaned Agent Processes (Zombie Processes)",
@@ -37,6 +41,7 @@
   },
   {
     "id": "ES-005",
+    "status": "open",
     "severity": "MEDIUM",
     "category": "dos",
     "title": "ACP Stream Rate Limiting (DoS)",
@@ -46,6 +51,7 @@
   },
   {
     "id": "ES-006",
+    "status": "open",
     "severity": "MEDIUM",
     "category": "recovery",
     "title": "Stall Detection Reset on Server Restart",
@@ -55,6 +61,7 @@
   },
   {
     "id": "ES-007",
+    "status": "open",
     "severity": "LOW",
     "category": "edge_case",
     "title": "Startup Race Condition (Event before Session Commit)",
@@ -64,6 +71,7 @@
   },
   {
     "id": "ES-008",
+    "status": "open",
     "severity": "MEDIUM",
     "category": "integrity",
     "title": "Partial Write Corruption on Crash",
@@ -73,6 +81,7 @@
   },
   {
     "id": "ES-009",
+    "status": "open",
     "severity": "LOW",
     "category": "edge_case",
     "title": "Workspace Mapping Hot-Reload Race",
@@ -82,11 +91,100 @@
   },
   {
     "id": "ES-010",
+    "status": "open",
     "severity": "HIGH",
     "category": "security",
     "title": "Unbounded `host_cli` Execution",
     "artifacts": ["spec.md", "src/config.rs"],
     "detail": "The `host_cli` setting in `config.toml` allows executing any binary. If an attacker gains write access to `config.toml` (e.g., via a separate vulnerability or misconfiguration), they can change `host_cli` to a malicious script. When the operator runs `/intercom session-start`, the server executes the malware with the server's privileges (and potentially tokens, see ES-001).",
     "recommendation": "While `config.toml` is trusted, adding an allowlist of permitted binaries or strict path validation (must be in system PATH or specific directory) reduces the blast radius. At minimum, log a CRITICAL warning on startup if `host_cli` points to a non-standard location."
+  },
+  {
+    "id": "HITL-001",
+    "status": "open",
+    "severity": "MEDIUM",
+    "category": "reliability",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "Socket Mode WebSocket Drops Silently with No Operator Notification",
+    "artifacts": ["src/slack/client.rs"],
+    "detail": "During HITL testing the Socket Mode WebSocket disconnected 3+ times within ~1 hour with OS error 10053 (Windows: 'An established connection was aborted by the software in your host machine.'). Auto-reconnect succeeds in approximately 2 minutes, but all slash commands return `dispatch_failed` during the gap. No message is posted to Slack when the connection drops or when it recovers, leaving the operator unaware of the outage.",
+    "recommendation": "1) Post a Slack message (via HTTP REST fallback, not Socket Mode) when the WebSocket drops and again when it recovers. 2) Investigate slack-morphism's ping interval — the reconnect kicks in ~212 seconds after the last pong, which suggests the default ping interval may be too long for Windows TCP keepalive timeouts. Consider reducing the ping interval or adding an application-level heartbeat."
+  },
+  {
+    "id": "HITL-002",
+    "status": "open",
+    "severity": "LOW",
+    "category": "usability",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "No Historical or Named Session Query; Sessions Lack Human-Readable Titles",
+    "artifacts": ["src/slack/commands.rs", "src/persistence/session_repo.rs"],
+    "detail": "`/arc sessions` only lists currently active sessions. There is no way to query historical, stale, interrupted, or abandoned sessions from Slack. Sessions also lack a human-readable name or title — only a UUID short-hash is shown — making it difficult for operators to identify a session's purpose when multiple sessions exist, similar to how GitHub Copilot Chat shows conversation titles in VS Code.",
+    "recommendation": "1) Add `/arc sessions --all` or `/arc sessions --history` that returns all sessions (active, interrupted, terminated) with their status and original prompt as a title. 2) Store a truncated version of the initial prompt as a `title` field on the session record and display it in all session listings."
+  },
+  {
+    "id": "HITL-003",
+    "status": "open",
+    "severity": "CRITICAL",
+    "category": "architecture",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "MCP Approval and Communication Tools Unreachable from Agent Subprocess in ACP Mode",
+    "artifacts": ["src/main.rs", "src/mcp/sse.rs", "src/driver/acp_driver.rs"],
+    "detail": "In ACP mode (`--mode acp`), the MCP HTTP transport on port 3000 is explicitly disabled (src/main.rs:353-360). Agent subprocesses (e.g., Copilot CLI) that rely on MCP tools — `check_clearance`, `auto_check`, `check_diff`, `transmit`, `standby`, `reboot` — receive an error when attempting to connect: 'fetch failed'. This means the entire approval workflow, modal capture, standby/wait, and state recovery are non-functional in ACP mode. The agent correctly reports the tools as unavailable and falls back to asking for direct confirmation, bypassing the Block Kit Approve/Reject UI entirely.",
+    "recommendation": "Start the MCP HTTP transport on port 3000 even in ACP mode so that agent subprocesses can call MCP tools. The transport should authenticate requests using the session ID embedded in the `?session_id=` query parameter, routing tool calls through the ACP driver rather than the MCP driver. Alternatively, provide a lightweight sidecar endpoint that proxies only the approval/communication tools for ACP subprocess use."
+  },
+  {
+    "id": "HITL-004",
+    "status": "open",
+    "severity": "LOW",
+    "category": "usability",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "session-checkpoint Help Shows session_id as Optional but It Is Required; Error Message Is Misleading",
+    "artifacts": ["src/slack/commands.rs"],
+    "detail": "The help text for `session-checkpoint` (lines 257, 300 in commands.rs) shows `[session_id]` in square brackets, indicating it is optional. However, when called without a session ID (e.g., `/arc session-checkpoint my-label`), the server returns `Error: not found: session my-label not found`, treating the label as a session ID. The error message is misleading — the real issue is that session ID resolution failed, not that the label is invalid.",
+    "recommendation": "1) Either make session ID resolution truly optional by falling back to the most-recently-active session when no session ID is provided (consistent with other commands). 2) Or update the help text to show `session-checkpoint <session_id> [label]` (required, not optional) and return a clear error: 'usage: session-checkpoint <session_id> [label]'."
+  },
+  {
+    "id": "HITL-005",
+    "status": "open",
+    "severity": "HIGH",
+    "category": "correctness",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "session-checkpoint Ignores Specified Session ID and Creates Checkpoint on Wrong Session",
+    "artifacts": ["src/slack/commands.rs", "src/slack/commands.rs:parse_checkpoint_args"],
+    "detail": "When running `/arc session-checkpoint <session_id> <label>`, the checkpoint is created on a different session than the one specified. In testing, `/arc session-checkpoint df06095d hitl-test-checkpoint` created checkpoint `2e4e74f8` under session `d2316b4c-4048-45ec-adff-5b27c4a592e6`. No error was returned, making the mismatch invisible to the operator. The root cause is likely in `parse_checkpoint_args` interpreting arguments incorrectly, or `resolve_command_session` ignoring the explicit ID and falling back to the most-recently-active session.",
+    "recommendation": "Fix `parse_checkpoint_args` to correctly extract the session ID and label from the args slice. Add a unit test verifying that `session-checkpoint <known-id> <label>` creates the checkpoint under the session with the matching ID, not the most-recently-active session."
+  },
+  {
+    "id": "HITL-006",
+    "status": "open",
+    "severity": "HIGH",
+    "category": "usability",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "Interrupted Sessions Cannot Be Stopped or Cleared via Slash Commands After Server Restart",
+    "artifacts": ["src/main.rs:check_interrupted_on_startup", "src/slack/commands.rs:resolve_command_session", "src/persistence/session_repo.rs:find_active_by_channel"],
+    "detail": "On server restart, `check_interrupted_on_startup` transitions all previously-Active sessions to `Interrupted` status. `/arc sessions` continues to display these sessions (suggesting `list_active` returns Interrupted sessions), but `session-stop`, `session-clear`, and `session-restart` all call `resolve_command_session` which uses `find_active_by_channel` — a query that excludes Interrupted sessions. The operator sees sessions listed but receives a 'not found' error when trying to act on them. There is no slash command to clean up Interrupted sessions.",
+    "recommendation": "1) Fix `resolve_command_session` to also resolve Interrupted sessions when an explicit session ID is provided (ambiguity only applies to implicit resolution). 2) Add `/arc session-clear --interrupted` or `/arc session-cleanup` that force-terminates all Interrupted sessions in the channel. 3) Alternatively, post a Slack message on startup listing interrupted session IDs with a one-click 'Clear All' button."
+  },
+  {
+    "id": "HITL-007",
+    "status": "open",
+    "severity": "MEDIUM",
+    "category": "observability",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "ACP Session Lifecycle Events Not Written to Audit Log",
+    "artifacts": ["src/audit/writer.rs", "src/slack/commands.rs", "src/mcp/tools/"],
+    "detail": "The audit log only captures MCP tool calls (check_clearance, auto_check, broadcast, etc.). ACP session lifecycle events — session start, session stop, session pause/resume, steering delivery, task queueing — are not written to the audit log. During a full HITL test session (~1 hour, 6+ sessions created), no audit entries were written for today's date. This leaves a significant gap in the audit trail for ACP-mode deployments.",
+    "recommendation": "Add explicit audit log writes in the ACP session lifecycle handlers: `handle_acp_session_start`, `handle_session_stop`, `handle_session_pause`, `handle_session_resume`, `handle_session_clear`, and the steer/task handlers when in ACP mode. Use event types such as `acp_session_start`, `acp_session_stop`, `acp_steer_delivered`, `acp_task_queued`."
+  },
+  {
+    "id": "HITL-008",
+    "status": "open",
+    "severity": "LOW",
+    "category": "usability",
+    "source": "HITL ACP test run 2026-03-03",
+    "title": "Paused Sessions Hidden from /arc sessions Listing",
+    "artifacts": ["src/slack/commands.rs:handle_sessions", "src/persistence/session_repo.rs:list_active"],
+    "detail": "When a session is paused via `/arc session-pause`, it disappears from `/arc sessions` output (`No active sessions.` was returned while a paused session existed). The operator has no visibility into paused sessions and cannot distinguish between 'no sessions' and 'one paused session'. This could lead to the operator accidentally starting duplicate sessions.",
+    "recommendation": "Update `handle_sessions` to also query and display paused sessions, with a visual indicator (e.g., `⏸ paused`) to distinguish them from active sessions. Update `list_active` in session_repo or add a separate `list_active_and_paused` query."
   }
 ]

@@ -12,6 +12,7 @@ mod unit {
     mod cli_tests;
     mod command_approve_tests;
     mod command_exec_tests;
+    mod command_tests;
     mod config_tests;
     mod credential_loading_tests;
     mod diff_tests;

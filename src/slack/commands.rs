@@ -74,7 +74,10 @@ pub async fn handle_command(
         let guard = state.read().await;
         guard.get_user_state::<Arc<AppState>>().cloned()
     };
-    debug!(elapsed_ms = started.elapsed().as_millis(), "state lock acquired");
+    debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "state lock acquired"
+    );
 
     let response_text = if let Some(ref app) = app_state {
         // Verify authorized user.
@@ -140,6 +143,14 @@ async fn dispatch_command(
 
         "session-start" | "session-stop" | "session-restart" => Ok(format!(
             "`{command}` is only available in ACP mode. Use `/{prefix} help` for commands."
+        )),
+
+        "session-cleanup" if state.server_mode == ServerMode::Acp => {
+            handle_session_cleanup(user_id, channel_id, state).await
+        }
+
+        "session-cleanup" => Ok(format!(
+            "`session-cleanup` is only available in ACP mode. Use `/{prefix} help` for commands."
         )),
 
         "session-pause" => {
@@ -339,7 +350,7 @@ async fn resolve_command_session(
     repo: &SessionRepo,
 ) -> crate::Result<crate::models::session::Session> {
     if let Some(id) = session_id {
-        // Try exact match first, then fall back to prefix matching.
+        // Explicit ID: accept any status including Interrupted (HITL-006 / S083).
         if let Some(session) = repo.get_by_id(id).await? {
             return Ok(session);
         }
@@ -349,12 +360,19 @@ async fn resolve_command_session(
             .ok_or_else(|| crate::AppError::NotFound(format!("session {id} not found")));
     }
 
-    // T067: Prefer the session in the originating channel (S043).
+    // T067: Prefer the active session in the originating channel (S043).
     let channel_sessions = repo.find_active_by_channel(channel_id).await?;
     if let Some(session) = channel_sessions
         .into_iter()
         .find(|s| s.owner_user_id == user_id)
     {
+        return Ok(session);
+    }
+
+    // HITL-006: Fall back to interrupted sessions when no active session exists
+    // so operators can manage sessions after a server restart (S083, S084).
+    let interrupted = repo.find_interrupted_by_channel(channel_id).await?;
+    if let Some(session) = interrupted.into_iter().find(|s| s.owner_user_id == user_id) {
         return Ok(session);
     }
 
@@ -782,6 +800,49 @@ async fn handle_session_stop(
     Ok(format!("ACP session `{}` stopped.", terminated.id))
 }
 
+/// Terminate all interrupted sessions in the channel (HITL-006 / S085, S086).
+///
+/// Queries all sessions with status `Interrupted` in the channel that are
+/// owned by the requesting user, marks each as `Terminated`, and deregisters
+/// them from the ACP driver.  Posts a confirmation listing the terminated
+/// session IDs.
+async fn handle_session_cleanup(
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    let interrupted = repo.find_interrupted_by_channel(channel_id).await?;
+    let user_sessions: Vec<_> = interrupted
+        .into_iter()
+        .filter(|s| s.owner_user_id == user_id)
+        .collect();
+
+    if user_sessions.is_empty() {
+        return Ok("No interrupted sessions to clean up.".to_owned());
+    }
+
+    let count = user_sessions.len();
+    let mut cleaned: Vec<String> = Vec::with_capacity(count);
+
+    for session in &user_sessions {
+        repo.set_terminated(&session.id, SessionStatus::Terminated)
+            .await?;
+        if let Some(ref acp_driver) = state.acp_driver {
+            acp_driver.deregister_session(&session.id).await;
+        }
+        let short_id: String = session.id.chars().take(8).collect();
+        cleaned.push(format!("`{short_id}…`"));
+        info!(session_id = %session.id, user_id, "interrupted session cleaned up");
+    }
+
+    Ok(format!(
+        "Cleaned up {count} interrupted session(s): {}",
+        cleaned.join(", ")
+    ))
+}
+
 async fn handle_session_clear(
     session_id: Option<&str>,
     user_id: &str,
@@ -883,19 +944,30 @@ async fn handle_session_restart(
 
 // ── Checkpoint commands (T070-T071 integration, T072) ────────────────
 
-/// Parse checkpoint args: `[session_id] [label]` — if first arg looks like a
-/// UUID it's a `session_id`, otherwise it's used as the label.
-fn parse_checkpoint_args<'a>(args: &[&'a str]) -> (Option<&'a str>, Option<&'a str>) {
+/// Parse `session-checkpoint [session_id] [label]` arguments.
+///
+/// The first positional argument is always the session ID (or a prefix of it).
+/// The second positional argument, if present, is the checkpoint label.
+/// Any additional arguments are silently ignored.
+///
+/// | Call                         | `session_id`      | `label`           |
+/// |------------------------------|-------------------|-------------------|
+/// | `session-checkpoint`         | `None`            | `None`            |
+/// | `session-checkpoint abc123`  | `Some("abc123")`  | `None`            |
+/// | `session-checkpoint abc lbl` | `Some("abc")`     | `Some("lbl")`     |
+///
+/// When `session_id` is `None`, the caller should fall back to the
+/// most-recently-active session in the channel (S082).
+/// Parse `args` from a `session-checkpoint` slash command into `(session_id, label)`.
+///
+/// Rule: the first positional argument is always `session_id`, the second is `label`.
+/// There is no content-based heuristic — a single argument is always a `session_id`
+/// regardless of whether it contains dashes (HITL-005 fix).
+#[must_use]
+pub fn parse_checkpoint_args<'a>(args: &[&'a str]) -> (Option<&'a str>, Option<&'a str>) {
     match args.len() {
         0 => (None, None),
-        1 => {
-            // If it contains a dash and is longish, treat as session_id.
-            if args[0].contains('-') && args[0].len() > 10 {
-                (Some(args[0]), None)
-            } else {
-                (None, Some(args[0]))
-            }
-        }
+        1 => (Some(args[0]), None),
         _ => (Some(args[0]), Some(args[1])),
     }
 }
