@@ -653,3 +653,27 @@ In `src/slack/handlers/steer.rs`, `store_from_slack` picks the first active sess
 
 - If an auto-approve action is granted by an operator in Slack for a given command, such as cargo test, and cargo is already in the auto-approve list with a set of RegEx separated subcommands, then "test" should be added to the list of auto-approve subcommands rather than adding a new node to the auto-approve tree.
 - Consider whether adding a hook, such as .github/hooks/pre-tool-terminal-filter.ps1, would be a better fit for enforcing terminal command auto-approval rules based on the configured RegEx patterns, rather than implementing this logic directly in the `resolve_clearance` method of the `AgentDriver`. This hook could intercept terminal command executions and check them against the auto-approve list before they are sent to the agent, providing a more centralized and potentially more efficient way to manage auto-approvals without having to route every command through Slack for approval. This would also allow for more complex logic to be implemented in the hook, such as logging, notifications, or even dynamic adjustments to the auto-approve list based on certain conditions, without adding overhead to the main agent communication flow.  It would also be more deterministic as an enforcement mechanism because the agent would be required to observe the hook, whereas the agent may simply forget to check with agent-intercom's auto-approval process.
+
+## Adversarial Review Findings (2026-03-03)
+
+Source: adversarial code review of feature 005-intercom-acp-server (GPT-5.2 Codex + Claude Opus 4.6). Findings F-03, F-04, F-05 were fixed in commit `1ed6a4d`. Remaining findings are deferred.
+
+### CRITICAL — Feature Gaps
+
+- **F-01** `src/main.rs:756–763` — ClearanceRequested event handler is a no-op. The ACP event consumer logs `AgentEvent::ClearanceRequested` but never calls `acp_driver.register_clearance()`, never persists an `approval_request` DB record, and never posts a Slack interactive approval message. ACP agents requesting clearance will hang indefinitely. Must: (1) register clearance with AcpDriver, (2) persist approval_request via ApprovalRepo, (3) post Slack interactive approval message to session thread. (FR-005 non-functional for ACP)
+- **F-02** `src/main.rs:775–782` — PromptForwarded event handler is a no-op. Same pattern as F-01: logged but never registered with `acp_driver.register_prompt_request()` or surfaced to Slack. ACP agents forwarding prompts will hang. Must mirror MCP `forward_prompt` tool behavior. (FR-005 non-functional for ACP)
+
+### MEDIUM — Correctness and Compliance
+
+- **F-06** `src/acp/reader.rs:346–355` — Queued steering messages are marked consumed even when `send_prompt` delivery fails. Messages lost on retry. Fix: only mark consumed after successful send; keep failed deliveries unconsumed for retry on next reconnect.
+- **F-07** `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes sessions in `created` state, so concurrent `session-start` calls can all pass the limit check. Also `count_active` counts ALL protocols against `acp.max_sessions`. Fix: count `created` sessions too, or add `count_active_by_protocol` filtered to ACP only.
+- **F-08** `src/slack/commands.rs:415–425` — ACP session start resolves workspace from `state.config` (static) instead of `state.workspace_mappings` (hot-reloaded). New workspace mappings added while server is running are not picked up for ACP sessions. Violates FR-014.
+- **F-09** `src/driver/acp_driver.rs:130–134` — `deregister_session` removes `stream_writers` and `agent_session_ids` but does NOT clean up `pending_clearances` or `pending_prompts_acp` for the session. These are keyed by `request_id`/`prompt_id`, not `session_id`. Once F-01/F-02 are fixed, orphaned entries will accumulate as memory leaks. Fix: scan and remove matching entries or add a reverse index.
+- **F-10** `src/mcp/sse.rs:421–446` — No deprecation warning logged when both `workspace_id` and `channel_id` query params are provided. FR-013 requires: "when both are provided, workspace_id takes precedence and a deprecation warning MUST be logged." The warning only fires when `workspace_id` is absent.
+- **F-11** `src/slack/commands.rs:810–868` — `session-restart` does not set `restart_of` field on new session. The `Session` model supports `restart_of: Option<String>` and the DB schema has the column, but the restart handler never links the new session to the old one. The new session starts a fresh Slack thread instead of continuing in the old one.
+- **F-12** `src/slack/commands.rs:655–689` — `handle_mcp_session_start` does not accept or set `channel_id` on the session. MCP sessions started via `/acom session-start` are invisible to `find_active_by_channel`, so operators in the channel see "no active session" errors.
+- **F-13** `src/acp/handshake.rs:40–47` — Static handshake correlation IDs (`PROMPT_ID = "intercom-prompt-1"`) overlap with `AcpDriver::PROMPT_COUNTER` which starts at 1, also producing `"intercom-prompt-1"`. Fix: start counter at 1000 or use UUIDs for handshake IDs.
+
+### LOW — Observability
+
+- **F-14** `src/acp/writer.rs:67–70` — Writer task exits silently on write error without emitting a `SessionTerminated` event. The reader will eventually detect EOF, but there is a window where queued messages are silently dropped.
