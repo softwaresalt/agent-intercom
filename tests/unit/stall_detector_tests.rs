@@ -198,6 +198,77 @@ async fn cancellation_stops_detector() {
     assert!(result.is_err(), "no events after cancellation");
 }
 
+// ── T147 (S107, S108): Stall timer initialization from DB timestamps ──────────
+
+/// S107 — When a detector is initialised with `initial_elapsed` close to the
+/// threshold, it must fire significantly sooner than the full `inactivity_threshold`.
+///
+/// This simulates a server restart where `now - last_activity_at ≈ threshold`.
+#[tokio::test]
+async fn stall_timer_with_near_threshold_elapsed_fires_quickly() {
+    let ct = CancellationToken::new();
+    let (tx, mut rx) = mpsc::channel(32);
+    let detector = StallDetector::new(
+        "s-near-elapsed".to_owned(),
+        Duration::from_secs(5),
+        Duration::from_secs(60),
+        3,
+        tx,
+        ct.clone(),
+    )
+    .with_initial_elapsed(Duration::from_millis(4_800));
+
+    let _handle = detector.spawn();
+
+    // Should fire within ~500 ms (only ~200 ms remaining from 5 s threshold).
+    let event = tokio::time::timeout(Duration::from_millis(800), rx.recv())
+        .await
+        .expect("must fire quickly because most of the threshold already elapsed")
+        .expect("channel must be open");
+
+    assert!(
+        matches!(event, StallEvent::Stalled { ref session_id, .. } if session_id == "s-near-elapsed"),
+        "expected Stalled for 's-near-elapsed'; got {event:?}"
+    );
+
+    ct.cancel();
+}
+
+/// S108 — When `initial_elapsed >= inactivity_threshold` the detector must fire
+/// immediately (within a short grace period) rather than waiting the full interval.
+///
+/// This simulates a server restart where the agent was already overdue for a
+/// stall check before the server went down.
+#[tokio::test]
+async fn stall_timer_with_past_threshold_elapsed_fires_immediately() {
+    let ct = CancellationToken::new();
+    let (tx, mut rx) = mpsc::channel(32);
+    let detector = StallDetector::new(
+        "s-past-elapsed".to_owned(),
+        Duration::from_secs(5),
+        Duration::from_secs(60),
+        3,
+        tx,
+        ct.clone(),
+    )
+    .with_initial_elapsed(Duration::from_secs(10)); // 10 s > 5 s threshold
+
+    let _handle = detector.spawn();
+
+    // Should fire almost immediately (within 300 ms) because elapsed > threshold.
+    let event = tokio::time::timeout(Duration::from_millis(400), rx.recv())
+        .await
+        .expect("must fire immediately when initial_elapsed >= threshold")
+        .expect("channel must be open");
+
+    assert!(
+        matches!(event, StallEvent::Stalled { .. }),
+        "expected Stalled event; got {event:?}"
+    );
+
+    ct.cancel();
+}
+
 // ── Stall notification content (T056 — S058, S060, S061) ─────────────────────
 
 /// S058 — The stall alert blocks produced for a stalled session must include

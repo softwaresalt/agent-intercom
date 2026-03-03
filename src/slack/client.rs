@@ -22,6 +22,7 @@ use tracing::{error, info, warn};
 
 use crate::mcp::handler::AppState;
 use crate::models::session::SessionMode;
+use crate::persistence::session_repo::SessionRepo;
 use crate::slack::{commands, events, push_events};
 use crate::{config::SlackConfig, AppError, Result};
 
@@ -264,6 +265,8 @@ impl SlackService {
             .with_hello_events(|event, _client, state| async move {
                 // T095: On each hello (including reconnections), re-post
                 // any pending interactive messages that may have been lost.
+                // T138 (FR-042): On reconnections, also notify active session
+                // channels that the WebSocket is back online.
                 info!(?event, "socket hello (connection established)");
                 let app: Option<Arc<AppState>> = {
                     let guard = state.read().await;
@@ -271,6 +274,10 @@ impl SlackService {
                 };
                 if let Some(app) = app {
                     repost_pending_messages(&app).await;
+                    // Post reconnect notification only when a Slack service is wired up.
+                    if let Some(ref slack) = app.slack {
+                        notify_ws_reconnect(slack, &app.db).await;
+                    }
                 }
             })
             .with_command_events(commands::handle_command)
@@ -604,6 +611,114 @@ async fn repost_pending_messages(state: &AppState) {
         Ok(_) => { /* no pending prompts */ }
         Err(err) => {
             warn!(%err, "failed to query pending prompts for reconnect re-post");
+        }
+    }
+}
+
+// ── WebSocket disconnect/reconnect notifications (T137/T138, FR-042) ──────────
+
+/// Collect the Slack channel IDs of all currently-active sessions.
+///
+/// Used by [`notify_ws_disconnect`] and [`notify_ws_reconnect`] to post
+/// notifications to every channel that has a live ACP session, so operators
+/// are informed of connectivity state changes even when the server's global
+/// Slack channel is not configured.
+///
+/// Returns an empty `Vec` when no sessions are active or when none have a
+/// `channel_id` set.
+///
+/// # Errors
+///
+/// Returns `AppError::Db` if the database query fails.
+pub async fn collect_active_session_channels(
+    db: &Arc<crate::persistence::db::Database>,
+) -> Result<Vec<SlackChannelId>> {
+    let repo = SessionRepo::new(Arc::clone(db));
+    let sessions = repo.list_active().await?;
+    Ok(sessions
+        .into_iter()
+        .filter_map(|s| s.channel_id.map(SlackChannelId))
+        .collect())
+}
+
+/// Post a WebSocket-dropped notification to all active session channels.
+///
+/// Called when the Socket Mode connection drops (FR-042). The message is
+/// sent via the HTTP REST API (not the Socket Mode WebSocket, which is down)
+/// so operators receive timely notification even during an outage.
+///
+/// Errors posting to individual channels are logged at `WARN` and do not
+/// prevent notifications to other channels.
+pub async fn notify_ws_disconnect(
+    slack: &Arc<SlackService>,
+    db: &Arc<crate::persistence::db::Database>,
+) {
+    let channels = match collect_active_session_channels(db).await {
+        Ok(ch) => ch,
+        Err(err) => {
+            warn!(%err, "failed to collect channels for WS disconnect notification");
+            return;
+        }
+    };
+
+    if channels.is_empty() {
+        return;
+    }
+
+    info!(
+        channel_count = channels.len(),
+        "posting WebSocket drop notification to active session channels"
+    );
+
+    for channel in channels {
+        let msg = SlackMessage::plain(
+            channel.clone(),
+            "\u{26a0}\u{fe0f} *Connection interrupted* — Slack WebSocket disconnected. \
+             Agent responses may be delayed. Reconnecting\u{2026}",
+        );
+        if let Err(err) = slack.post_message_direct(msg).await {
+            warn!(%err, channel = %channel.0, "failed to post WS disconnect notification");
+        }
+    }
+}
+
+/// Post a WebSocket-reconnected notification to all active session channels.
+///
+/// Called on each Socket Mode `hello` event after the initial connection,
+/// indicating the WebSocket has been re-established (FR-042).  Posts via
+/// the HTTP REST API using the bot token.
+///
+/// Errors posting to individual channels are logged at `WARN` and do not
+/// prevent notifications to other channels.
+pub async fn notify_ws_reconnect(
+    slack: &Arc<SlackService>,
+    db: &Arc<crate::persistence::db::Database>,
+) {
+    let channels = match collect_active_session_channels(db).await {
+        Ok(ch) => ch,
+        Err(err) => {
+            warn!(%err, "failed to collect channels for WS reconnect notification");
+            return;
+        }
+    };
+
+    if channels.is_empty() {
+        return;
+    }
+
+    info!(
+        channel_count = channels.len(),
+        "posting WebSocket reconnect notification to active session channels"
+    );
+
+    for channel in channels {
+        let msg = SlackMessage::plain(
+            channel.clone(),
+            "\u{2705} *Connection restored* — Slack WebSocket reconnected. \
+             Agent communication is back to normal.",
+        );
+        if let Err(err) = slack.post_message_direct(msg).await {
+            warn!(%err, channel = %channel.0, "failed to post WS reconnect notification");
         }
     }
 }

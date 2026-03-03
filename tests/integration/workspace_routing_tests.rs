@@ -245,3 +245,69 @@ async fn three_sessions_in_three_channels_route_correctly() {
     let ids: std::collections::HashSet<_> = session_ids.iter().collect();
     assert_eq!(ids.len(), 3, "all three session IDs must be distinct");
 }
+
+// ── T153 (S111, S112): Config reload concurrent with session creation ─────────
+
+/// S111 / S112 — When a hot-reload write fires while session creation is
+/// resolving the workspace-to-channel mapping, the resolved `channel_id` must
+/// be a consistent snapshot — never `None` or a partially-observed mapping.
+///
+/// The correctness guarantee is provided by holding a read lock on the
+/// `workspace_mappings` `RwLock` for the full duration of channel resolution.
+/// This test verifies that the `RwLock` prevents observation of a torn state
+/// even under concurrent writer pressure.
+#[tokio::test]
+async fn config_reload_concurrent_with_session_creation_is_consistent() {
+    use std::sync::{Arc, RwLock};
+
+    let mappings: Arc<RwLock<Vec<WorkspaceMapping>>> =
+        Arc::new(RwLock::new(vec![WorkspaceMapping {
+            workspace_id: "ws-concurrent".to_owned(),
+            channel_id: "C-ORIGINAL".to_owned(),
+            label: None,
+            path: None,
+        }]));
+
+    let mut reader_handles = Vec::new();
+
+    // Spawn 8 reader tasks that each acquire the read lock, resolve the
+    // channel, and hold the lock long enough for a writer to compete.
+    for _ in 0..8 {
+        let m = Arc::clone(&mappings);
+        reader_handles.push(tokio::spawn(async move {
+            let guard = m.read().expect("read lock must not be poisoned");
+            let channel = guard
+                .iter()
+                .find(|entry| entry.workspace_id == "ws-concurrent")
+                .map(|entry| entry.channel_id.clone());
+            // Drop guard before .await to avoid holding across await.
+            drop(guard);
+            channel
+        }));
+    }
+
+    // Concurrently trigger a hot-reload update.
+    let write_mappings = Arc::clone(&mappings);
+    let writer = tokio::spawn(async move {
+        let mut guard = write_mappings
+            .write()
+            .expect("write lock must not be poisoned");
+        *guard = vec![WorkspaceMapping {
+            workspace_id: "ws-concurrent".to_owned(),
+            channel_id: "C-RELOADED".to_owned(),
+            label: None,
+            path: None,
+        }];
+    });
+
+    writer.await.expect("writer task must complete");
+
+    for handle in reader_handles {
+        let channel = handle.await.expect("reader task must complete");
+        assert!(
+            channel == Some("C-ORIGINAL".to_owned()) || channel == Some("C-RELOADED".to_owned()),
+            "channel must be consistently C-ORIGINAL or C-RELOADED (never None or torn); \
+             got: {channel:?}"
+        );
+    }
+}

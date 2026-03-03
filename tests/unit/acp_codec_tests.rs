@@ -154,7 +154,7 @@ async fn stream_eof_emits_session_terminated() {
     // Empty byte slice — immediate EOF.
     let empty: &[u8] = b"";
 
-    run_reader("sess-eof".to_owned(), empty, tx, cancel, None)
+    run_reader("sess-eof".to_owned(), empty, tx, cancel, None, 0)
         .await
         .expect("run_reader must return Ok(()) on clean EOF");
 
@@ -374,5 +374,65 @@ async fn write_failure_returns_acp_error() {
     assert!(
         matches!(result, Err(AppError::Acp(ref msg)) if msg.contains("write failed")),
         "write failure must return AppError::Acp containing 'write failed', got: {result:?}"
+    );
+}
+
+// ── T143 (S104, S105, S106): Token-bucket rate limiter ───────────────────────
+
+/// S104 — Normal traffic at or below `max_rate` messages per second is always
+/// permitted by `TokenBucketRateLimiter::check()`.
+#[test]
+fn token_bucket_allows_single_message() {
+    use agent_intercom::acp::reader::{RateLimitDecision, TokenBucketRateLimiter};
+
+    let mut limiter = TokenBucketRateLimiter::new(10);
+    let decision = limiter.check();
+    assert!(
+        matches!(decision, RateLimitDecision::Allow),
+        "first message must always be allowed; got: {decision:?}"
+    );
+}
+
+/// S105 — Bursting beyond `max_rate` within one second must trigger a
+/// `Throttle` decision (not `Allow`) to warn that the rate limit is exceeded.
+#[test]
+fn token_bucket_throttles_burst_beyond_rate() {
+    use agent_intercom::acp::reader::{RateLimitDecision, TokenBucketRateLimiter};
+
+    // 10 tokens/sec — exhaust immediately with 20 calls without waiting.
+    let mut limiter = TokenBucketRateLimiter::new(10);
+    let mut throttled = false;
+    for _ in 0..20 {
+        if matches!(
+            limiter.check(),
+            RateLimitDecision::Throttle | RateLimitDecision::Terminate
+        ) {
+            throttled = true;
+            break;
+        }
+    }
+    assert!(
+        throttled,
+        "burst beyond rate limit must trigger Throttle or Terminate"
+    );
+}
+
+/// S106 — Sustained flooding (many messages far beyond the allowed rate) must
+/// eventually trigger a `Terminate` decision so the session is shut down.
+#[test]
+fn token_bucket_terminates_on_sustained_flood() {
+    use agent_intercom::acp::reader::{RateLimitDecision, TokenBucketRateLimiter};
+
+    let mut limiter = TokenBucketRateLimiter::new(10);
+    let mut last = RateLimitDecision::Allow;
+    for _ in 0..300 {
+        last = limiter.check();
+        if matches!(last, RateLimitDecision::Terminate) {
+            break;
+        }
+    }
+    assert!(
+        matches!(last, RateLimitDecision::Terminate),
+        "sustained flood must eventually trigger Terminate; got: {last:?}"
     );
 }

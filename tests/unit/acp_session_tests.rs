@@ -243,3 +243,106 @@ async fn crash_with_pending_clearance_resolves_as_timeout() {
         "pending clearance must be marked interrupted when agent crashes"
     );
 }
+
+// ── T150 (S109, S110): Session Active in DB before reader processes events ────
+
+/// S109 — The session DB record must be committed as `active` before the ACP
+/// reader task starts, so that any early inbound events can find the session
+/// in `list_active()` without a grace-period retry.
+///
+/// This test validates the state transition model required by the T151 fix:
+/// `update_status(Active)` must be called and confirmed before spawning the
+/// reader task.
+#[tokio::test]
+async fn session_active_in_db_before_reader_starts() {
+    use std::sync::Arc;
+
+    use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+    use agent_intercom::persistence::{db, session_repo::SessionRepo};
+
+    let pool = Arc::new(db::connect_memory().await.expect("in-memory db"));
+    let repo = SessionRepo::new(Arc::clone(&pool));
+
+    // 1. Create session record (maps to DB insert in finish_acp_session_start).
+    let session = Session::new(
+        "U-ORDER-TEST".to_owned(),
+        "/workspace/order-test".to_owned(),
+        Some("initial prompt".to_owned()),
+        SessionMode::Remote,
+    );
+    let created = repo.create(&session).await.expect("create session");
+
+    // Verify initial status is not Active.
+    let before = repo
+        .get_by_id(&created.id)
+        .await
+        .expect("get before")
+        .expect("session present");
+    assert_ne!(
+        before.status,
+        SessionStatus::Active,
+        "session must not start as Active"
+    );
+
+    // 2. Transition to Active (T151 fix: this happens BEFORE reader is spawned).
+    let active = repo
+        .update_status(&created.id, SessionStatus::Active)
+        .await
+        .expect("activate session");
+    assert_eq!(
+        active.status,
+        SessionStatus::Active,
+        "session must be Active immediately after update_status"
+    );
+
+    // 3. Reader task would start here — verify session is findable as Active.
+    let active_sessions = repo.list_active().await.expect("list active sessions");
+    assert!(
+        active_sessions.iter().any(|s| s.id == created.id),
+        "session must appear in list_active() before reader starts"
+    );
+}
+
+/// S110 — If a reader event arrives before the session is Active in the DB,
+/// the grace-period retry (T152) must handle it without panicking.
+///
+/// This test verifies the pre-condition: a session that exists but is not yet
+/// Active is NOT found by `list_active()`, confirming the grace period is needed.
+#[tokio::test]
+async fn session_not_active_is_absent_from_list_active() {
+    use std::sync::Arc;
+
+    use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+    use agent_intercom::persistence::{db, session_repo::SessionRepo};
+
+    let pool = Arc::new(db::connect_memory().await.expect("in-memory db"));
+    let repo = SessionRepo::new(Arc::clone(&pool));
+
+    // Insert a session that is NOT yet Active (still in initial state).
+    let session = Session::new(
+        "U-RACE-TEST".to_owned(),
+        "/workspace/race-test".to_owned(),
+        Some("race prompt".to_owned()),
+        SessionMode::Remote,
+    );
+    let created = repo.create(&session).await.expect("create session");
+
+    // list_active() must NOT include a non-Active session.
+    let active_sessions = repo.list_active().await.expect("list active sessions");
+    assert!(
+        !active_sessions.iter().any(|s| s.id == created.id),
+        "non-Active session must not appear in list_active()"
+    );
+
+    // Confirm the session exists but with a non-Active status.
+    let fetched = repo
+        .get_by_id(&created.id)
+        .await
+        .expect("get session")
+        .expect("session present");
+    assert_ne!(
+        fetched.status,
+        SessionStatus::Active,
+        "newly-created session must not be Active"
+    );
+}

@@ -5,6 +5,7 @@ mod unit {
     mod acp_session_tests;
     mod approval_repo_tests;
     mod ask_approval_tests;
+    mod audit_tests;
     mod audit_writer_tests;
     mod blocks_tests;
     mod checkpoint_tests;
@@ -30,6 +31,7 @@ mod unit {
     mod session_model_tests;
     mod session_repo_tests;
     mod session_routing_tests;
+    mod slack_client_tests;
     mod stall_consumer_tests;
     mod stall_detector_tests;
     mod stall_repo_tests;

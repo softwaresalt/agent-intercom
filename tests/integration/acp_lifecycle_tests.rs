@@ -177,6 +177,7 @@ async fn queued_messages_delivered_on_reconnect() {
         event_tx,
         cancel,
         Some(flush_ctx),
+        0,
     )
     .await
     .expect("run_reader must not error on clean EOF");

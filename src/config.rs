@@ -192,6 +192,10 @@ fn default_acp_startup_timeout_seconds() -> u64 {
     30
 }
 
+fn default_acp_max_msg_rate() -> u32 {
+    10
+}
+
 /// ACP-mode specific configuration.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -209,6 +213,13 @@ pub struct AcpConfig {
     /// to `30`.
     #[serde(default = "default_acp_startup_timeout_seconds")]
     pub startup_timeout_seconds: u64,
+    /// Maximum inbound ACP messages per second (token-bucket rate limit, FR-044).
+    ///
+    /// Exceeding this rate triggers a warning log and the message is dropped.
+    /// Sustained flooding (> 50 consecutive drops) terminates the session.
+    /// Set to `0` to disable rate limiting. Defaults to `10`.
+    #[serde(default = "default_acp_max_msg_rate")]
+    pub max_msg_rate: u32,
 }
 
 impl Default for AcpConfig {
@@ -216,6 +227,7 @@ impl Default for AcpConfig {
         Self {
             max_sessions: default_acp_max_sessions(),
             startup_timeout_seconds: default_acp_startup_timeout_seconds(),
+            max_msg_rate: default_acp_max_msg_rate(),
         }
     }
 }

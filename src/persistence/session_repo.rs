@@ -508,6 +508,25 @@ impl SessionRepo {
         rows.into_iter().map(SessionRow::into_session).collect()
     }
 
+    /// Return `(session_id, last_activity_at)` for all active sessions (T148, FR-045).
+    ///
+    /// Used by the server startup path to seed stall-detector timers from
+    /// persisted `last_activity_at` timestamps so stall detection resumes
+    /// correctly after a restart.  `last_activity_at` is `None` when the
+    /// session has not yet recorded any activity.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn load_active_session_timestamps(&self) -> Result<Vec<(String, Option<String>)>> {
+        let rows: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT id, last_activity_at FROM session WHERE status = 'active'")
+                .fetch_all(self.db.as_ref())
+                .await?;
+
+        Ok(rows)
+    }
+
     /// Update the operational mode for a session.
     ///
     /// # Errors

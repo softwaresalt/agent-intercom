@@ -47,6 +47,77 @@ use crate::persistence::steering_repo::SteeringRepo;
 use crate::slack::client::{SlackMessage, SlackService};
 use crate::{AppError, Result};
 
+// ── Rate limiting (T143–T145, FR-044) ────────────────────────────────────────
+
+/// Rate-limit decision for a single inbound ACP message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RateLimitDecision {
+    /// Message is within the allowed rate; process normally.
+    Allow,
+    /// Rate limit exceeded; log a warning and skip this message.
+    Throttle,
+    /// Sustained flood detected; terminate the session.
+    Terminate,
+}
+
+/// Token-bucket rate limiter for inbound ACP messages (FR-044).
+///
+/// Refills `max_rate` tokens per second; tokens cannot exceed `max_rate`.
+/// When the bucket is empty:
+/// - `Throttle` is returned and `consecutive_throttle` is incremented.
+/// - After `TERMINATE_THRESHOLD` consecutive throttles, `Terminate` is returned.
+///
+/// One token is consumed per call to [`check`].
+pub struct TokenBucketRateLimiter {
+    max_rate: f64,
+    tokens: f64,
+    last_refill: std::time::Instant,
+    consecutive_throttle: u32,
+}
+
+/// Number of consecutive throttle events that trigger `Terminate`.
+const TERMINATE_THRESHOLD: u32 = 50;
+
+impl TokenBucketRateLimiter {
+    /// Create a new limiter with the given maximum rate in messages per second.
+    #[must_use]
+    pub fn new(max_rate: u32) -> Self {
+        let rate = f64::from(max_rate);
+        Self {
+            max_rate: rate,
+            tokens: rate,
+            last_refill: std::time::Instant::now(),
+            consecutive_throttle: 0,
+        }
+    }
+
+    /// Consume one token and return the rate-limit decision.
+    ///
+    /// Refills the bucket proportionally to elapsed wall-clock time before
+    /// deciding whether to allow or throttle the message.
+    pub fn check(&mut self) -> RateLimitDecision {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.last_refill = now;
+
+        // Refill tokens proportional to elapsed time, capped at max_rate.
+        self.tokens = (self.tokens + elapsed * self.max_rate).min(self.max_rate);
+
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            self.consecutive_throttle = 0;
+            RateLimitDecision::Allow
+        } else {
+            self.consecutive_throttle += 1;
+            if self.consecutive_throttle >= TERMINATE_THRESHOLD {
+                RateLimitDecision::Terminate
+            } else {
+                RateLimitDecision::Throttle
+            }
+        }
+    }
+}
+
 // ── Inbound message types ─────────────────────────────────────────────────────
 
 /// Top-level ACP message envelope (agent → server).
@@ -197,6 +268,9 @@ pub fn parse_inbound_line(session_id: &str, line: &str) -> Result<Option<AgentEv
 /// Malformed or unrecognised lines are logged and skipped — they do **not**
 /// terminate the reader task.
 ///
+/// The `max_msg_rate` parameter (FR-044) sets the token-bucket refill rate in
+/// messages per second.  Pass `0` to disable rate limiting.
+///
 /// # Cancellation
 ///
 /// Respects `cancel`: when the token fires the reader exits cleanly without
@@ -212,6 +286,7 @@ pub async fn run_reader<R>(
     event_tx: mpsc::Sender<AgentEvent>,
     cancel: CancellationToken,
     flush_ctx: Option<ReconnectFlushContext>,
+    max_msg_rate: u32,
 ) -> Result<()>
 where
     R: AsyncRead + Unpin + Send,
@@ -220,6 +295,13 @@ where
     if let Some(ctx) = flush_ctx {
         flush_queued_messages(&session_id, &ctx, &event_tx).await;
     }
+
+    // ── Rate limiter (T144/T145, FR-044) ─────────────────────────────────────
+    let mut rate_limiter = if max_msg_rate > 0 {
+        Some(TokenBucketRateLimiter::new(max_msg_rate))
+    } else {
+        None
+    };
 
     let mut framed = FramedRead::new(stdout, AcpCodec::new());
 
@@ -263,6 +345,33 @@ where
                     }
 
                     Some(Ok(line)) => {
+                        // ── Rate limit check (FR-044) ─────────────────────
+                        if let Some(ref mut limiter) = rate_limiter {
+                            match limiter.check() {
+                                RateLimitDecision::Allow => {}
+                                RateLimitDecision::Throttle => {
+                                    warn!(
+                                        session_id,
+                                        "acp reader: rate limit exceeded, dropping message"
+                                    );
+                                    continue;
+                                }
+                                RateLimitDecision::Terminate => {
+                                    warn!(
+                                        session_id,
+                                        "acp reader: sustained message flood, terminating session"
+                                    );
+                                    send_terminated(
+                                        &event_tx,
+                                        &session_id,
+                                        "rate limit: sustained message flood",
+                                    )
+                                    .await;
+                                    break;
+                                }
+                            }
+                        }
+
                         match parse_inbound_line(&session_id, &line) {
                             Ok(Some(event)) => {
                                 // Emit StreamActivity before the main event so the

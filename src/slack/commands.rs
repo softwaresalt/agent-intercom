@@ -447,17 +447,25 @@ async fn handle_acp_session_start(
 
     // Resolve the workspace root and name from the incoming Slack channel.
     // Falls back to `default_workspace_root` when the channel has no mapping.
-    let workspace_root = state
-        .config
-        .workspace_root_for_channel(channel_id)
-        .to_path_buf();
-    let workspace_name = state
-        .config
-        .resolve_workspace_by_channel_id(channel_id)
-        .and_then(|m| m.label.as_deref())
-        .or_else(|| workspace_root.file_name().and_then(|n| n.to_str()))
-        .unwrap_or("workspace")
-        .to_owned();
+    // T154: hold a read-lock on the hot-reload workspace_mappings for the
+    // duration of channel resolution so a concurrent config reload cannot
+    // produce an inconsistent (channel, workspace_root) pair.
+    let (workspace_root, workspace_name) = {
+        let mappings = state
+            .workspace_mappings
+            .read()
+            .map_err(|_| crate::AppError::Config("workspace_mappings lock poisoned".to_owned()))?;
+        let mapping = mappings.iter().find(|m| m.channel_id == channel_id);
+        let root = mapping
+            .and_then(|m| m.path.clone())
+            .unwrap_or_else(|| state.config.default_workspace_root.clone());
+        let name = mapping
+            .and_then(|m| m.label.as_deref())
+            .or_else(|| root.file_name().and_then(|n| n.to_str()))
+            .unwrap_or("workspace")
+            .to_owned();
+        (root, name)
+    };
 
     // Build the session record with ACP-specific fields.
     let mut session = Session::new(
@@ -613,12 +621,21 @@ async fn finish_acp_session_start(
             channel_id: Some(reader_channel_id),
             thread_ts: None, // thread_ts not yet recorded at spawn
         };
+
+        // T151 (FR-046): Activate the session BEFORE starting the reader task
+        // so that any inbound events that arrive immediately after the reader
+        // starts can find the session in the Active state.
+        let _active = repo
+            .update_status(session_id, SessionStatus::Active)
+            .await?;
+
         tokio::spawn(crate::acp::reader::run_reader(
             reader_session_id,
             conn.stdout,
             reader_event_tx,
             reader_ct,
             Some(flush_ctx),
+            state.config.acp.max_msg_rate,
         ));
 
         let writer_session_id = session_id.to_owned();
@@ -647,12 +664,20 @@ async fn finish_acp_session_start(
             .lock()
             .await
             .insert(session_id.to_owned(), conn.child);
+
+        // Activate the session here since the `if` branch already activated it above.
+        let _ = repo
+            .update_status(session_id, SessionStatus::Active)
+            .await?;
     }
 
-    // Activate the session.
-    let active = repo
-        .update_status(session_id, SessionStatus::Active)
-        .await?;
+    // Retrieve the active session record for Slack posting.
+    // (The `if` branch already holds `active`; fetch again for the `else` path.)
+    let Some(active) = repo.get_by_id(session_id).await? else {
+        return Err(crate::AppError::NotFound(format!(
+            "session not found after activation: {session_id}"
+        )));
+    };
 
     // T058 / S036: Post "session started" as the thread root and record ts.
     // All subsequent messages for this session will be posted as thread replies.
