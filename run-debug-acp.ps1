@@ -44,7 +44,7 @@ $env:SLACK_MEMBER_IDS = (
     [System.Environment]::GetEnvironmentVariable("SLACK_MEMBER_IDS", "User")
 )
 
-$env:RUST_LOG = "info,agent_intercom::acp=debug,agent_intercom::driver=debug,agent_intercom::slack=debug"
+$env:RUST_LOG = "info,agent_intercom::acp=debug,agent_intercom::driver=debug,agent_intercom::slack=debug,slack_morphism=debug"
 
 # ── Preflight checks ────────────────────────────────────────────────────────
 

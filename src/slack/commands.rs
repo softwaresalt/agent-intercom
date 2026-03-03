@@ -18,7 +18,7 @@ use slack_morphism::prelude::{
     SlackCommandEvent, SlackCommandEventResponse, SlackMessageContent, SlackMessageResponseType,
     SlackTs,
 };
-use tracing::{info, info_span, warn};
+use tracing::{debug, info, info_span, warn};
 
 use crate::acp::handshake;
 use crate::acp::spawner::SpawnConfig;
@@ -46,6 +46,14 @@ pub async fn handle_command(
     _client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     state: SlackClientEventsUserState,
 ) -> slack_morphism::AnyStdResult<SlackCommandEventResponse> {
+    let started = std::time::Instant::now();
+    debug!(
+        command = ?event.command,
+        user = %event.user_id,
+        channel = %event.channel_id,
+        "handle_command entry"
+    );
+
     let user_id = event.user_id.to_string();
     let raw_text = event.text.clone().unwrap_or_default();
     let parts: Vec<&str> = raw_text.split_whitespace().collect();
@@ -66,6 +74,7 @@ pub async fn handle_command(
         let guard = state.read().await;
         guard.get_user_state::<Arc<AppState>>().cloned()
     };
+    debug!(elapsed_ms = started.elapsed().as_millis(), "state lock acquired");
 
     let response_text = if let Some(ref app) = app_state {
         // Verify authorized user.
@@ -81,6 +90,12 @@ pub async fn handle_command(
     } else {
         "Server state not available.".to_owned()
     };
+
+    debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        response_len = response_text.len(),
+        "handle_command exit"
+    );
 
     Ok(ephemeral_response(&response_text))
 }
