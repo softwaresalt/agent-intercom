@@ -81,23 +81,28 @@ pub async fn store_from_slack(
                     .register_agent_session_id(&session.id, asid)
                     .await;
             }
-            acp_driver
-                .send_prompt(&session.id, text)
-                .await
-                .map_err(|err| {
-                    crate::AppError::Acp(format!(
-                        "failed to deliver steering message via ACP driver: {err}"
-                    ))
-                })?;
-            info!(
-                session_id = %session.id,
-                channel_id = ?channel_id,
-                "steering message delivered directly via ACP driver (session online)"
-            );
-            return Ok(format!(
-                "Steering message delivered directly to agent in session `{}`.",
-                session.id
-            ));
+            match acp_driver.send_prompt(&session.id, text).await {
+                Ok(()) => {
+                    info!(
+                        session_id = %session.id,
+                        channel_id = ?channel_id,
+                        "steering message delivered directly via ACP driver (session online)"
+                    );
+                    return Ok(format!(
+                        "Steering message delivered directly to agent in session `{}`.",
+                        session.id
+                    ));
+                }
+                Err(err) => {
+                    // Writer may be gone (server restart, agent process exited).
+                    // Fall through to offline queue rather than returning an error.
+                    warn!(
+                        session_id = %session.id,
+                        %err,
+                        "ACP direct delivery failed — falling back to queue"
+                    );
+                }
+            }
         }
     }
 

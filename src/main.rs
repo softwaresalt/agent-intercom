@@ -607,7 +607,13 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
 
 /// Check for interrupted sessions on startup and optionally re-post
 /// pending requests to Slack (T082).
+///
+/// On server restart, any sessions that were Active/Online are now orphaned
+/// (their agent processes are dead). This function first marks all such
+/// sessions as Interrupted, then counts pending requests and optionally
+/// posts a recovery summary to Slack.
 async fn check_interrupted_on_startup(state: &AppState) {
+    use agent_intercom::models::session::SessionStatus;
     use agent_intercom::persistence::approval_repo::ApprovalRepo;
     use agent_intercom::persistence::prompt_repo::PromptRepo;
     use agent_intercom::persistence::session_repo::SessionRepo;
@@ -617,6 +623,18 @@ async fn check_interrupted_on_startup(state: &AppState) {
     let session_repo = SessionRepo::new(Arc::clone(&state.db));
     let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
     let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+
+    // Mark all Active sessions as Interrupted — their agent processes were
+    // lost when the server shut down.
+    let active = session_repo.list_active().await.unwrap_or_default();
+    for session in &active {
+        if let Err(err) = session_repo
+            .update_status(&session.id, SessionStatus::Interrupted)
+            .await
+        {
+            warn!(%err, session_id = %session.id, "failed to mark active session as interrupted");
+        }
+    }
 
     let interrupted = session_repo.list_interrupted().await.unwrap_or_default();
 
