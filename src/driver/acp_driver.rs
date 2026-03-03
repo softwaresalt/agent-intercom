@@ -108,11 +108,7 @@ impl AcpDriver {
     ///
     /// Must be called after `session/new` handshake completes. The agent
     /// session ID is required for constructing `session/prompt` messages.
-    pub async fn register_agent_session_id(
-        &self,
-        session_id: &str,
-        agent_session_id: &str,
-    ) {
+    pub async fn register_agent_session_id(&self, session_id: &str, agent_session_id: &str) {
         self.agent_session_ids
             .lock()
             .await
@@ -282,8 +278,12 @@ impl AgentDriver for AcpDriver {
     fn interrupt(&self, session_id: &str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         let session_id = session_id.to_owned();
         Box::pin(async move {
-            let writers = self.stream_writers.lock().await;
-            let Some(tx) = writers.get(&session_id) else {
+            // Clone the sender and drop the lock before awaiting (F-04).
+            let tx = {
+                let writers = self.stream_writers.lock().await;
+                writers.get(&session_id).cloned()
+            };
+            let Some(tx) = tx else {
                 // Session already gone — idempotent, return Ok.
                 debug!(
                     session_id,
@@ -410,11 +410,17 @@ impl AgentDriver for AcpDriver {
 
 /// Look up the writer for `session_id` and send `msg` through it.
 ///
+/// Clones the sender and drops the lock before awaiting the send to avoid
+/// holding the mutex across an `.await` point (F-04).
+///
 /// Returns [`AppError::NotFound`] if no writer is registered for the session,
 /// or [`AppError::Acp`] if the channel is closed (agent disconnected).
 async fn send_to_session(writers: &WriterMap, session_id: &str, msg: Value) -> Result<()> {
-    let writers = writers.lock().await;
-    let Some(tx) = writers.get(session_id) else {
+    let tx = {
+        let guard = writers.lock().await;
+        guard.get(session_id).cloned()
+    };
+    let Some(tx) = tx else {
         return Err(AppError::NotFound(format!(
             "no ACP writer registered for session '{session_id}'"
         )));

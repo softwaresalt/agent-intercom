@@ -49,17 +49,9 @@ pub async fn handle_push_event(
 
             let channel_id = mention.channel.to_string();
             let thread_ts = mention.origin.thread_ts.clone();
-            let text = mention
-                .content
-                .text
-                .as_deref()
-                .unwrap_or_default();
+            let text = mention.content.text.as_deref().unwrap_or_default();
 
-            info!(
-                user_id,
-                channel_id,
-                "push event: app mention received"
-            );
+            info!(user_id, channel_id, "push event: app mention received");
 
             handlers::steer::ingest_app_mention(text, &channel_id, &app).await;
             post_ack(&app, &channel_id, thread_ts.as_ref()).await;
@@ -118,7 +110,14 @@ pub async fn handle_push_event(
                 "push event: thread message → steering"
             );
 
-            match handlers::steer::store_from_slack(text, Some(&channel_str), &app).await {
+            match handlers::steer::store_from_slack(
+                text,
+                Some(&channel_str),
+                Some(thread_ts.0.as_str()),
+                &app,
+            )
+            .await
+            {
                 Ok(result) => {
                     info!(channel = channel_str, %result, "thread message → steer stored");
                     post_ack(&app, &channel_str, Some(thread_ts)).await;
@@ -162,9 +161,6 @@ fn is_authorized(user_id: &str, state: &AppState) -> bool {
     {
         return true;
     }
-    warn!(
-        user_id,
-        "push event: unauthorized user (silently ignored)"
-    );
+    warn!(user_id, "push event: unauthorized user (silently ignored)");
     false
 }

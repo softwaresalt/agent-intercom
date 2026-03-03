@@ -310,7 +310,11 @@ impl SessionRepo {
 
         match rows.len() {
             0 => Ok(None),
-            1 => rows.into_iter().next().map(SessionRow::into_session).transpose(),
+            1 => rows
+                .into_iter()
+                .next()
+                .map(SessionRow::into_session)
+                .transpose(),
             n => Err(AppError::Config(format!(
                 "ambiguous session prefix '{prefix}' matches {n} sessions"
             ))),
@@ -628,14 +632,12 @@ impl SessionRepo {
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
 
-        sqlx::query(
-            "UPDATE session SET agent_session_id = ?1, updated_at = ?2 WHERE id = ?3",
-        )
-        .bind(agent_session_id)
-        .bind(&now)
-        .bind(session_id)
-        .execute(self.db.as_ref())
-        .await?;
+        sqlx::query("UPDATE session SET agent_session_id = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(agent_session_id)
+            .bind(&now)
+            .bind(session_id)
+            .execute(self.db.as_ref())
+            .await?;
 
         Ok(())
     }

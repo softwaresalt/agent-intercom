@@ -23,16 +23,19 @@ use crate::persistence::steering_repo::SteeringRepo;
 /// confirming storage or describing the failure.
 ///
 /// When `channel_id` is `Some`, only sessions associated with that channel
-/// are considered (S043 / RI-04 fix). If no session is active in the
-/// channel the caller receives a descriptive "no active session in this
-/// channel" error (S045).
+/// are considered (S043 / RI-04 fix). When `thread_ts` is also provided,
+/// thread-based disambiguation is used first (F-05 / FR-017). If no
+/// session is active in the channel the caller receives a descriptive
+/// "no active session in this channel" error (S045).
 ///
 /// # Errors
 ///
 /// Returns an `AppError` if session lookup or message insertion fails.
+#[allow(clippy::too_many_lines)]
 pub async fn store_from_slack(
     text: &str,
     channel_id: Option<&str>,
+    thread_ts: Option<&str>,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     if text.trim().is_empty() {
@@ -44,18 +47,39 @@ pub async fn store_from_slack(
     let session_repo = SessionRepo::new(Arc::clone(&state.db));
 
     let session = if let Some(ch) = channel_id {
-        // T065 / S043: scope session lookup to the originating channel.
-        let sessions = session_repo
-            .find_active_by_channel(ch)
-            .await
-            .map_err(|err| {
-                crate::AppError::Db(format!("failed to find sessions in channel: {err}"))
-            })?;
-        sessions.into_iter().next().ok_or_else(|| {
-            crate::AppError::Config(
-                "no active session in this channel — start a session first".into(),
-            )
-        })?
+        // F-05 / FR-017: When thread_ts is available, use it for precise
+        // session disambiguation (each session owns a unique Slack thread).
+        if let Some(ts) = thread_ts {
+            if let Ok(Some(sess)) = session_repo.find_by_channel_and_thread(ch, ts).await {
+                sess
+            } else {
+                // Thread didn't match — fall back to channel-scoped lookup.
+                let sessions = session_repo
+                    .find_active_by_channel(ch)
+                    .await
+                    .map_err(|err| {
+                        crate::AppError::Db(format!("failed to find sessions in channel: {err}"))
+                    })?;
+                sessions.into_iter().next().ok_or_else(|| {
+                    crate::AppError::Config(
+                        "no active session in this channel — start a session first".into(),
+                    )
+                })?
+            }
+        } else {
+            // T065 / S043: scope session lookup to the originating channel.
+            let sessions = session_repo
+                .find_active_by_channel(ch)
+                .await
+                .map_err(|err| {
+                    crate::AppError::Db(format!("failed to find sessions in channel: {err}"))
+                })?;
+            sessions.into_iter().next().ok_or_else(|| {
+                crate::AppError::Config(
+                    "no active session in this channel — start a session first".into(),
+                )
+            })?
+        }
     } else {
         // No channel context: fall back to any active session (IPC / tests).
         let sessions = session_repo
@@ -203,7 +227,7 @@ pub async fn ingest_app_mention(text: &str, channel_id: &str, state: &Arc<AppSta
         return;
     }
 
-    match store_from_slack(&stripped, Some(channel_id), state).await {
+    match store_from_slack(&stripped, Some(channel_id), None, state).await {
         Ok(msg) => info!(channel_id, %msg, "app mention → steering message stored"),
         Err(err) => warn!(channel_id, %err, "failed to store app mention as steering message"),
     }

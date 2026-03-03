@@ -171,7 +171,7 @@ async fn dispatch_command(
             } else {
                 args.join(" ")
             };
-            steer_handler::store_from_slack(&text, Some(channel_id), state).await
+            steer_handler::store_from_slack(&text, Some(channel_id), None, state).await
         }
 
         "task" => {
@@ -559,9 +559,7 @@ async fn finish_acp_session_start(
         // it in `session/prompt` messages.
         if let Ok(Some(sess)) = repo.get_by_id(session_id).await {
             if let Some(ref asid) = sess.agent_session_id {
-                acp_driver
-                    .register_agent_session_id(session_id, asid)
-                    .await;
+                acp_driver.register_agent_session_id(session_id, asid).await;
             }
         }
 

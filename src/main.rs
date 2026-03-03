@@ -804,14 +804,27 @@ async fn run_acp_event_consumer(
     }
 }
 
-/// Handle the `SessionTerminated` event: resolve pending clearances and
-/// notify the operator on Slack.
+/// Handle the `SessionTerminated` event: update DB status, resolve pending
+/// clearances, deregister driver state, and notify the operator on Slack.
 async fn handle_session_terminated(state: &Arc<AppState>, session_id: &str, reason: &str) {
     use agent_intercom::models::approval::ApprovalStatus;
+    use agent_intercom::models::session::SessionStatus;
     use agent_intercom::persistence::approval_repo::ApprovalRepo;
     use agent_intercom::persistence::session_repo::SessionRepo;
     use agent_intercom::slack::client::SlackMessage;
     use slack_morphism::prelude::{SlackChannelId, SlackTs};
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // F-03: Mark the session as Interrupted in the database so it no longer
+    // appears in list_active(). Without this, sessions whose agent process
+    // exits naturally (EOF, crash) remain Active forever.
+    if let Err(err) = session_repo
+        .set_terminated(session_id, SessionStatus::Interrupted)
+        .await
+    {
+        warn!(%err, session_id, "failed to mark session as interrupted on termination");
+    }
 
     // S068: Resolve any pending clearance requests as Interrupted
     // so the operator is not left waiting for buttons that will never be clicked.
@@ -830,7 +843,6 @@ async fn handle_session_terminated(state: &Arc<AppState>, session_id: &str, reas
 
     // Notify the operator via Slack (when available).
     let Some(ref slack) = state.slack else { return };
-    let session_repo = SessionRepo::new(Arc::clone(&state.db));
     let (ch, ts) = match session_repo.get_by_id(session_id).await {
         Ok(Some(sess)) => (
             sess.channel_id.unwrap_or_default(),
