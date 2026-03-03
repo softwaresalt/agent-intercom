@@ -8,13 +8,13 @@
 use std::sync::Arc;
 
 use slack_morphism::prelude::{
-    SlackClient, SlackClientEventsUserState, SlackClientHyperHttpsConnector,
-    SlackEventCallbackBody, SlackPushEventCallback,
+    SlackChannelId, SlackClient, SlackClientEventsUserState, SlackClientHyperHttpsConnector,
+    SlackEventCallbackBody, SlackPushEventCallback, SlackTs,
 };
 use tracing::{debug, info, warn};
 
 use crate::mcp::handler::AppState;
-use crate::slack::handlers;
+use crate::slack::{client::SlackMessage, handlers};
 
 /// Handle push events (app mentions, channel messages) from Socket Mode.
 ///
@@ -48,6 +48,7 @@ pub async fn handle_push_event(
             }
 
             let channel_id = mention.channel.to_string();
+            let thread_ts = mention.origin.thread_ts.clone();
             let text = mention
                 .content
                 .text
@@ -61,6 +62,7 @@ pub async fn handle_push_event(
             );
 
             handlers::steer::ingest_app_mention(text, &channel_id, &app).await;
+            post_ack(&app, &channel_id, thread_ts.as_ref()).await;
         }
 
         SlackEventCallbackBody::Message(msg) => {
@@ -87,7 +89,7 @@ pub async fn handle_push_event(
 
             // Only process thread replies — top-level channel messages are
             // not steering input (those come via slash commands).
-            let Some(ref _thread_ts) = msg.origin.thread_ts else {
+            let Some(ref thread_ts) = msg.origin.thread_ts else {
                 debug!("push event: top-level message, not a thread reply — ignoring");
                 return Ok(());
             };
@@ -117,7 +119,10 @@ pub async fn handle_push_event(
             );
 
             match handlers::steer::store_from_slack(text, Some(&channel_str), &app).await {
-                Ok(msg) => info!(channel = channel_str, %msg, "thread message → steer stored"),
+                Ok(result) => {
+                    info!(channel = channel_str, %result, "thread message → steer stored");
+                    post_ack(&app, &channel_str, Some(thread_ts)).await;
+                }
                 Err(err) => {
                     warn!(channel = channel_str, %err, "thread message → steer failed");
                 }
@@ -130,6 +135,21 @@ pub async fn handle_push_event(
     }
 
     Ok(())
+}
+
+/// Post a brief acknowledgment to the session thread so the operator knows
+/// their message was received.
+async fn post_ack(state: &AppState, channel_id: &str, thread_ts: Option<&SlackTs>) {
+    let Some(ref slack) = state.slack else { return };
+    let msg = SlackMessage {
+        channel: SlackChannelId(channel_id.to_owned()),
+        text: Some("\u{1f4e1} 10-4".to_owned()),
+        blocks: None,
+        thread_ts: thread_ts.cloned(),
+    };
+    if let Err(err) = slack.enqueue(msg).await {
+        warn!(%err, "push event: failed to post ack");
+    }
 }
 
 /// Check if the user is in the authorized list.
