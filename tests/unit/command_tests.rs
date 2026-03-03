@@ -1,10 +1,13 @@
-//! Unit tests for slash command argument parsing and session resolution (Phase 13).
+//! Unit tests for slash command argument parsing and session resolution (Phase 13/16).
 //!
 //! Covers:
 //! - T113: `parse_checkpoint_args` with dash-containing single arg (S081)
 //! - T114: `parse_checkpoint_args` fallback to most-recent when no arg (S082)
 //! - T116: `resolve_command_session` resolves Interrupted sessions by explicit ID (S083, S084)
 //! - T117: `find_interrupted_by_channel` used by session-cleanup logic (S085, S086)
+//! - T155: `list_all_by_channel` returns sessions across all statuses (S113, S114)
+//! - T161: `format_checkpoint_help` shows `session_id` as optional (S117, S118)
+//! - T163: `list_active_or_paused` includes paused sessions for display (S119, S120)
 
 use std::sync::Arc;
 
@@ -131,4 +134,146 @@ async fn find_interrupted_by_channel_empty_when_none() {
         .expect("find_interrupted_by_channel");
 
     assert!(result.is_empty());
+}
+
+// ── T155 / S113 S114 ──────────────────────────────────────────────────────────
+
+/// `list_all_by_channel` returns sessions with every status in a channel.
+///
+/// This supports HITL-002 / FR-048: `/arc sessions --all` should show all
+/// historical sessions (active, paused, terminated, interrupted) for the
+/// current channel so operators can review session history.
+#[tokio::test]
+async fn list_all_by_channel_returns_sessions_across_statuses() {
+    let db = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&db));
+    let channel = "C_HIST";
+
+    // Active session.
+    let mut s1 = Session::new(
+        "U1".into(),
+        "/ws".into(),
+        Some("active prompt".into()),
+        SessionMode::Remote,
+    );
+    s1.channel_id = Some(channel.into());
+    let s1 = repo.create(&s1).await.expect("create s1");
+    repo.update_status(&s1.id, SessionStatus::Active)
+        .await
+        .expect("activate s1");
+
+    // Terminated session.
+    let mut s2 = Session::new("U1".into(), "/ws".into(), None, SessionMode::Remote);
+    s2.channel_id = Some(channel.into());
+    let s2 = repo.create(&s2).await.expect("create s2");
+    repo.update_status(&s2.id, SessionStatus::Active)
+        .await
+        .expect("activate s2");
+    repo.set_terminated(&s2.id, SessionStatus::Terminated)
+        .await
+        .expect("terminate s2");
+
+    // Interrupted session.
+    let mut s3 = Session::new("U1".into(), "/ws".into(), None, SessionMode::Remote);
+    s3.channel_id = Some(channel.into());
+    let s3 = repo.create(&s3).await.expect("create s3");
+    repo.update_status(&s3.id, SessionStatus::Active)
+        .await
+        .expect("activate s3");
+    repo.set_terminated(&s3.id, SessionStatus::Interrupted)
+        .await
+        .expect("interrupt s3");
+
+    // Session in a different channel — must not appear.
+    let mut other = Session::new("U2".into(), "/ws".into(), None, SessionMode::Remote);
+    other.channel_id = Some("C_OTHER".into());
+    let other = repo.create(&other).await.expect("create other");
+    repo.update_status(&other.id, SessionStatus::Active)
+        .await
+        .expect("activate other");
+
+    let all = repo
+        .list_all_by_channel(channel)
+        .await
+        .expect("list_all_by_channel");
+    assert_eq!(
+        all.len(),
+        3,
+        "must return all 3 channel sessions regardless of status"
+    );
+}
+
+/// `list_all_by_channel` returns empty for a channel with no sessions.
+#[tokio::test]
+async fn list_all_by_channel_empty_for_unknown_channel() {
+    let db = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&db));
+
+    let all = repo
+        .list_all_by_channel("C_UNKNOWN")
+        .await
+        .expect("list_all_by_channel");
+    assert!(all.is_empty());
+}
+
+// ── T161 / S117 S118 ──────────────────────────────────────────────────────────
+
+/// `format_checkpoint_help` shows `[session_id]` as optional (bracket notation).
+///
+/// Verifies HITL-004 / FR-050: the help text must accurately describe that
+/// `session_id` is optional (falls back to most-recent when omitted).
+#[test]
+fn checkpoint_help_shows_session_id_as_optional_brackets() {
+    use agent_intercom::slack::commands::format_checkpoint_help;
+    let help = format_checkpoint_help("/arc");
+    assert!(
+        help.contains("[session_id]"),
+        "help text must show session_id as optional using bracket notation: got: {help}"
+    );
+    assert!(
+        !help.contains("<session_id>"),
+        "help text must NOT mark session_id as required with angle brackets"
+    );
+}
+
+// ── T163 / S119 S120 ──────────────────────────────────────────────────────────
+
+/// `list_active_or_paused` returns paused sessions alongside active ones.
+///
+/// Verifies HITL-008 / FR-051: the sessions listing must show paused sessions
+/// with a visual indicator. `handle_sessions` uses `list_active_or_paused`
+/// (after T164) so paused sessions appear in the default listing.
+#[tokio::test]
+async fn list_active_or_paused_includes_paused_sessions() {
+    let db = Arc::new(db::connect_memory().await.expect("db connect"));
+    let repo = SessionRepo::new(Arc::clone(&db));
+
+    // Create and activate a session, then pause it.
+    let mut s = Session::new("U1".into(), "/ws".into(), None, SessionMode::Remote);
+    s.channel_id = Some("C_PAUSE".into());
+    let s = repo.create(&s).await.expect("create");
+    repo.update_status(&s.id, SessionStatus::Active)
+        .await
+        .expect("activate");
+    repo.update_status(&s.id, SessionStatus::Paused)
+        .await
+        .expect("pause");
+
+    // Create a terminated session — must NOT appear.
+    let mut t = Session::new("U1".into(), "/ws".into(), None, SessionMode::Remote);
+    t.channel_id = Some("C_PAUSE".into());
+    let t = repo.create(&t).await.expect("create terminated");
+    repo.update_status(&t.id, SessionStatus::Active)
+        .await
+        .expect("activate terminated");
+    repo.set_terminated(&t.id, SessionStatus::Terminated)
+        .await
+        .expect("terminate");
+
+    let visible = repo
+        .list_active_or_paused()
+        .await
+        .expect("list_active_or_paused");
+    assert_eq!(visible.len(), 1, "must include the paused session");
+    assert_eq!(visible[0].status, SessionStatus::Paused);
 }

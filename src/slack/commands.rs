@@ -26,6 +26,7 @@ use crate::diff::path_safety::validate_path;
 use crate::driver::AgentDriver;
 use crate::mcp::handler::AppState;
 use crate::mode::ServerMode;
+use crate::models::session::truncate_session_title;
 use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
 use crate::orchestrator::{checkpoint_manager, session_manager, spawner};
 use crate::persistence::checkpoint_repo::CheckpointRepo;
@@ -117,7 +118,7 @@ async fn dispatch_command(
     match command {
         "help" => Ok(handle_help(args.first().copied(), state.server_mode)),
 
-        "sessions" => handle_sessions(db).await,
+        "sessions" => handle_sessions(args, channel_id, db).await,
 
         // ACP-only session lifecycle commands.
         "session-start" if state.server_mode == ServerMode::Acp => {
@@ -305,10 +306,18 @@ fn format_session_help(prefix: &str, mode: ServerMode) -> String {
     text
 }
 
-fn format_checkpoint_help(prefix: &str) -> String {
+/// Return the checkpoint-specific help text.
+///
+/// Describes `session-checkpoint` as optional-session_id `[session_id]`
+/// so operators understand the command falls back to the most-recent active
+/// session when the argument is omitted (HITL-004 / FR-050).
+#[must_use]
+pub fn format_checkpoint_help(prefix: &str) -> String {
     let _ = prefix;
     "*Checkpoint commands:*\n\
-     • `session-checkpoint [session_id] [label]` — Snapshot session state and file hashes\n\
+     • `session-checkpoint [session_id] [label]` — Snapshot current session state and file \
+     hashes. When `session_id` is omitted, the most-recent active session in this channel is \
+     used. If no session is active, the command fails with a descriptive error.\n\
      • `session-restore <checkpoint_id>` — Restore a checkpoint (warns of diverged files)\n\
      • `session-checkpoints [session_id]` — List all checkpoints for a session"
         .to_owned()
@@ -382,24 +391,59 @@ async fn resolve_command_session(
     ))
 }
 
-async fn handle_sessions(db: &Arc<Database>) -> crate::Result<String> {
+async fn handle_sessions(
+    args: &[&str],
+    channel_id: &str,
+    db: &Arc<Database>,
+) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(db));
-    let active = repo.list_active().await?;
+    let all_flag = args.contains(&"--all");
 
-    if active.is_empty() {
-        return Ok("No active sessions.".to_owned());
+    let sessions = if all_flag {
+        // HITL-002 / FR-048: --all shows every session in this channel.
+        repo.list_all_by_channel(channel_id).await?
+    } else {
+        // HITL-008 / FR-051: default listing shows active and paused sessions.
+        repo.list_active_or_paused().await?
+    };
+
+    if sessions.is_empty() {
+        return Ok(if all_flag {
+            "No sessions found in this channel.".to_owned()
+        } else {
+            "No active sessions.".to_owned()
+        });
     }
 
-    let mut lines = vec!["*Active Sessions:*".to_owned()];
-    for session in &active {
+    let header = if all_flag {
+        "*All Sessions (this channel):*"
+    } else {
+        "*Active Sessions:*"
+    };
+    let mut lines = vec![header.to_owned()];
+
+    for session in &sessions {
         let short_id: String = session.id.chars().take(8).collect();
         let protocol = match session.protocol_mode {
             ProtocolMode::Acp => "ACP",
             ProtocolMode::Mcp => "MCP",
         };
-        let connectivity = format!("{:?}", session.connectivity_status);
+        // T165: status icons — 🟢 Active, ⏸ Paused, 🔴 Terminated, 💀 Interrupted.
+        let icon = match session.status {
+            crate::models::session::SessionStatus::Active => "\u{1f7e2}",
+            crate::models::session::SessionStatus::Paused => "\u{23f8}",
+            crate::models::session::SessionStatus::Terminated => "\u{1f534}",
+            crate::models::session::SessionStatus::Interrupted => "\u{1f480}",
+            crate::models::session::SessionStatus::Created => "\u{23f3}",
+        };
+        // T159/FR-049: show title when available.
+        let title_suffix = session
+            .title
+            .as_deref()
+            .map(|t| format!(" | _{t}_"))
+            .unwrap_or_default();
         lines.push(format!(
-            "• `{short_id}…` — {protocol} | owner: `{}` | connectivity: {connectivity}",
+            "{icon} `{short_id}…` — {protocol} | owner: `{}`{title_suffix}",
             session.owner_user_id
         ));
     }
@@ -476,6 +520,8 @@ async fn handle_acp_session_start(
     );
     session.protocol_mode = ProtocolMode::Acp;
     session.channel_id = Some(channel_id.to_owned());
+    // T159 / FR-049: store truncated prompt as session title (max 80 chars).
+    session.title = Some(truncate_session_title(prompt));
 
     let created = repo.create(&session).await?;
     let session_id = created.id.clone();

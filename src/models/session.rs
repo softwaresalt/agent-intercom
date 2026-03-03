@@ -105,6 +105,12 @@ pub struct Session {
     /// Only populated for ACP sessions after the handshake completes. Required
     /// for sending `session/prompt` messages to the agent.
     pub agent_session_id: Option<String>,
+    /// Short title derived from the initial prompt (at most 80 characters).
+    ///
+    /// Populated at session creation from the first prompt text and truncated
+    /// with `"..."` if the prompt exceeds 80 characters. `None` for sessions
+    /// created before this field was introduced.
+    pub title: Option<String>,
 }
 
 impl Session {
@@ -138,6 +144,7 @@ impl Session {
             last_activity_at: None,
             restart_of: None,
             agent_session_id: None,
+            title: None,
         }
     }
 
@@ -157,5 +164,26 @@ impl Session {
                 SessionStatus::Terminated | SessionStatus::Interrupted
             )
         )
+    }
+}
+
+/// Truncate a prompt string to produce a session title (at most 80 chars).
+///
+/// Returns the prompt unchanged when it is 80 characters or fewer. When
+/// longer, returns the first 80 characters followed by `"..."`.
+///
+/// # Examples
+///
+/// ```
+/// # use agent_intercom::models::session::truncate_session_title;
+/// assert_eq!(truncate_session_title("short"), "short");
+/// assert_eq!(truncate_session_title(&"a".repeat(81)), format!("{}...", "a".repeat(80)));
+/// ```
+#[must_use]
+pub fn truncate_session_title(prompt: &str) -> String {
+    if prompt.len() <= 80 {
+        prompt.to_owned()
+    } else {
+        format!("{}...", &prompt[..80])
     }
 }

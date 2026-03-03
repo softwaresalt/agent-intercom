@@ -69,6 +69,7 @@ async fn session_table_has_expected_columns() {
         "last_activity_at",
         "restart_of",
         "agent_session_id",
+        "title",
     ];
 
     assert_eq!(

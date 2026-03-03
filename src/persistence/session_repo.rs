@@ -42,6 +42,7 @@ struct SessionRow {
     last_activity_at: Option<String>,
     restart_of: Option<String>,
     agent_session_id: Option<String>,
+    title: Option<String>,
 }
 
 impl SessionRow {
@@ -110,6 +111,7 @@ impl SessionRow {
             last_activity_at,
             restart_of: self.restart_of,
             agent_session_id: self.agent_session_id,
+            title: self.title,
         })
     }
 }
@@ -244,9 +246,9 @@ impl SessionRepo {
             "INSERT INTO session (id, owner_user_id, workspace_root, status, prompt, mode,
              created_at, updated_at, terminated_at, last_tool, nudge_count, stall_paused,
              progress_snapshot, protocol_mode, channel_id, thread_ts, connectivity_status,
-             last_activity_at, restart_of, agent_session_id)
+             last_activity_at, restart_of, agent_session_id, title)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-             ?17, ?18, ?19, ?20)",
+             ?17, ?18, ?19, ?20, ?21)",
         )
         .bind(&session.id)
         .bind(&session.owner_user_id)
@@ -268,6 +270,7 @@ impl SessionRepo {
         .bind(&last_activity_at)
         .bind(&session.restart_of)
         .bind(&session.agent_session_id)
+        .bind(&session.title)
         .execute(self.db.as_ref())
         .await?;
 
@@ -680,5 +683,26 @@ impl SessionRepo {
             .await?;
 
         Ok(())
+    }
+
+    /// List all sessions associated with a Slack channel, regardless of status.
+    ///
+    /// Used by `/arc sessions --all` (HITL-002 / FR-048) to show the complete
+    /// session history for the current channel, including terminated and
+    /// interrupted sessions.
+    ///
+    /// Results are ordered by `updated_at` descending (most recent first).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn list_all_by_channel(&self, channel_id: &str) -> Result<Vec<Session>> {
+        let rows: Vec<SessionRow> =
+            sqlx::query_as("SELECT * FROM session WHERE channel_id = ?1 ORDER BY updated_at DESC")
+                .bind(channel_id)
+                .fetch_all(self.db.as_ref())
+                .await?;
+
+        rows.into_iter().map(SessionRow::into_session).collect()
     }
 }
