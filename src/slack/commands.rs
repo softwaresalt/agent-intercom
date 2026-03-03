@@ -324,8 +324,12 @@ async fn resolve_command_session(
     repo: &SessionRepo,
 ) -> crate::Result<crate::models::session::Session> {
     if let Some(id) = session_id {
+        // Try exact match first, then fall back to prefix matching.
+        if let Some(session) = repo.get_by_id(id).await? {
+            return Ok(session);
+        }
         return repo
-            .get_by_id(id)
+            .get_by_prefix(id)
             .await?
             .ok_or_else(|| crate::AppError::NotFound(format!("session {id} not found")));
     }
@@ -355,10 +359,15 @@ async fn handle_sessions(db: &Arc<Database>) -> crate::Result<String> {
 
     let mut lines = vec!["*Active Sessions:*".to_owned()];
     for session in &active {
-        let last_tool = session.last_tool.as_deref().unwrap_or("none");
+        let short_id: String = session.id.chars().take(8).collect();
+        let protocol = match session.protocol_mode {
+            ProtocolMode::Acp => "ACP",
+            ProtocolMode::Mcp => "MCP",
+        };
+        let connectivity = format!("{:?}", session.connectivity_status);
         lines.push(format!(
-            "• `{}` — owner: `{}`, status: `{:?}`, last tool: `{}`",
-            session.id, session.owner_user_id, session.status, last_tool
+            "• `{short_id}…` — {protocol} | owner: `{}` | connectivity: {connectivity}",
+            session.owner_user_id
         ));
     }
 
@@ -746,6 +755,12 @@ async fn handle_session_stop(
     let mut child = state.active_children.lock().await.remove(&session.id);
     let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
 
+    // Deregister the ACP driver's in-memory state for this session so
+    // stale writers / agent_session_ids don't linger.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(&session.id).await;
+    }
+
     if let Some(ref slack) = state.slack {
         session_manager::notify_session_ended(&terminated, "stopped by operator", slack).await;
     }
@@ -769,6 +784,11 @@ async fn handle_session_clear(
     // to avoid holding the lock guard across an await point.
     let mut child = state.active_children.lock().await.remove(&session.id);
     let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
+
+    // Deregister the ACP driver's in-memory state for this session.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(&session.id).await;
+    }
 
     // T060 / S094: Post session-ended summary as a threaded reply.
     if let Some(ref slack) = state.slack {
@@ -822,6 +842,11 @@ async fn handle_session_restart(
         session_manager::terminate_session(&old_session_id, &repo, child.as_mut()).await
     {
         warn!(%err, session_id = %old_session_id, "failed to terminate old session during restart");
+    }
+
+    // Deregister the old session's ACP driver state.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(&old_session_id).await;
     }
 
     // Notify the Slack thread that the session was restarted.

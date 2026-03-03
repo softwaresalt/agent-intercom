@@ -290,6 +290,33 @@ impl SessionRepo {
         row.map(SessionRow::into_session).transpose()
     }
 
+    /// Retrieve a session by ID prefix.
+    ///
+    /// Matches sessions whose ID starts with the given prefix. Returns
+    /// `Ok(None)` if no match exists, or `Err` if multiple sessions match
+    /// (ambiguous prefix).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` on query failure or `AppError::Config` if the
+    /// prefix matches more than one session.
+    pub async fn get_by_prefix(&self, prefix: &str) -> Result<Option<Session>> {
+        let pattern = format!("{prefix}%");
+        let rows: Vec<SessionRow> =
+            sqlx::query_as("SELECT * FROM session WHERE id LIKE ?1 ORDER BY updated_at DESC")
+                .bind(&pattern)
+                .fetch_all(self.db.as_ref())
+                .await?;
+
+        match rows.len() {
+            0 => Ok(None),
+            1 => rows.into_iter().next().map(SessionRow::into_session).transpose(),
+            n => Err(AppError::Config(format!(
+                "ambiguous session prefix '{prefix}' matches {n} sessions"
+            ))),
+        }
+    }
+
     /// Update session status and `updated_at` timestamp.
     ///
     /// Validates state transitions before applying the update.
@@ -399,7 +426,7 @@ impl SessionRepo {
         let now = Utc::now().to_rfc3339();
         let status_s = status_str(status);
 
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE session SET status = ?1, terminated_at = ?2, updated_at = ?2 WHERE id = ?3",
         )
         .bind(status_s)
@@ -407,6 +434,12 @@ impl SessionRepo {
         .bind(id)
         .execute(self.db.as_ref())
         .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound(format!(
+                "set_terminated: no rows updated for session {id}"
+            )));
+        }
 
         self.get_by_id(id)
             .await?

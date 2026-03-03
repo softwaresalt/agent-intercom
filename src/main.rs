@@ -823,6 +823,11 @@ async fn handle_session_terminated(state: &Arc<AppState>, session_id: &str, reas
         warn!(%err, session_id, "failed to resolve pending clearances on termination");
     }
 
+    // Deregister the ACP driver's in-memory state for this session.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(session_id).await;
+    }
+
     // Notify the operator via Slack (when available).
     let Some(ref slack) = state.slack else { return };
     let session_repo = SessionRepo::new(Arc::clone(&state.db));
