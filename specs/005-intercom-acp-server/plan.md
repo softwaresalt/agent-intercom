@@ -113,6 +113,75 @@ tests/
 
 **Structure Decision**: Adds two new top-level source modules (`src/driver/`, `src/acp/`) following established patterns. The driver module owns the protocol abstraction; the acp module owns stream mechanics. Existing modules are extended minimally — session model gains 3 fields, config gains workspace mappings, SSE gains workspace_id resolution.
 
+## Findings Remediation (Phases 13–16)
+
+*Added post-implementation based on adversarial analysis (ES-*) and HITL testing (HITL-*) findings from `findings.json`.*
+
+### Phase 13: Critical & High-Priority Fixes
+
+**Findings**: HITL-003 (CRITICAL), HITL-005 (HIGH), HITL-006 (HIGH)
+
+| Finding | Component | Change Summary |
+|---------|-----------|---------------|
+| HITL-003 | `src/main.rs`, `src/mcp/sse.rs` | Enable MCP HTTP transport in ACP mode; add session_id authentication middleware for ACP subprocess requests |
+| HITL-005 | `src/slack/commands.rs` | Fix `parse_checkpoint_args` to correctly extract session_id vs label |
+| HITL-006 | `src/slack/commands.rs`, `src/main.rs` | Extend `resolve_command_session` for Interrupted sessions; add `session-cleanup` command; startup notification |
+
+**New files**: `tests/integration/acp_mcp_bridge_tests.rs`
+**Modified files**: `src/main.rs`, `src/mcp/sse.rs`, `src/slack/commands.rs`
+
+### Phase 14: Security Hardening
+
+**Findings**: ES-004 (MEDIUM), ES-010 (HIGH), ES-008 (MEDIUM)
+
+| Finding | Component | Change Summary |
+|---------|-----------|---------------|
+| ES-004 | `src/acp/spawner.rs` | Windows Job Object wrapper + Unix process group spawning for full process tree termination |
+| ES-010 | `src/config.rs`, `src/main.rs` | host_cli path validation and non-standard location warning |
+| ES-008 | `src/driver/acp_driver.rs`, `src/acp/writer.rs` | Per-session sequence counters on outbound messages; write failure logging |
+
+**New files**: None
+**Modified files**: `src/acp/spawner.rs`, `src/config.rs`, `src/main.rs`, `src/driver/acp_driver.rs`, `src/acp/writer.rs`
+
+### Phase 15: Reliability & Observability
+
+**Findings**: HITL-001 (MEDIUM), HITL-007 (MEDIUM), ES-005 (MEDIUM), ES-006 (MEDIUM), ES-007 (LOW), ES-009 (LOW)
+
+| Finding | Component | Change Summary |
+|---------|-----------|---------------|
+| HITL-001 | `src/slack/client.rs` | WebSocket disconnect/reconnect hooks; HTTP REST fallback notifications |
+| HITL-007 | `src/audit/writer.rs`, `src/slack/commands.rs`, handlers | ACP audit event types; audit writes in session lifecycle handlers |
+| ES-005 | `src/acp/reader.rs`, `src/config.rs` | Token-bucket rate limiter in ACP reader; `max_msg_rate` config |
+| ES-006 | `src/orchestrator/stall_detector.rs`, `src/persistence/session_repo.rs` | Stall timer initialization from persisted `last_activity_at` on restart |
+| ES-007 | `src/slack/commands.rs`, `src/acp/spawner.rs` | Reorder spawn sequence: DB commit → driver register → reader start |
+| ES-009 | `src/slack/commands.rs` | Read lock on workspace_mappings during session creation |
+
+**New files**: None
+**Modified files**: `src/slack/client.rs`, `src/audit/writer.rs`, `src/slack/commands.rs`, `src/acp/reader.rs`, `src/config.rs`, `src/orchestrator/stall_detector.rs`, `src/persistence/session_repo.rs`, `src/acp/spawner.rs`
+
+### Phase 16: Usability Improvements
+
+**Findings**: HITL-002 (LOW), HITL-004 (LOW), HITL-008 (LOW)
+
+| Finding | Component | Change Summary |
+|---------|-----------|---------------|
+| HITL-002 | `src/persistence/schema.rs`, `src/persistence/session_repo.rs`, `src/slack/commands.rs` | `title` column; `list_all_by_channel` query; `--all` flag; status icons |
+| HITL-004 | `src/slack/commands.rs` | Fix help text; improve error messages for session-checkpoint |
+| HITL-008 | `src/persistence/session_repo.rs`, `src/slack/commands.rs` | Include Paused in `list_active` (or new `list_visible`); ⏸ icon |
+
+**New files**: None
+**Modified files**: `src/persistence/schema.rs`, `src/persistence/session_repo.rs`, `src/slack/commands.rs`
+
+### Remediation Phase Dependencies
+
+```
+Phase 12 (Polish — complete)
+  ├── Phase 13 (Critical Fixes) ← FIRST PRIORITY
+  ├── Phase 14 (Security) [parallel with 13]
+  ├── Phase 15 (Reliability) [parallel with 13/14]
+  └── Phase 16 (Usability) [parallel with 14/15]
+```
+
 ## Complexity Tracking
 
 No constitution violations to justify.

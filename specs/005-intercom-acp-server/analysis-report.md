@@ -201,3 +201,43 @@ Three independent reviewers analyzed all spec artifacts with different focus are
 | C | Gemini 3 Pro Preview | Edge cases & security | 10 |
 
 Findings were deduplicated by matching on affected artifacts and root cause. When reviewers disagreed on severity, the higher severity was used. No reviewer conflicts were found — all findings were either unique or in agreement.
+
+---
+
+## HITL Testing Findings (2026-03-03)
+
+*Post-implementation findings from human-in-the-loop testing. These supplement the pre-implementation adversarial review above.*
+
+**Source**: `findings.json` (HITL-001 through HITL-008)
+**Test session**: ~1 hour, 6+ ACP sessions created
+
+| ID | Severity | Category | Title | Spec Status |
+|----|----------|----------|-------|-------------|
+| HITL-001 | MEDIUM | reliability | Socket Mode WebSocket Drops Silently | ✅ FR-042, S098–S100, T135–T138 |
+| HITL-002 | LOW | usability | No Historical/Named Session Query | ✅ FR-048/049, S113–S116, T155–T160 |
+| HITL-003 | CRITICAL | architecture | MCP Tools Unreachable in ACP Mode | ✅ FR-032/033, S077–S080, T107–T112 |
+| HITL-004 | LOW | usability | session-checkpoint Help Text Bug | ✅ FR-050, S117–S118, T161–T162 |
+| HITL-005 | HIGH | correctness | session-checkpoint Wrong Session | ✅ FR-034, S081–S082, T113–T115 |
+| HITL-006 | HIGH | usability | Interrupted Sessions Unmanageable | ✅ FR-035/036, S083–S088, T116–T121 |
+| HITL-007 | MEDIUM | observability | ACP Audit Logging Missing | ✅ FR-043, S101–S103, T139–T142 |
+| HITL-008 | LOW | usability | Paused Sessions Hidden | ✅ FR-051, S119–S120, T163–T165 |
+
+### Additional Adversarial Findings Not Previously Tracked
+
+| ID | Severity | Category | Title | Spec Status |
+|----|----------|----------|-------|-------------|
+| ES-008 | MEDIUM | integrity | Partial Write Corruption on Crash | ✅ FR-040/041, S095–S097, T130–T134 |
+| ES-009 | LOW | edge_case | Workspace Mapping Hot-Reload Race | ✅ FR-047, S111–S112, T153–T154 |
+| ES-010 | HIGH | security | Unbounded host_cli Execution | ✅ FR-038/039, S092–S094, T127–T129 |
+
+### Updated Remediation Summary
+
+| Priority | Pre-Implementation | HITL | Total | Status |
+|----------|-------------------|------|-------|--------|
+| CRITICAL | 5/5 resolved | 1/1 specced | 6 | ✅ All addressed |
+| HIGH | 8/8 resolved | 3/3 specced | 11 | ✅ All addressed |
+| MEDIUM | 10/10 (6 tracked) | 2/2 specced | 12 | ✅ All addressed |
+| LOW | 4/4 (2 tracked) | 2/2 specced | 6 | ✅ All addressed |
+| **Total** | **27** | **11** | **38** | ✅ |
+
+All 38 findings now have FR, scenario, and task coverage in the 005 spec artifacts.

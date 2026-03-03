@@ -8,15 +8,15 @@
 
 | Metric | Count |
 |---|---|
-| **Total Scenarios** | 76 |
-| Happy-path | 30 |
-| Edge-case | 15 |
-| Error | 14 |
-| Boundary | 5 |
-| Concurrent | 6 |
-| Security | 6 |
+| **Total Scenarios** | 120 |
+| Happy-path | 52 |
+| Edge-case | 25 |
+| Error | 20 |
+| Boundary | 8 |
+| Concurrent | 8 |
+| Security | 7 |
 
-**Non-happy-path coverage**: 61% (minimum 30% required)
+**Non-happy-path coverage**: 57% (minimum 30% required)
 
 ## Dual-Mode Startup (US-1, FR-001, FR-002)
 
@@ -171,26 +171,106 @@
 
 ---
 
+## Findings Remediation Scenarios (Phases 13–16)
+
+### Phase 13: Critical & High-Priority Fixes (HITL-003, HITL-005, HITL-006)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S077 | ACP subprocess calls check_clearance via MCP HTTP | ACP mode, agent subprocess connects to `http://localhost:3000/mcp?session_id=<sid>` | Subprocess invokes `check_clearance` tool | Tool executes successfully, clearance request posted to Slack thread for the ACP session | Clearance pending, Slack thread updated | happy-path |
+| S078 | ACP subprocess with invalid session_id rejected | ACP mode, subprocess connects with `?session_id=nonexistent` | Subprocess sends any MCP tool request | HTTP 401 Unauthorized returned: "invalid or unknown session_id" | No state change, request logged | security |
+| S079 | ACP subprocess with missing session_id rejected | ACP mode, subprocess connects without session_id param | Subprocess sends MCP tool request | HTTP 401 Unauthorized returned: "session_id query parameter required" | No state change | security |
+| S080 | MCP tools functional end-to-end in ACP mode | ACP mode, active session, subprocess connected via HTTP | Subprocess calls auto_check → check_clearance → check_diff | Full approval workflow completes: policy checked, clearance posted to Slack, operator approves, diff applied | File written, approval recorded | happy-path |
+| S081 | session-checkpoint with explicit session_id | Two active sessions (A, B) in channel | `/arc session-checkpoint <session_A_id> my-label` | Checkpoint created under session A, not session B | Checkpoint record has session_id=A, label="my-label" | happy-path |
+| S082 | session-checkpoint without session_id falls back | One active session in channel | `/arc session-checkpoint my-label` | Checkpoint created under the active session | Checkpoint record has correct session_id | happy-path |
+| S083 | session-stop with explicit interrupted session_id | Session X in Interrupted status | `/arc session-stop <session_X_id>` | Session X terminated successfully | Session status = Terminated | happy-path |
+| S084 | session-stop implicit resolution skips Interrupted | Session X (Interrupted), Session Y (Active) in channel | `/arc session-stop` (no session ID) | Session Y stopped (implicit resolves Active only) | Session Y terminated, Session X unchanged | edge-case |
+| S085 | session-cleanup terminates all interrupted sessions | 3 Interrupted sessions in channel | `/arc session-cleanup` | All 3 sessions terminated, confirmation posted | All 3 sessions status = Terminated | happy-path |
+| S086 | session-cleanup in channel with no interrupted sessions | Only active sessions in channel | `/arc session-cleanup` | "No interrupted sessions in this channel" | No state change | edge-case |
+| S087 | Startup posts interrupted session list | Server restarts, 2 previously-active sessions become Interrupted | Server startup | Slack message posted listing 2 interrupted sessions with "Clear All" button | Sessions in Interrupted status | happy-path |
+| S088 | Startup with no interrupted sessions | Clean startup, no previous sessions | Server startup | No interrupted session notification posted | Normal startup | edge-case |
+
+---
+
+### Phase 14: Security Hardening (ES-004, ES-010, ES-008)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S089 | Process tree killed on session stop (Windows) | ACP session, agent spawned child processes | `/arc session-stop` | Entire process tree terminated via Job Object, not just direct child | All processes in tree killed | happy-path |
+| S090 | Process tree killed on session stop (Unix) | ACP session, agent spawned child processes | `/arc session-stop` | `SIGTERM` sent to process group, all children terminated | All processes in group killed | happy-path |
+| S091 | Orphan process detection on startup | Server crashed previously, orphan agent process running | Server startup | Orphan processes detected and logged at WARN level | Warning logged, no auto-kill (operator decision) | edge-case |
+| S092 | host_cli in system PATH — no warning | `host_cli = "copilot"`, copilot is in PATH | Server startup | No CRITICAL warning logged | Normal startup | happy-path |
+| S093 | host_cli at unusual path — CRITICAL warning | `host_cli = "/tmp/downloads/agent"` | Server startup | CRITICAL tracing event: "host_cli resolves to non-standard location: /tmp/downloads/agent" | Server starts, warning logged | security |
+| S094 | host_cli nonexistent — startup error | `host_cli = "/nonexistent/binary"`, ACP mode | Server startup | Error: "host_cli binary not found: /nonexistent/binary" | Server exits, exit code 1 | error |
+| S095 | Outbound ACP messages include sequence numbers | Active ACP session, 3 messages sent | Server sends clearance/response, prompt/send, session/interrupt | Messages have seq=1, seq=2, seq=3 respectively | Sequence monotonically increasing | happy-path |
+| S096 | Sequence number resets per session | Session A sends 5 messages, Session B starts | Session B sends first message | Session B's first message has seq=1 (independent of Session A) | Per-session sequence counters | boundary |
+| S097 | Write failure logged on broken pipe | ACP session, agent process killed externally | Server attempts to write prompt/send | WARN log: "ACP write failed: broken pipe, session=<id>, method=prompt/send, seq=N" | Session marked Interrupted | error |
+
+---
+
+### Phase 15: Reliability & Observability (HITL-001, HITL-007, ES-005, ES-006, ES-007, ES-009)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S098 | WebSocket drops — notification posted | Active sessions in channels X and Y | Socket Mode WebSocket disconnects (OS error 10053) | HTTP REST message posted to channels X and Y: "⚠️ Slack connection interrupted — reconnecting..." | Channels notified | happy-path |
+| S099 | WebSocket recovers — notification posted | Previous disconnect notification posted | Socket Mode reconnects | HTTP REST message posted: "✅ Slack connection restored" | Channels notified, normal operation resumes | happy-path |
+| S100 | WebSocket drops with no active sessions | No active sessions | WebSocket disconnects | WARN logged but no Slack message posted (no channels to notify) | Warning in logs only | edge-case |
+| S101 | ACP session-start writes audit entry | ACP mode, operator starts session | `/arc session-start "build feature"` | Audit log entry: `{event: "acp_session_start", session_id, channel_id, user_id, prompt}` | Audit file contains entry | happy-path |
+| S102 | ACP session-stop writes audit entry | Active ACP session | `/arc session-stop` | Audit log entry: `{event: "acp_session_stop", session_id, channel_id, user_id}` | Audit file contains entry | happy-path |
+| S103 | Steering delivery writes audit entry | Active ACP session, steering message sent | Operator sends message in session thread | Audit log entry: `{event: "acp_steer_delivered", session_id, channel_id, user_id, content}` | Audit file contains entry | happy-path |
+| S104 | Normal message rate — no throttle | ACP session, agent sends 5 msg/sec | Sustained 5 msg/sec for 10 seconds | All messages processed normally, no warnings | No throttle triggered | happy-path |
+| S105 | Burst exceeds rate limit — warning logged | ACP session, agent sends 15 msg/sec burst | Brief burst (< 5 seconds) | WARN logged: "ACP rate limit exceeded for session <id>: 15 msg/s (limit: 10)" | Warning only, messages processed | edge-case |
+| S106 | Sustained flood terminates session | ACP session, agent sends 30+ msg/sec for > 5 seconds | Sustained flood | Session terminated, ERROR logged: "ACP session <id> terminated: sustained rate limit violation" | Session terminated, process killed | error |
+| S107 | Stall timer initialized from DB on restart | Session with `last_activity_at` = 4 minutes ago, threshold = 5 min | Server restart | Stall timer starts with 4 minutes elapsed (1 minute until stall) | Timer correctly initialized | happy-path |
+| S108 | Stall timer triggers immediately after restart | Session with `last_activity_at` = 10 minutes ago, threshold = 5 min | Server restart | Stall detector fires immediately for this session | Nudge sent or operator notified | edge-case |
+| S109 | Session committed before reader starts | ACP session start, agent immediately sends status update | `/arc session-start`, agent writes to stdout within 10ms | Status update processed correctly — session found in DB and driver map | Event processed, no errors | happy-path |
+| S110 | Reader event before session committed — graceful handling | Theoretical race: reader starts before DB commit | Agent sends message on stdout | Event buffered or retried; no panic, no data loss | WARN logged, event eventually processed | edge-case |
+| S111 | Config reload during session creation — consistent channel | Session being created for workspace "proj", config reload removes "proj" mapping | Concurrent config reload | Session created with the channel that was valid at resolution time (read lock held) | Session has consistent channel_id | concurrent |
+| S112 | Config reload after session creation — no effect | Active session for workspace "proj", mapping updated | Config reload changes "proj" channel | Active session retains original channel, new sessions use updated mapping | Active session unaffected | happy-path |
+
+---
+
+### Phase 16: Usability Improvements (HITL-002, HITL-004, HITL-008)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S113 | /arc sessions --all shows all statuses | 1 Active, 1 Paused, 1 Interrupted, 1 Terminated session | `/arc sessions --all` | All 4 sessions listed with status indicators: 🟢 Active, ⏸ Paused, ⚠️ Interrupted, ⏹ Terminated | All sessions visible | happy-path |
+| S114 | /arc sessions (no flag) shows active + paused | 1 Active, 1 Paused, 1 Terminated | `/arc sessions` | 2 sessions listed (Active + Paused), Terminated hidden | Only visible sessions shown | happy-path |
+| S115 | Session title derived from initial prompt | Session started with "Build the authentication module for the web app" | Session listed in `/arc sessions` | Title shown: "Build the authentication module for the web app" (truncated to 80 chars) | title field populated | happy-path |
+| S116 | Session title truncation at 80 chars | Session started with a 200-character prompt | Session listed | Title shows first 77 characters + "..." | title field truncated correctly | boundary |
+| S117 | session-checkpoint help shows correct syntax | Operator types help command | `/arc help session-checkpoint` | Help shows: `session-checkpoint [session_id] <label>` with clear description | Correct help text | happy-path |
+| S118 | session-checkpoint without session_id — clear error when no active session | No active sessions in channel | `/arc session-checkpoint my-label` | Error: "no active session in this channel" (not "session my-label not found") | No checkpoint created | error |
+| S119 | /arc sessions shows paused sessions with icon | 1 Active session, 1 Paused session | `/arc sessions` | Active: "🟢 abc123 — Build auth module", Paused: "⏸ def456 — Fix login bug" | Both sessions visible with indicators | happy-path |
+| S120 | /arc sessions empty channel | No sessions at all in channel | `/arc sessions` | "No active sessions in this channel." | No output | edge-case |
+
+---
+
 ## Edge Case Coverage Checklist
 
 - [x] Malformed inputs and invalid arguments (S006, S026, S032, S033, S052, S054)
-- [x] Missing dependencies and unavailable resources (S004, S005, S014, S025)
-- [x] State errors and race conditions (S016, S047, S068)
-- [x] Boundary values (empty, max-length, zero, negative) (S026, S042, S057, S058)
-- [x] Permission and authorization failures (S072)
-- [x] Concurrent access patterns (S017, S041, S048)
-- [x] Graceful degradation scenarios (S028, S031, S035, S059)
+- [x] Missing dependencies and unavailable resources (S004, S005, S014, S025, S094)
+- [x] State errors and race conditions (S016, S047, S068, S110, S111)
+- [x] Boundary values (empty, max-length, zero, negative) (S026, S042, S057, S058, S096, S116)
+- [x] Permission and authorization failures (S072, S078, S079)
+- [x] Concurrent access patterns (S017, S041, S048, S111)
+- [x] Graceful degradation scenarios (S028, S031, S035, S059, S100)
+- [x] Process lifecycle and cleanup (S089, S090, S091)
+- [x] Audit and observability (S101, S102, S103)
+- [x] Rate limiting and DoS protection (S104, S105, S106)
+- [x] Server restart recovery (S087, S107, S108)
 
 ## Cross-Reference Validation
 
-- [x] Every entity in `data-model.md` has at least one scenario covering its state transitions (Session: S018-S026, S069-S071; WorkspaceMapping: S027-S035; AgentEvent: S049-S055; AcpMessage: S049-S058)
-- [x] Every endpoint in `contracts/` has at least one happy-path and one error scenario (AgentDriver: S008-S017; ACP Stream: S049-S058; Workspace Mapping: S027-S035)
+- [x] Every entity in `data-model.md` has at least one scenario covering its state transitions (Session: S018-S026, S069-S071, S081-S088; WorkspaceMapping: S027-S035; AgentEvent: S049-S055; AcpMessage: S049-S058)
+- [x] Every endpoint in `contracts/` has at least one happy-path and one error scenario (AgentDriver: S008-S017, S077-S080; ACP Stream: S049-S058, S095-S097; Workspace Mapping: S027-S035)
 - [x] Every user story in `spec.md` has corresponding behavioral coverage (US-1: S001-S007, US-2: S008-S017, US-3: S018-S026, US-4: S027-S035, US-5: S036-S042, US-6: S043-S048, US-7: S049-S058, US-8: S059-S062, US-9: S063-S068)
+- [x] Every remediation FR has at least one scenario (FR-032/033: S077-S080, FR-034: S081-S082, FR-035/036: S083-S088, FR-037: S089-S091, FR-038/039: S092-S094, FR-040/041: S095-S097, FR-042: S098-S100, FR-043: S101-S103, FR-044: S104-S106, FR-045: S107-S108, FR-046: S109-S110, FR-047: S111-S112, FR-048/049: S113-S116, FR-050: S117-S118, FR-051: S119-S120)
 - [x] No scenario has ambiguous or non-deterministic expected outcomes
 
 ## Notes
 
-- Scenario IDs are globally sequential (S001–S076) across all components
+- Scenario IDs are globally sequential (S001–S120) across all components
 - Categories: `happy-path`, `edge-case`, `error`, `boundary`, `concurrent`, `security`
 - Each row is deterministic — exactly one expected outcome per input state
 - Security scenarios are minimal because the existing authorization guard (FR-013/SC-009 from base) covers most security paths; only ACP-specific security paths are added here
+- Findings remediation scenarios (S077–S120) map 1:1 to findings in `findings.json`

@@ -207,6 +207,42 @@ The existing stall detection mechanism (monitoring `ping` frequency and escalati
 - **FR-030**: The initial prompt for an ACP session MUST be delivered via the ACP stream protocol (stdin), never as a command-line argument to the agent process. `host_cli_args` in configuration MUST be static and not include user-provided content.
 - **FR-031**: All session-modifying actions (clearance resolution, prompt delivery, interruption, steering) MUST verify that the acting Slack user matches the session's `owner_user_id`. Actions from non-owners MUST be rejected with a descriptive error message.
 
+### Remediation Requirements (Findings)
+
+*Added post-implementation based on adversarial analysis (ES-*) and HITL testing (HITL-*) findings.*
+
+#### Phase 13 — Critical & High-Priority Fixes
+
+- **FR-032** *(HITL-003)*: In ACP mode, the MCP HTTP transport on the configured port MUST remain active so that agent subprocesses can reach MCP tools (`check_clearance`, `auto_check`, `check_diff`, `transmit`, `standby`, `reboot`). The transport MUST authenticate requests using a `session_id` query parameter and route tool calls through the `AcpDriver` for the matching session.
+- **FR-033** *(HITL-003)*: MCP tool requests from ACP subprocesses MUST include a valid `session_id` query parameter. Requests with a missing or invalid `session_id` MUST be rejected with HTTP 401 Unauthorized.
+- **FR-034** *(HITL-005)*: The `session-checkpoint` command MUST create the checkpoint on the session explicitly identified by the provided session ID argument. When no session ID is provided, it MUST fall back to the most recently active session in the channel. The `parse_checkpoint_args` function MUST correctly extract session ID and label from the argument list.
+- **FR-035** *(HITL-006)*: `resolve_command_session` MUST resolve sessions in `Interrupted` status when an explicit session ID is provided. Implicit resolution (no session ID) MAY continue to match only `Active` sessions.
+- **FR-036** *(HITL-006)*: The system MUST provide a `session-cleanup` slash command that force-terminates all `Interrupted` sessions in the originating channel. On server startup, if interrupted sessions exist, the system MUST post a Slack message listing them with a one-click "Clear All" button.
+
+#### Phase 14 — Security Hardening
+
+- **FR-037** *(ES-004)*: The ACP spawner MUST terminate the entire process tree when a session ends — using Job Objects on Windows and process group signals (`SIGTERM` to process group) on Unix. `kill_on_drop(true)` alone is insufficient for grandchild processes.
+- **FR-038** *(ES-010)*: On startup, the server MUST log a `CRITICAL` tracing event if `host_cli` resolves to a path outside the system `PATH` or standard installation directories. The server MUST NOT block startup, but the warning MUST be prominent.
+- **FR-039** *(ES-010)*: The `host_cli` configuration value MUST be validated as an existing, executable file at startup. If it does not exist or is not executable, the server MUST exit with a descriptive error (consistent with existing FR-004/FR-005 behavior for ACP mode).
+- **FR-040** *(ES-008)*: All outbound ACP messages MUST include a monotonically increasing `seq` field (per session). This enables gap detection if the agent tracks received sequence numbers.
+- **FR-041** *(ES-008)*: Write failures to the ACP stream (partial writes, broken pipe) MUST be logged at `WARN` level with the message method, session ID, and sequence number. The session MUST be marked as interrupted on write failure.
+
+#### Phase 15 — Reliability & Observability
+
+- **FR-042** *(HITL-001)*: The server MUST post a Slack notification via the HTTP REST API (not Socket Mode) when the Socket Mode WebSocket connection drops, and again when it recovers. Notifications MUST go to all channels with active sessions.
+- **FR-043** *(HITL-007)*: ACP session lifecycle events MUST be written to the audit log. Required event types: `acp_session_start`, `acp_session_stop`, `acp_session_pause`, `acp_session_resume`, `acp_steer_delivered`, `acp_task_queued`. Each entry MUST include session ID, channel ID, and acting user ID.
+- **FR-044** *(ES-005)*: The ACP reader MUST enforce a token-bucket rate limit on inbound messages (default: 10 messages/second, configurable via `[acp] max_msg_rate`). Exceeding the rate MUST trigger a `WARN` log. Sustained abuse (>3× rate for >5 seconds) MUST terminate the session.
+- **FR-045** *(ES-006)*: On server startup, the stall detector MUST initialize timers for existing active/interrupted sessions using their persisted `last_activity_at` timestamps. The elapsed time since last activity (`now - last_activity_at`) MUST be used as the timer's initial value.
+- **FR-046** *(ES-007)*: The session record MUST be committed to the database and the session MUST be registered in the driver map BEFORE the ACP reader task is started. Events received before registration MUST NOT cause panics or data loss.
+- **FR-047** *(ES-009)*: During ACP session creation, channel resolution from workspace mappings MUST hold a read lock on the workspace configuration for the entire resolution+session-creation transaction to prevent races with hot-reload.
+
+#### Phase 16 — Usability Improvements
+
+- **FR-048** *(HITL-002)*: The `/arc sessions` command MUST support a `--all` flag that displays sessions in all statuses (active, paused, interrupted, terminated) with their status indicated. Without the flag, only active and paused sessions are shown.
+- **FR-049** *(HITL-002)*: The session record MUST store a `title` field containing a truncated version of the initial prompt (max 80 characters). The title MUST be displayed in all session listings alongside the session ID.
+- **FR-050** *(HITL-004)*: The `session-checkpoint` help text MUST accurately reflect parameter requirements. If session ID resolution falls back to most-recent-active, the help text MUST show `[session_id]` (optional). Error messages for failed resolution MUST clearly state the cause (e.g., "no active session in this channel" rather than treating the label as a session ID).
+- **FR-051** *(HITL-008)*: The `/arc sessions` listing MUST include paused sessions with a `⏸` visual indicator. The `list_active` query (or a new `list_visible` query) MUST return both active and paused sessions.
+
 ### Key Entities
 
 - **Agent Driver**: Protocol-agnostic abstraction for agent communication. Supports clearance resolution, prompt delivery, and session interruption. Has protocol-specific implementations for MCP and ACP.

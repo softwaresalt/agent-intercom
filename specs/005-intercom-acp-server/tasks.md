@@ -301,6 +301,225 @@
 
 ---
 
+## Phase 13: Critical & High-Priority Fixes (Findings Remediation) 🚨
+
+**Purpose**: Address CRITICAL and HIGH findings from adversarial analysis and HITL testing
+
+**Findings**: HITL-003 (CRITICAL), HITL-005 (HIGH), HITL-006 (HIGH)
+
+### HITL-003 — MCP Tools Unreachable in ACP Mode (FR-032, FR-033)
+
+#### Tests (S077–S080)
+
+- [ ] T107 [P] Write integration test for ACP subprocess calling check_clearance via HTTP transport in `tests/integration/acp_mcp_bridge_tests.rs` — covers S077
+- [ ] T108 [P] Write security test for invalid session_id rejection in `tests/integration/acp_mcp_bridge_tests.rs` — covers S078, S079
+- [ ] T109 [P] Write end-to-end test for full approval workflow via ACP subprocess in `tests/integration/acp_mcp_bridge_tests.rs` — covers S080
+
+#### Implementation
+
+- [ ] T110 Remove the conditional that disables MCP HTTP transport in ACP mode in `src/main.rs` — transport MUST start in both modes
+- [ ] T111 Add session_id query parameter extraction and validation middleware in `src/mcp/sse.rs` — reject requests with missing/invalid session_id when in ACP mode with HTTP 401
+- [ ] T112 Wire ACP session authentication: when session_id is present, resolve the session from DB, verify it is active, and set the session context for tool routing through `AcpDriver`
+
+### HITL-005 — session-checkpoint Wrong Session (FR-034)
+
+#### Tests (S081–S082)
+
+- [ ] T113 [P] Write unit test for `parse_checkpoint_args` correctly extracting session_id and label in `tests/unit/command_tests.rs` — covers S081
+- [ ] T114 [P] Write unit test for checkpoint fallback to most-recent when no session_id in `tests/unit/command_tests.rs` — covers S082
+
+#### Implementation
+
+- [ ] T115 Fix `parse_checkpoint_args` in `src/slack/commands.rs` to correctly extract session ID (first arg) and label (second arg), using `resolve_command_session` only when no explicit session ID provided
+
+### HITL-006 — Interrupted Sessions Unmanageable (FR-035, FR-036)
+
+#### Tests (S083–S088)
+
+- [ ] T116 [P] Write unit test for `resolve_command_session` resolving Interrupted sessions by explicit ID in `tests/unit/command_tests.rs` — covers S083, S084
+- [ ] T117 [P] Write unit test for `session-cleanup` command in `tests/unit/command_tests.rs` — covers S085, S086
+- [ ] T118 [P] Write integration test for startup interrupted session notification in `tests/integration/session_lifecycle_tests.rs` — covers S087, S088
+
+#### Implementation
+
+- [ ] T119 Update `resolve_command_session` in `src/slack/commands.rs` to also query `find_by_id` when an explicit session ID is provided, accepting Interrupted status
+- [ ] T120 Add `session-cleanup` slash command handler in `src/slack/commands.rs` — queries all Interrupted sessions in channel, terminates each, posts confirmation
+- [ ] T121 Update `check_interrupted_on_startup` in `src/main.rs` to post Slack message listing interrupted sessions with "Clear All" Block Kit button
+
+**Checkpoint**: ACP subprocesses can reach MCP tools; checkpoint and interrupted session commands work correctly
+
+---
+
+## Phase 14: Security Hardening (Findings Remediation) 🔒
+
+**Purpose**: Process tree termination, host_cli validation, write atomicity
+
+**Findings**: ES-004 (MEDIUM), ES-010 (HIGH), ES-008 (MEDIUM)
+
+### ES-004 — Process Tree Termination (FR-037)
+
+#### Tests (S089–S091)
+
+- [ ] T122 [P] Write integration test for process tree termination on Windows in `tests/integration/acp_lifecycle_tests.rs` — covers S089
+- [ ] T123 [P] Write integration test for process group termination on Unix in `tests/integration/acp_lifecycle_tests.rs` — covers S090
+
+#### Implementation
+
+- [ ] T124 [cfg(windows)] Implement Job Object wrapper in `src/acp/spawner.rs` — create Job Object, assign spawned process, configure `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+- [ ] T125 [cfg(unix)] Implement process group spawning in `src/acp/spawner.rs` — use `pre_exec` to call `setsid()`, send `SIGTERM` to `-pgid` on termination
+- [ ] T126 Add orphan process detection on startup in `src/acp/spawner.rs` — check for processes matching `host_cli` binary name, log WARN if found (no auto-kill)
+
+### ES-010 — host_cli Validation (FR-038, FR-039)
+
+#### Tests (S092–S094)
+
+- [ ] T127 [P] Write unit test for host_cli path validation in `tests/unit/config_tests.rs` — covers S092, S093, S094
+
+#### Implementation
+
+- [ ] T128 Add `validate_host_cli_path` function in `src/config.rs` — check existence, executability, and whether path is in standard directories
+- [ ] T129 Wire host_cli validation into ACP startup path in `src/main.rs` — call `validate_host_cli_path`, log CRITICAL if non-standard, error if nonexistent
+
+### ES-008 — Outbound Message Sequence Numbers (FR-040, FR-041)
+
+#### Tests (S095–S097)
+
+- [ ] T130 [P] Write unit test for monotonic sequence number assignment in `tests/unit/acp_codec_tests.rs` — covers S095, S096
+- [ ] T131 [P] Write unit test for write failure logging in `tests/unit/acp_codec_tests.rs` — covers S097
+
+#### Implementation
+
+- [ ] T132 Add per-session `AtomicU64` sequence counter to `AcpDriver` session registration in `src/driver/acp_driver.rs`
+- [ ] T133 Add `seq` field to all outbound ACP message serialization in `src/acp/writer.rs` — increment and include sequence number
+- [ ] T134 Add write failure handling in `src/acp/writer.rs` — log WARN with method/session_id/seq, mark session Interrupted on broken pipe
+
+**Checkpoint**: Process trees fully terminated; host_cli validated; outbound messages have sequence numbers
+
+---
+
+## Phase 15: Reliability & Observability (Findings Remediation) 📊
+
+**Purpose**: WebSocket notifications, audit logging, rate limiting, stall timer persistence, startup ordering
+
+**Findings**: HITL-001 (MEDIUM), HITL-007 (MEDIUM), ES-005 (MEDIUM), ES-006 (MEDIUM), ES-007 (LOW), ES-009 (LOW)
+
+### HITL-001 — Socket Mode Disconnect Notifications (FR-042)
+
+#### Tests (S098–S100)
+
+- [ ] T135 [P] Write unit test for WebSocket drop notification posting in `tests/unit/slack_client_tests.rs` — covers S098, S099
+- [ ] T136 [P] Write unit test for no notification when no active sessions in `tests/unit/slack_client_tests.rs` — covers S100
+
+#### Implementation
+
+- [ ] T137 Add `on_disconnect` and `on_reconnect` callback hooks in `src/slack/client.rs` — query active session channels, post notification via HTTP REST API (not Socket Mode)
+- [ ] T138 Wire disconnect/reconnect hooks into Socket Mode event loop — detect connection state changes, invoke hooks
+
+### HITL-007 — ACP Audit Logging (FR-043)
+
+#### Tests (S101–S103)
+
+- [ ] T139 [P] Write unit test for ACP session lifecycle audit entries in `tests/unit/audit_tests.rs` — covers S101, S102, S103
+
+#### Implementation
+
+- [ ] T140 Add ACP audit event types to `src/audit/writer.rs` — `acp_session_start`, `acp_session_stop`, `acp_session_pause`, `acp_session_resume`, `acp_steer_delivered`, `acp_task_queued`
+- [ ] T141 Add audit log writes in ACP session handlers in `src/slack/commands.rs` — call `audit_logger.log()` in session-start, session-stop, session-pause, session-resume handlers
+- [ ] T142 Add audit log writes in steering/task handlers — call `audit_logger.log()` in `src/slack/handlers/steer.rs` and task handler when mode is ACP
+
+### ES-005 — ACP Stream Rate Limiting (FR-044)
+
+#### Tests (S104–S106)
+
+- [ ] T143 [P] Write unit test for token-bucket rate limiter in `tests/unit/acp_codec_tests.rs` — covers S104, S105, S106
+
+#### Implementation
+
+- [ ] T144 Create `TokenBucketRateLimiter` struct in `src/acp/reader.rs` — configurable rate (default 10/sec), burst allowance, sustained violation detection
+- [ ] T145 Wire rate limiter into ACP reader loop in `src/acp/reader.rs` — check each message, log WARN on burst, terminate session on sustained flood
+- [ ] T146 Add `max_msg_rate` config field to `[acp]` section in `src/config.rs` with default value 10
+
+### ES-006 — Stall Timer Initialization on Restart (FR-045)
+
+#### Tests (S107–S108)
+
+- [ ] T147 [P] Write unit test for stall timer initialization from DB timestamps in `tests/unit/stall_detector_tests.rs` — covers S107, S108
+
+#### Implementation
+
+- [ ] T148 Add `load_active_session_timestamps` query to `src/persistence/session_repo.rs` — return `Vec<(session_id, last_activity_at)>` for active/interrupted sessions
+- [ ] T149 Update stall detector initialization in `src/orchestrator/stall_detector.rs` — on startup, call `load_active_session_timestamps`, initialize each timer with `now - last_activity_at` elapsed
+
+### ES-007 — Startup Race Condition (FR-046)
+
+#### Tests (S109–S110)
+
+- [ ] T150 [P] Write unit test verifying session DB commit happens before reader start in `tests/unit/acp_session_tests.rs` — covers S109, S110
+
+#### Implementation
+
+- [ ] T151 Reorder ACP session start sequence in `src/slack/commands.rs` and `src/acp/spawner.rs` — commit session to DB → register in driver map → THEN start reader task
+- [ ] T152 Add grace period buffer in ACP reader task — if `AgentEvent` dispatched for unknown session, retry lookup once after 100ms delay before logging error
+
+### ES-009 — Workspace Mapping Hot-Reload Race (FR-047)
+
+#### Tests (S111–S112)
+
+- [ ] T153 [P] Write concurrent test for config reload during session creation in `tests/integration/workspace_routing_tests.rs` — covers S111, S112
+
+#### Implementation
+
+- [ ] T154 Update ACP session creation in `src/slack/commands.rs` — acquire read lock on `workspace_mappings` before channel resolution and hold through session record creation
+
+**Checkpoint**: WebSocket notifications working; audit logging complete; rate limiting enforced; stall timers persistent; startup race eliminated; config reload race-safe
+
+---
+
+## Phase 16: Usability Improvements (Findings Remediation) 🎨
+
+**Purpose**: Session history, session titles, help text fixes, paused session visibility
+
+**Findings**: HITL-002 (LOW), HITL-004 (LOW), HITL-008 (LOW)
+
+### HITL-002 — Session History & Titles (FR-048, FR-049)
+
+#### Tests (S113–S116)
+
+- [ ] T155 [P] Write unit test for `/arc sessions --all` query returning all statuses in `tests/unit/command_tests.rs` — covers S113, S114
+- [ ] T156 [P] Write unit test for session title truncation in `tests/unit/session_model_tests.rs` — covers S115, S116
+
+#### Implementation
+
+- [ ] T157 Add `title` column to session table schema in `src/persistence/schema.rs` — `TEXT DEFAULT NULL`, idempotent migration
+- [ ] T158 Update `SessionRepo` in `src/persistence/session_repo.rs` — include `title` in INSERT/SELECT, add `list_all_by_channel` query returning all statuses
+- [ ] T159 Update ACP session-start handler to set `title` = truncated initial prompt (max 80 chars, append "..." if truncated) in `src/slack/commands.rs`
+- [ ] T160 Update `handle_sessions` in `src/slack/commands.rs` — parse `--all` flag, call `list_all_by_channel` or `list_active`, format output with status icons and titles
+
+### HITL-004 — session-checkpoint Help Text (FR-050)
+
+#### Tests (S117–S118)
+
+- [ ] T161 [P] Write unit test for session-checkpoint help text accuracy in `tests/unit/command_tests.rs` — covers S117, S118
+
+#### Implementation
+
+- [ ] T162 Update session-checkpoint help text in `src/slack/commands.rs` — change `[session_id]` to show correct optionality, update error messages to clearly state "no active session in this channel" when resolution fails
+
+### HITL-008 — Paused Sessions in Listing (FR-051)
+
+#### Tests (S119–S120)
+
+- [ ] T163 [P] Write unit test for paused session visibility in `/arc sessions` in `tests/unit/command_tests.rs` — covers S119, S120
+
+#### Implementation
+
+- [ ] T164 Update `list_active` query in `src/persistence/session_repo.rs` to include Paused sessions (or add `list_visible` query returning Active + Paused)
+- [ ] T165 Update session listing format in `src/slack/commands.rs` — add ⏸ icon for Paused, 🟢 for Active
+
+**Checkpoint**: Session history queryable; titles visible; help text accurate; paused sessions visible
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -317,6 +536,10 @@
 - **Phase 10 (US8 — Offline Queue)**: Depends on Phase 9 (stream) and feature 004 (steering queue)
 - **Phase 11 (US9 — Stall Detection)**: Depends on Phase 9 (stream activity) and Phase 4 (driver)
 - **Phase 12 (Polish)**: Depends on all desired user stories being complete
+- **Phase 13 (Critical Fixes)**: Depends on Phase 12 (all core features complete). HITL-003 depends on Phase 3 (MCP transport) + Phase 9 (ACP stream). HITL-005/006 depend on Phase 8 (channel routing).
+- **Phase 14 (Security)**: Depends on Phase 5 (spawner) for ES-004, Phase 3 (config) for ES-010, Phase 9 (writer) for ES-008. Can parallel with Phase 13.
+- **Phase 15 (Reliability)**: Depends on Phase 11 (stall detector) for ES-006, Phase 9 (reader) for ES-005/ES-007. Can parallel with Phase 13/14.
+- **Phase 16 (Usability)**: Depends on Phase 8 (commands) for all items. Can parallel with Phase 14/15.
 
 ### User Story Dependencies
 
@@ -328,11 +551,19 @@ Phase 2 (Foundation)
   │   └── Phase 11 (US9: Stall)  ────────┘                           Phase 11 (US9: Stall)
   ├── Phase 6 (US4: Workspace Mapping) [parallel with 3/4]
   └── Phase 7 (US5: Threading) ── Phase 8 (US6: Channel Routing)
+
+Phase 12 (Polish) ← depends on all above
+  ├── Phase 13 (Critical Fixes: HITL-003, HITL-005, HITL-006)
+  ├── Phase 14 (Security: ES-004, ES-010, ES-008) [parallel with 13]
+  ├── Phase 15 (Reliability: HITL-001, HITL-007, ES-005/006/007/009) [parallel with 13/14]
+  └── Phase 16 (Usability: HITL-002, HITL-004, HITL-008) [parallel with 14/15]
 ```
 
 ### Parallel Opportunities
 
 - **Phase 3 + Phase 6 + Phase 7**: Mode flag, workspace mapping, and threading can all run in parallel after Phase 2
+- **Phase 13 + Phase 14**: Critical fixes and security hardening can run in parallel
+- **Phase 14 + Phase 15 + Phase 16**: Security, reliability, and usability can all run in parallel
 - **Within each phase**: All tasks marked [P] can run in parallel
 - **All test tasks marked [P]** within a phase can run in parallel
 
@@ -365,6 +596,13 @@ Phase 2 (Foundation)
 12. Complete Phase 12: Polish
 13. **FINAL VALIDATION**: Full regression, clippy, fmt
 
+### Findings Remediation (Post-HITL)
+
+14. Complete Phase 13: Critical & High-Priority Fixes (HITL-003, HITL-005, HITL-006)
+15. Complete Phase 14 + 15: Security Hardening + Reliability (parallel)
+16. Complete Phase 16: Usability Improvements
+17. **FINAL VALIDATION**: Full regression, clippy, fmt, HITL re-test
+
 ---
 
 ## Notes
@@ -374,5 +612,6 @@ Phase 2 (Foundation)
 - Each user story is independently completable and testable
 - TDD required: write tests first, verify they fail, then implement
 - Commit after each task or logical group
-- Total: 112 tasks across 12 phases
+- Total: 171 tasks across 16 phases (T001–T106 original, T107–T165 remediation)
 - **Deferred**: `ctl/main.rs` ACP subcommands and `src/ipc/server.rs` ACP extensions are deferred to a future feature. ACP sessions are managed exclusively via Slack in this feature.
+- **Findings traceability**: Each remediation task traces to a finding ID (ES-* or HITL-*) → FR → scenario → task chain
