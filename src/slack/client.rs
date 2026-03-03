@@ -22,7 +22,7 @@ use tracing::{error, info, warn};
 
 use crate::mcp::handler::AppState;
 use crate::models::session::SessionMode;
-use crate::slack::{commands, events};
+use crate::slack::{commands, events, push_events};
 use crate::{config::SlackConfig, AppError, Result};
 
 const QUEUE_CAPACITY: usize = 256;
@@ -275,10 +275,7 @@ impl SlackService {
             })
             .with_command_events(commands::handle_command)
             .with_interaction_events(events::handle_interaction)
-            .with_push_events(|event, _client, _state| async move {
-                info!(?event, "push event ignored");
-                Ok(())
-            });
+            .with_push_events(push_events::handle_push_event);
         let config = SlackClientSocketModeConfig {
             max_connections_count: SlackClientSocketModeConfig::DEFAULT_CONNECTIONS_COUNT,
             debug_connections: SlackClientSocketModeConfig::DEFAULT_DEBUG_CONNECTIONS,
