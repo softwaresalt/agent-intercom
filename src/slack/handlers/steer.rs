@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use tracing::{info, warn};
 
+use crate::audit::{AuditEntry, AuditEventType};
 use crate::driver::AgentDriver;
 use crate::mcp::handler::AppState;
 use crate::models::session::{ConnectivityStatus, ProtocolMode};
@@ -112,6 +113,10 @@ pub async fn store_from_slack(
                         channel_id = ?channel_id,
                         "steering message delivered directly via ACP driver (session online)"
                     );
+
+                    // HITL-007: audit-log direct steering delivery.
+                    emit_steer_audit(state.audit_logger.as_ref(), &session.id);
+
                     return Ok(format!(
                         "Steering message delivered directly to agent in session `{}`.",
                         session.id
@@ -139,6 +144,9 @@ pub async fn store_from_slack(
 
     let steering_repo = SteeringRepo::new(Arc::clone(&state.db));
     steering_repo.insert(&msg).await?;
+
+    // HITL-007: audit-log queued steering message.
+    emit_steer_audit(state.audit_logger.as_ref(), &session.id);
 
     info!(
         session_id = %session.id,
@@ -245,6 +253,17 @@ fn strip_mention(text: &str) -> &str {
             .map_or(trimmed, |(_, rest)| rest.trim_start())
     } else {
         trimmed
+    }
+}
+
+/// Emit an `AcpSteerDelivered` audit entry (HITL-007).
+fn emit_steer_audit(logger: Option<&Arc<dyn crate::audit::AuditLogger>>, session_id: &str) {
+    if let Some(logger) = logger {
+        let entry =
+            AuditEntry::new(AuditEventType::AcpSteerDelivered).with_session(session_id.to_owned());
+        if let Err(err) = logger.log_entry(entry) {
+            warn!(%err, "audit log write failed (steer delivered)");
+        }
     }
 }
 

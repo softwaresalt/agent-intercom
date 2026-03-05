@@ -22,6 +22,7 @@ use tracing::{debug, info, info_span, warn};
 
 use crate::acp::handshake;
 use crate::acp::spawner::SpawnConfig;
+use crate::audit::{AuditEntry, AuditEventType};
 use crate::diff::path_safety::validate_path;
 use crate::driver::AgentDriver;
 use crate::mcp::handler::AppState;
@@ -156,12 +157,12 @@ async fn dispatch_command(
 
         "session-pause" => {
             let session_id = args.first().copied();
-            handle_session_pause(session_id, user_id, channel_id, db).await
+            handle_session_pause(session_id, user_id, channel_id, state).await
         }
 
         "session-resume" => {
             let session_id = args.first().copied();
-            handle_session_resume(session_id, user_id, channel_id, db).await
+            handle_session_resume(session_id, user_id, channel_id, state).await
         }
 
         "session-clear" => {
@@ -757,6 +758,14 @@ async fn finish_acp_session_start(
         channel_id, workspace = %workspace_name, "ACP session started"
     );
 
+    // HITL-007: audit-log the ACP session start event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionStart,
+        &active.id,
+        None,
+    );
+
     Ok(())
 }
 
@@ -801,14 +810,23 @@ async fn handle_session_pause(
     session_id: Option<&str>,
     user_id: &str,
     channel_id: &str,
-    db: &Arc<Database>,
+    state: &Arc<AppState>,
 ) -> crate::Result<String> {
-    let repo = SessionRepo::new(Arc::clone(db));
+    let repo = SessionRepo::new(Arc::clone(&state.db));
 
     let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let paused = session_manager::pause_session(&session.id, &repo).await?;
+
+    // HITL-007: audit-log the ACP session pause event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionPause,
+        &paused.id,
+        Some(user_id),
+    );
+
     Ok(format!("Session `{}` paused.", paused.id))
 }
 
@@ -816,14 +834,23 @@ async fn handle_session_resume(
     session_id: Option<&str>,
     user_id: &str,
     channel_id: &str,
-    db: &Arc<Database>,
+    state: &Arc<AppState>,
 ) -> crate::Result<String> {
-    let repo = SessionRepo::new(Arc::clone(db));
+    let repo = SessionRepo::new(Arc::clone(&state.db));
 
     let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let resumed = session_manager::resume_session(&session.id, &repo).await?;
+
+    // HITL-007: audit-log the ACP session resume event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionResume,
+        &resumed.id,
+        Some(user_id),
+    );
+
     Ok(format!("Session `{}` resumed.", resumed.id))
 }
 
@@ -888,6 +915,15 @@ async fn handle_session_stop(
     }
 
     info!(session_id = %terminated.id, user_id, "ACP session stopped by operator");
+
+    // HITL-007: audit-log the ACP session stop event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionStop,
+        &terminated.id,
+        Some(user_id),
+    );
+
     Ok(format!("ACP session `{}` stopped.", terminated.id))
 }
 
@@ -926,6 +962,14 @@ async fn handle_session_cleanup(
         let short_id: String = session.id.chars().take(8).collect();
         cleaned.push(format!("`{short_id}…`"));
         info!(session_id = %session.id, user_id, "interrupted session cleaned up");
+
+        // HITL-007: audit-log each cleaned-up session.
+        emit_audit(
+            state.audit_logger.as_ref(),
+            AuditEventType::AcpSessionStop,
+            &session.id,
+            Some(user_id),
+        );
     }
 
     Ok(format!(
@@ -959,6 +1003,14 @@ async fn handle_session_clear(
     if let Some(ref slack) = state.slack {
         session_manager::notify_session_ended(&terminated, "terminated by operator", slack).await;
     }
+
+    // HITL-007: audit-log the session clear/terminate event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionStop,
+        &terminated.id,
+        Some(user_id),
+    );
 
     Ok(format!("Session `{}` terminated.", terminated.id))
 }
@@ -1031,6 +1083,30 @@ async fn handle_session_restart(
 
     // Spawn the new ACP session with the original prompt.
     handle_acp_session_start(&original_prompt, user_id, channel_id, state).await
+}
+
+// ── Audit helpers (HITL-007) ─────────────────────────────────────────
+
+/// Emit an audit log entry for an ACP session lifecycle event.
+///
+/// A no-op when the audit logger is not configured. Logs a warning
+/// if the underlying write fails so the handler's happy path is not
+/// interrupted by audit I/O errors.
+fn emit_audit(
+    logger: Option<&Arc<dyn crate::audit::AuditLogger>>,
+    event_type: AuditEventType,
+    session_id: &str,
+    operator_id: Option<&str>,
+) {
+    if let Some(logger) = logger {
+        let mut entry = AuditEntry::new(event_type).with_session(session_id.to_owned());
+        if let Some(op) = operator_id {
+            entry = entry.with_operator(op.to_owned());
+        }
+        if let Err(err) = logger.log_entry(entry) {
+            warn!(%err, "audit log write failed (acp lifecycle event)");
+        }
+    }
 }
 
 // ── Checkpoint commands (T070-T071 integration, T072) ────────────────

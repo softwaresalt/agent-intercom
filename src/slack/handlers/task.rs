@@ -6,8 +6,9 @@
 
 use std::sync::Arc;
 
-use tracing::info;
+use tracing::{info, warn};
 
+use crate::audit::{AuditEntry, AuditEventType};
 use crate::mcp::handler::AppState;
 use crate::models::inbox::{InboxSource, TaskInboxItem};
 use crate::persistence::inbox_repo::InboxRepo;
@@ -39,6 +40,14 @@ pub async fn store_from_slack(
 
     let inbox_repo = InboxRepo::new(Arc::clone(&state.db));
     inbox_repo.insert(&item).await?;
+
+    // HITL-007: audit-log the task queue event.
+    if let Some(ref logger) = state.audit_logger {
+        let entry = AuditEntry::new(AuditEventType::AcpTaskQueued).with_result(item.id.clone());
+        if let Err(err) = logger.log_entry(entry) {
+            warn!(%err, "audit log write failed (task queued)");
+        }
+    }
 
     info!(
         task_id = %item.id,
