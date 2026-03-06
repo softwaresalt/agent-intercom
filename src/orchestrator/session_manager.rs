@@ -94,13 +94,28 @@ pub async fn terminate_session(
                 warn!(session_id, %err, "error waiting for child process");
             }
             Err(_) => {
-                // Timeout — force kill.
+                // Timeout — force kill then wait for the process to fully
+                // exit so the OS releases resources (ports, file handles)
+                // before any replacement is spawned.
                 warn!(
                     session_id,
                     "child process did not exit within grace period, forcing kill"
                 );
                 if let Err(err) = process.kill().await {
                     warn!(session_id, %err, "failed to force-kill child process");
+                }
+                // Reap the zombie / confirm death (bounded to avoid hangs).
+                let reap = Duration::from_secs(3);
+                match tokio::time::timeout(reap, process.wait()).await {
+                    Ok(Ok(exit)) => {
+                        info!(session_id, ?exit, "child process confirmed dead after kill");
+                    }
+                    Ok(Err(err)) => {
+                        warn!(session_id, %err, "error reaping child after kill");
+                    }
+                    Err(_) => {
+                        warn!(session_id, "child process still alive 3s after kill");
+                    }
                 }
             }
         }

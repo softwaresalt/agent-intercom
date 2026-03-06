@@ -16,6 +16,12 @@ slash prefix `/arc`). The operator's expected action is stated in **bold**.
 > `host_cli` and `host_cli_args` config fields must point to a valid ACP
 > agent binary (e.g., GitHub Copilot CLI with `--acp` flag).
 
+> **Session IDs:** Most session commands accept an optional `<short-id>` —
+> the first 8 characters of the session UUID (e.g., `49621dd2`). Use
+> `/arc sessions` to list active sessions and their short IDs. When only
+> one session is active in the channel the ID may be omitted, but these
+> test scenarios always specify it explicitly for reliability.
+
 ---
 
 ## Scenario 1: Ping Baseline (ACP)
@@ -137,13 +143,13 @@ slash prefix `/arc`). The operator's expected action is stated in **bold**.
 **Prerequisites:** Scenario 3 must have passed (an active ACP session exists).
 
 **Steps:**
-1. Call `broadcast` with `message: "[TEST] Operator: please run '/arc session-pause' to pause the active session."`, `level: "info"`
-2. **Operator action: In Slack, type `/arc session-pause` and send**
+1. Call `broadcast` with `message: "[TEST] Operator: first run '/arc sessions' to note the session short ID (first 8 characters of the UUID), then run '/arc session-pause <short-id>' to pause it."`, `level: "info"`
+2. **Operator action: Run `/arc sessions`, note the 8-character short ID (e.g., `49621dd2`), then type `/arc session-pause <short-id>` and send**
 3. **Operator action: Verify the response confirms the session was paused**
 4. Call `broadcast` with `message: "[TEST] Operator: now run '/arc sessions' to confirm the session shows as paused."`, `level: "info"`
 5. **Operator action: Run `/arc sessions` and verify the session status is `paused`**
-6. Call `broadcast` with `message: "[TEST] Operator: now run '/arc session-resume' to resume the session."`, `level: "info"`
-7. **Operator action: In Slack, type `/arc session-resume` and send**
+6. Call `broadcast` with `message: "[TEST] Operator: now run '/arc session-resume <short-id>' to resume the session (use the same short ID from step 2)."`, `level: "info"`
+7. **Operator action: In Slack, type `/arc session-resume <short-id>` and send**
 8. **Operator action: Verify the response confirms the session was resumed**
 
 **Expected:** Session transitions: active → paused → active. State changes are reflected in `/arc sessions`.
@@ -294,11 +300,11 @@ slash prefix `/arc`). The operator's expected action is stated in **bold**.
 **Prerequisites:** An active ACP session from Scenario 3 must exist.
 
 **Steps:**
-1. Call `broadcast` with `message: "[TEST] Operator: please run '/arc session-checkpoint hitl-test-checkpoint' to create a checkpoint."`, `level: "info"`
-2. **Operator action: In Slack, type `/arc session-checkpoint hitl-test-checkpoint` and send**
+1. Call `broadcast` with `message: "[TEST] Operator: run '/arc sessions' to get the session short ID (first 8 chars of UUID), then run '/arc session-checkpoint <short-id> hitl-test-checkpoint' to create a checkpoint. The first argument is the session short ID, the second is the label."`, `level: "info"`
+2. **Operator action: Run `/arc sessions` to get the session short ID (e.g., `49621dd2`), then type `/arc session-checkpoint <short-id> hitl-test-checkpoint` and send**
 3. **Operator action: Verify the response includes a checkpoint ID**
-4. Call `broadcast` with `message: "[TEST] Operator: now run '/arc session-checkpoints' to list checkpoints."`, `level: "info"`
-5. **Operator action: Run `/arc session-checkpoints` and verify the list includes the checkpoint labeled `hitl-test-checkpoint`**
+4. Call `broadcast` with `message: "[TEST] Operator: now run '/arc session-checkpoints <short-id>' to list checkpoints (use the same session short ID)."`, `level: "info"`
+5. **Operator action: Run `/arc session-checkpoints <short-id>` and verify the list includes the checkpoint labeled `hitl-test-checkpoint`**
 
 **Expected:** Checkpoint created and listed. The checkpoint label matches what was provided.
 
@@ -316,8 +322,8 @@ slash prefix `/arc`). The operator's expected action is stated in **bold**.
 **Prerequisites:** An active ACP session from Scenario 3 must exist.
 
 **Steps:**
-1. Call `broadcast` with `message: "[TEST] Operator: please run '/arc session-stop' to gracefully stop the active ACP session."`, `level: "info"`
-2. **Operator action: In Slack, type `/arc session-stop` and send**
+1. Call `broadcast` with `message: "[TEST] Operator: run '/arc sessions' to get the session short ID (first 8 chars of UUID), then run '/arc session-stop <short-id>' to gracefully stop it."`, `level: "info"`
+2. **Operator action: Run `/arc sessions` to get the session short ID, then type `/arc session-stop <short-id>` and send**
 3. **Operator action: Verify the response confirms the session was stopped**
 4. **Operator action: Check the session's thread — a "session stopped" notification should appear as a threaded reply**
 5. Call `broadcast` with `message: "[TEST] Operator: run '/arc sessions' to verify the session shows as terminated."`, `level: "info"`
@@ -341,8 +347,8 @@ slash prefix `/arc`). The operator's expected action is stated in **bold**.
    Call `broadcast` with `message: "[TEST] Operator: please start a session with '/arc session-start Test restart feature for HITL'."`, `level: "info"`
 2. **Operator action: Run `/arc session-start Test restart feature for HITL`**
 3. Wait 10 seconds for the session to fully start
-4. Call `broadcast` with `message: "[TEST] Operator: now restart the session with '/arc session-restart'."`, `level: "info"`
-5. **Operator action: In Slack, type `/arc session-restart` and send**
+4. Call `broadcast` with `message: "[TEST] Operator: run '/arc sessions' to get the session short ID (first 8 chars of UUID), then restart with '/arc session-restart <short-id>'."`, `level: "info"`
+5. **Operator action: Run `/arc sessions` to get the session short ID (e.g., `49621dd2`), then type `/arc session-restart <short-id>` and send**
 6. **Operator action: Verify:**
    - The old session thread receives a "restarting" notification
    - A new "session started" message appears (possibly in a new thread)
@@ -443,8 +449,8 @@ slash prefix `/arc`). The operator's expected action is stated in **bold**.
    Call `broadcast` with `message: "[TEST] Operator: start a session with '/arc session-start Disposable session for clear test'."`, `level: "info"`
 2. **Operator action: Start a session if needed**
 3. Wait 10 seconds
-4. Call `broadcast` with `message: "[TEST] Operator: run '/arc session-clear' to force-terminate the session."`, `level: "info"`
-5. **Operator action: In Slack, type `/arc session-clear` and send**
+4. Call `broadcast` with `message: "[TEST] Operator: run '/arc sessions' to get the session short ID (first 8 chars of UUID), then run '/arc session-clear <short-id>' to force-terminate it."`, `level: "info"`
+5. **Operator action: Run `/arc sessions` to get the session short ID, then type `/arc session-clear <short-id>` and send**
 6. **Operator action: Verify the response confirms the session was terminated**
 7. **Operator action: Verify the session thread shows a "terminated by operator" notification**
 

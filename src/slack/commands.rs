@@ -1054,7 +1054,19 @@ async fn handle_session_restart(
     // Remove the child from the registry so the old process is dropped.
     let mut child = state.active_children.lock().await.remove(&old_session_id);
 
-    // Mark old session as Interrupted.
+    // Kill the entire process tree before terminate_session sends
+    // kill_on_drop to the direct child — matches the session-stop
+    // pattern to ensure grandchild processes are cleaned up (ES-004).
+    if let Some(ref c) = child {
+        if let Some(pid) = c.id() {
+            #[cfg(windows)]
+            crate::acp::spawner::kill_process_tree(pid).await;
+            #[cfg(unix)]
+            crate::acp::spawner::kill_process_group(pid).await;
+        }
+    }
+
+    // Mark old session as Terminated (waits for process exit).
     if let Err(err) =
         session_manager::terminate_session(&old_session_id, &repo, child.as_mut()).await
     {
