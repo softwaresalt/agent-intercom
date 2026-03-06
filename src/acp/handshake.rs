@@ -167,7 +167,8 @@ pub async fn send_session_new(
     workspace_path: &Path,
     timeout: Duration,
 ) -> Result<String> {
-    let cwd = workspace_path.to_string_lossy().replace('\\', "/");
+    let raw = workspace_path.to_string_lossy();
+    let cwd = strip_unc_prefix(&raw).replace('\\', "/");
 
     let msg: Value = json!({
         "jsonrpc": "2.0",
@@ -365,14 +366,27 @@ async fn write_json_line(stdin: &mut ChildStdin, value: &Value) -> std::io::Resu
     stdin.write_all(&bytes).await
 }
 
+/// Strip the Windows `\\?\` extended-length path prefix if present.
+///
+/// `Path::canonicalize()` on Windows often adds this prefix.  It must be
+/// removed before the path is sent to external processes (e.g. as a file URI
+/// or `cwd` parameter) because they typically cannot parse it.
+fn strip_unc_prefix(s: &str) -> &str {
+    s.strip_prefix(r"\\?\")
+        .or_else(|| s.strip_prefix("//?/"))
+        .unwrap_or(s)
+}
+
 /// Convert a filesystem path to a `file://` URI string.
 ///
 /// On Windows, backslash separators are converted to forward slashes and the
 /// drive letter is preserved: `C:\foo\bar` → `file:///C:/foo/bar`.
+/// The `\\?\` extended-length prefix added by `canonicalize()` is stripped.
 fn path_to_file_uri(path: &Path) -> String {
-    let s = path.to_string_lossy();
+    let raw = path.to_string_lossy();
+    let stripped = strip_unc_prefix(&raw);
     // Normalise Windows backslashes to forward slashes.
-    let forward = s.replace('\\', "/");
+    let forward = stripped.replace('\\', "/");
     if forward.starts_with('/') {
         format!("file://{forward}")
     } else {
@@ -385,7 +399,7 @@ fn path_to_file_uri(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::path_to_file_uri;
+    use super::{path_to_file_uri, strip_unc_prefix};
     use std::path::Path;
 
     #[test]
@@ -398,5 +412,27 @@ mod tests {
     fn windows_path_to_file_uri() {
         let uri = path_to_file_uri(Path::new(r"D:\Source\GitHub\agent-intercom"));
         assert_eq!(uri, "file:///D:/Source/GitHub/agent-intercom");
+    }
+
+    #[test]
+    fn windows_unc_prefix_stripped_from_uri() {
+        let uri = path_to_file_uri(Path::new(r"\\?\D:\Source\GitHub\agent-intercom"));
+        assert_eq!(uri, "file:///D:/Source/GitHub/agent-intercom");
+    }
+
+    #[test]
+    fn strip_unc_prefix_backslash() {
+        assert_eq!(strip_unc_prefix(r"\\?\D:\foo"), r"D:\foo");
+    }
+
+    #[test]
+    fn strip_unc_prefix_forward_slash() {
+        assert_eq!(strip_unc_prefix("//?/D:/foo"), "D:/foo");
+    }
+
+    #[test]
+    fn strip_unc_prefix_no_prefix() {
+        assert_eq!(strip_unc_prefix(r"D:\foo"), r"D:\foo");
+        assert_eq!(strip_unc_prefix("/home/user"), "/home/user");
     }
 }

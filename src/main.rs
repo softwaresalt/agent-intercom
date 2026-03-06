@@ -148,7 +148,10 @@ async fn run(args: Cli) -> Result<()> {
         // precedence over the [acp] config value.
         if !cli_port_override {
             config.http_port = config.acp.http_port;
-            info!(http_port = config.http_port, "ACP mode: HTTP port set from [acp] config");
+            info!(
+                http_port = config.http_port,
+                "ACP mode: HTTP port set from [acp] config"
+            );
         }
         info!("ACP mode: host_cli validated");
         // Check for orphan processes from prior runs (ES-004, FR-037).
