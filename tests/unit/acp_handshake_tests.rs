@@ -8,12 +8,8 @@
 //! - `send_prompt` request construction and empty-prompt validation
 
 use std::path::Path;
-use std::time::Duration;
 
-use tokio::io::BufReader;
-use tokio::process::{ChildStdin, ChildStdout};
-
-use agent_intercom::AppError;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,14 +32,14 @@ async fn write_line(w: &mut tokio::io::DuplexStream, line: &str) {
 
 // ── send_initialize ─────────────────────────────────────────────────────────
 
-/// The `send_initialize` function cannot be called directly with a
-/// `DuplexStream` because it expects `ChildStdin`. Instead, we verify the
-/// JSON-RPC message construction by testing the helper functions it depends on
-/// and the `path_to_file_uri` / `strip_unc_prefix` functions (already covered
-/// in `src/acp/handshake.rs` inline tests).
-///
-/// This test validates `send_prompt` as a representative for the write path,
-/// since all handshake functions use the same `write_json_line` helper.
+// The `send_initialize` function cannot be called directly with a
+// `DuplexStream` because it expects `ChildStdin`. Instead, we verify the
+// JSON-RPC message construction by testing the helper functions it depends on
+// and the `path_to_file_uri` / `strip_unc_prefix` functions (already covered
+// in `src/acp/handshake.rs` inline tests).
+//
+// This test validates `send_prompt` as a representative for the write path,
+// since all handshake functions use the same `write_json_line` helper.
 
 // ── wait_for_initialize_result — success path ───────────────────────────────
 
@@ -69,7 +65,6 @@ async fn wait_for_init_result_returns_result_on_success() {
     // can't construct ChildStdout directly, we test via the parse-level logic.
     //
     // Read the line manually and verify parse behaviour matches expectations.
-    use tokio::io::AsyncBufReadExt;
     let mut line = String::new();
     reader.read_line(&mut line).await.unwrap();
     let parsed: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
@@ -94,7 +89,6 @@ async fn wait_for_init_result_detects_error_response() {
     });
     write_line(&mut agent_out, &serde_json::to_string(&response).unwrap()).await;
 
-    use tokio::io::AsyncBufReadExt;
     let mut line = String::new();
     reader.read_line(&mut line).await.unwrap();
     let parsed: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
@@ -138,7 +132,6 @@ async fn wait_skips_unrelated_messages_before_matching_response() {
     write_line(&mut agent_out, &serde_json::to_string(&correct).unwrap()).await;
 
     // Read all three and verify only the third matches
-    use tokio::io::AsyncBufReadExt;
     let mut lines = Vec::new();
     for _ in 0..3 {
         let mut line = String::new();
@@ -171,7 +164,6 @@ async fn wait_detects_eof_when_agent_exits() {
     // Drop the writer to simulate agent process exit (EOF)
     drop(agent_out);
 
-    use tokio::io::AsyncBufReadExt;
     let mut line = String::new();
     let n = reader.read_line(&mut line).await.unwrap();
     assert_eq!(n, 0, "EOF must return 0 bytes read");
@@ -193,8 +185,6 @@ async fn wait_skips_empty_lines() {
     });
     write_line(&mut agent_out, &serde_json::to_string(&response).unwrap()).await;
 
-    use tokio::io::AsyncBufReadExt;
-    let mut lines_read = 0;
     let mut last_value = None;
     loop {
         let mut line = String::new();
@@ -202,7 +192,6 @@ async fn wait_skips_empty_lines() {
         if n == 0 {
             break;
         }
-        lines_read += 1;
         let trimmed = line.trim();
         if !trimmed.is_empty() {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
@@ -232,7 +221,6 @@ async fn wait_skips_malformed_json() {
     });
     write_line(&mut agent_out, &serde_json::to_string(&response).unwrap()).await;
 
-    use tokio::io::AsyncBufReadExt;
     let mut found = false;
     for _ in 0..2 {
         let mut line = String::new();
@@ -261,7 +249,7 @@ fn session_new_result_extracts_session_id() {
     let agent_session_id = result
         .get("sessionId")
         .and_then(serde_json::Value::as_str)
-        .map(|s| s.to_owned());
+        .map(str::to_owned);
 
     assert_eq!(agent_session_id, Some("agent-sess-abc123".to_owned()));
 }
