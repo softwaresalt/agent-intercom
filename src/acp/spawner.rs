@@ -266,40 +266,45 @@ pub async fn kill_process_tree(pid: u32) {
 /// `process_group(0)`, the child's PGID equals its own PID, so this kills
 /// the child and all its descendants.
 ///
-/// If the group-level `SIGTERM` fails (e.g. the process group was not yet
-/// established), falls back to `SIGKILL` on the direct PID to ensure the
-/// child does not outlive the server.
+/// Always follows up with a direct `SIGKILL` on the lead PID to guard
+/// against environments where group-level signals are silently dropped
+/// (e.g. certain CI runners with process isolation).
 ///
 /// The function is best-effort: if the `kill` binary is unavailable or
 /// fails, a warning is logged but no error is returned.
 #[cfg(unix)]
 pub async fn kill_process_group(pid: u32) {
     use tokio::process::Command;
+
+    // Step 1: SIGTERM the entire process group for graceful shutdown.
     let result = Command::new("kill")
         .args(["-TERM", &format!("-{pid}")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .await;
-    match result {
+    match &result {
         Ok(status) if status.success() => {
-            info!(pid, "process group terminated via kill -TERM");
-            return;
+            info!(pid, "sent SIGTERM to process group");
         }
         Ok(status) => {
             warn!(
                 pid,
                 exit_code = ?status.code(),
-                "kill -TERM on group failed — falling back to direct SIGKILL"
+                "kill -TERM on group exited with non-zero status"
             );
         }
         Err(err) => {
-            warn!(pid, %err, "failed to invoke kill for process group — falling back to direct SIGKILL");
+            warn!(pid, %err, "failed to invoke kill for process group SIGTERM");
         }
     }
 
-    // Fallback: SIGKILL the PID directly (does not propagate to descendants,
-    // but at least prevents the lead process from becoming an orphan).
+    // Step 2: Brief grace period for graceful shutdown handlers.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Step 3: SIGKILL the lead PID directly as a safety net.
+    // In environments with process group isolation (some CI runners),
+    // the group SIGTERM may report success without delivering the signal.
     let fallback = Command::new("kill")
         .args(["-KILL", &format!("{pid}")])
         .stdout(std::process::Stdio::null())
@@ -308,13 +313,10 @@ pub async fn kill_process_group(pid: u32) {
         .await;
     match fallback {
         Ok(s) if s.success() => {
-            info!(pid, "process killed directly via SIGKILL fallback");
+            info!(pid, "sent SIGKILL to lead process");
         }
-        Ok(s) => {
-            warn!(pid, exit_code = ?s.code(), "SIGKILL fallback also failed");
-        }
-        Err(err) => {
-            warn!(pid, %err, "failed to invoke kill for SIGKILL fallback");
+        Ok(_) | Err(_) => {
+            // Process may have already exited from SIGTERM — this is expected.
         }
     }
 }
