@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -33,6 +37,8 @@ jobs:
 
       - name: test
         run: cargo test --all-targets
+        env:
+          RUST_TEST_THREADS: 4
 
       - name: audit
         run: |
