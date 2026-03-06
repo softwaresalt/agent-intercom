@@ -277,10 +277,10 @@ pub async fn kill_process_group(pid: u32) {
     use nix::sys::signal::{killpg, Signal};
     use nix::unistd::Pid;
 
-    let pgid = Pid::from_raw(pid as i32);
+    let process_group_id = Pid::from_raw(pid.cast_signed());
 
     // Step 1: SIGTERM the entire process group for graceful shutdown.
-    match killpg(pgid, Signal::SIGTERM) {
+    match killpg(process_group_id, Signal::SIGTERM) {
         Ok(()) => info!(pid, "sent SIGTERM to process group"),
         Err(err) => warn!(pid, %err, "SIGTERM to process group failed"),
     }
@@ -291,7 +291,7 @@ pub async fn kill_process_group(pid: u32) {
     // Step 3: SIGKILL the entire process group as a safety net.
     // Handles processes that ignore SIGTERM; also covers the case where
     // the group SIGTERM was silently dropped.
-    match killpg(pgid, Signal::SIGKILL) {
+    match killpg(process_group_id, Signal::SIGKILL) {
         Ok(()) => info!(pid, "sent SIGKILL to process group"),
         Err(nix::errno::Errno::ESRCH) => { /* process already exited — expected */ }
         Err(err) => warn!(pid, %err, "SIGKILL to process group failed"),
