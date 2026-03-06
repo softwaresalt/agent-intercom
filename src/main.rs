@@ -121,6 +121,7 @@ async fn run(args: Cli) -> Result<()> {
     }
 
     // Override HTTP port from CLI if provided.
+    let cli_port_override = args.port.is_some();
     if let Some(port) = args.port {
         config.http_port = port;
     }
@@ -141,6 +142,13 @@ async fn run(args: Cli) -> Result<()> {
         if config.ipc_name == "agent-intercom" {
             config.ipc_name = "agent-intercom-acp".into();
             info!(ipc_name = %config.ipc_name, "ACP mode: IPC name auto-suffixed");
+        }
+        // Use the ACP-specific HTTP port so MCP and ACP instances can run
+        // concurrently without a port conflict.  The CLI --port flag takes
+        // precedence over the [acp] config value.
+        if !cli_port_override {
+            config.http_port = config.acp.http_port;
+            info!(http_port = config.http_port, "ACP mode: HTTP port set from [acp] config");
         }
         info!("ACP mode: host_cli validated");
         // Check for orphan processes from prior runs (ES-004, FR-037).

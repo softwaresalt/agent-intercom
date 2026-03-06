@@ -113,3 +113,4 @@ path         = "D:/Source/GitHub/agent-intercom"
 [acp]
 max_sessions = 5
 startup_timeout_seconds = 30
+http_port = 3001

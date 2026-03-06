@@ -185,3 +185,9 @@ status = "git status"
 # # If no ready line arrives within this window the spawner kills the process.
 # # Default: 30
 # startup_timeout_seconds = 30
+#
+# # HTTP port for the MCP tool endpoint when running in ACP mode.
+# # Defaults to 3001 so MCP (port 3000) and ACP servers can run concurrently.
+# # The --port CLI flag takes precedence over this value.
+# # Default: 3001
+# http_port = 3001

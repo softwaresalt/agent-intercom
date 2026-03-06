@@ -196,6 +196,10 @@ fn default_acp_max_msg_rate() -> u32 {
     10
 }
 
+fn default_acp_http_port() -> u16 {
+    3001
+}
+
 /// ACP-mode specific configuration.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -220,6 +224,13 @@ pub struct AcpConfig {
     /// Set to `0` to disable rate limiting. Defaults to `10`.
     #[serde(default = "default_acp_max_msg_rate")]
     pub max_msg_rate: u32,
+    /// HTTP port for the MCP tool endpoint when running in ACP mode.
+    ///
+    /// Defaults to `3001` so that an ACP server instance can run concurrently
+    /// with an MCP server instance (which defaults to port `3000`).  The CLI
+    /// `--port` flag takes precedence over this value.
+    #[serde(default = "default_acp_http_port")]
+    pub http_port: u16,
 }
 
 impl Default for AcpConfig {
@@ -228,6 +239,7 @@ impl Default for AcpConfig {
             max_sessions: default_acp_max_sessions(),
             startup_timeout_seconds: default_acp_startup_timeout_seconds(),
             max_msg_rate: default_acp_max_msg_rate(),
+            http_port: default_acp_http_port(),
         }
     }
 }
