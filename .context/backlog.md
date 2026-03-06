@@ -1,49 +1,197 @@
 # Backlog
 
-## Feature Groups
+Features are sized for 1–3 day build cycles. Each feature should be independently spec-able, buildable, testable, and releasable. Ordered by priority (highest first).
 
-### Feature 006-intercom-channel-improvements
+---
 
-- Add Playwright or some other user interface testing framework to automate testing of the Slack channel interactions, including session management commands, approval workflows, and message formatting. This will help ensure that the user experience in Slack is consistent and functional as new features are added or changes are made to the intercom system. Automated tests can simulate user interactions with the Slack channel, verify that the correct messages are posted, and check that session management commands work as expected in various scenarios (e.g., multiple sessions, different agent states). This will improve the reliability of the intercom system and reduce the likelihood of regressions in the user interface.
-- A better experience for the user when using commands like session-restart, session-pause, session-resume, session-stop, session-checkpoint, would be to both accept a short session ID or default to providing the user with a list of available sessions in the current channel if no session ID is provided, and then allow the user to select which session they want to perform the action on. This would be especially useful in channels where there may be multiple active sessions, as it would provide a clear and efficient way for users to manage their sessions without having to remember or look up specific session IDs. The command could be structured to first check if a session ID is provided, and if not, it could query the database for all active sessions in the current channel and present them in a dropdown menu or list format for the user to choose from. This would enhance the usability of the intercom system and make it more intuitive for operators to manage their sessions effectively.  The list should contain a short ID for the session combined with a label or name associated with the session in the database.  What is returned in the query will depend on the nature of the session's state and the command being executed.  For example, if session-pause, then list currently active sessions available to pause.  If session-resume, then list currently paused sessions available to resume.  If session-restart, then list all sessions that can be restarted regardless of current state.  This will provide a more user-friendly interface for managing sessions and reduce the likelihood of errors or confusion when dealing with multiple sessions in the same channel.
-- Need ability to install agent-intercom as a service on the local machine similar to how VS Code CLI has the code tunnel service install/uninstall commands. This will allow operators to easily set up and manage the intercom server without having to manually run it in a terminal, and can also enable features like automatic startup on boot, easier configuration management, and better integration with the operating system's service management tools. The installation process should be straightforward, with clear instructions and error handling to guide the operator through any issues that may arise during setup. Additionally, the service should be designed to run reliably in the background, with proper logging and monitoring capabilities to ensure that it is functioning correctly and to facilitate troubleshooting if any problems occur.  This should be enabled such that the operator can install agent-intercom to run as separate services for both ACP and MCP modes, allowing for more flexible deployment options depending on the operator's needs and preferences. The installation process should also include options for configuring the service, such as setting environment variables, specifying configuration file paths, and defining startup parameters to ensure that the intercom server is tailored to the operator's specific use case and environment.  It must not be a requirement for the user to run the server as a server, just the ability to do so if they want to.  Some users may not have admin privileges on their machine, so should be able to simply run from terminal window as well.  This will give operators more options.
-- Need a /intercom get-workspace command that names the workspace associated with the active channel. This will be useful for debugging and for operators to confirm which workspace they are currently interacting with, especially if they are managing multiple workspaces or sessions at the same time.  The command should query the SQLite database for the mapping of channel_id to workspace_id and return the workspace name or ID associated with the current channel.  This can help operators ensure that they are sending messages and approvals to the correct workspace context, and can also be useful for troubleshooting if messages are not appearing as expected in Slack.  The response from this command should be clear and informative, providing the operator with the necessary information about the current workspace context they are operating in.  It will also be useful for command features that need to associate new session ids with the current workspace and channel, ensuring that all interactions are properly linked to the correct workspace context from the start of a session.  This command can also be extended in the future to provide additional information about the workspace, such as active sessions, recent activity, or other relevant metadata that can assist the operator in managing their interactions effectively.
-- Also need the ability for the operator to attach files or screenshots/images to the Slack communication channel to the agent in ACP mode, and for those attachments to be properly linked to the agent session and visible in the Slack channel. This will involve implementing a new tool call (e.g., `attach_file`) that the agent can invoke with a file path or image data, which your server will then upload to Slack using the Web API and post in the appropriate channel with a reference to the session. The operator should also be able to manually upload files to the channel, and those files should be tagged with the session ID so that they are associated with the correct agent session. This will enhance the communication capabilities of your intercom system, allowing for richer interactions between the agent and the operator, especially when dealing with complex tasks that may require visual aids or file references.  Basically, I may want to start a session by first writing a rather longer set of requirements that I need to upload to the agent for it to use, for example, as part of a spec-kit planning session prior to build.  This would be a fundamental requirement to enable a true "human-in-the-loop" workflow where the operator can provide detailed instructions, reference materials, or feedback in a more flexible way than just text messages, and the agent can also share its own files or screenshots as part of its reasoning or output.  This will require careful handling of file uploads and metadata to ensure that everything is properly linked to the correct session and workspace context.
-- Ability to #path/filename references to files in the workspace in Slack messages, which the agent can then resolve to actual file paths on the local machine so that the operator can direct the agent to add the file's contents to the current context for what the operator wants the agent to do similar to the behavior of #path/filename references in GitHub Copilot Chat. This will involve implementing a parsing mechanism in the Slack message handling logic to detect these references, and then resolving them to actual file paths on the local machine where the agent is running. The agent can then read the contents of the file and add it to the current context for processing, allowing for more dynamic interactions where the operator can easily reference files without having to manually copy and paste their contents into the chat. This will enhance the usability of the intercom system, making it easier for operators to provide relevant information from files in the workspace and for agents to access that information as needed during their reasoning and task execution processes.
-- Also need the ability configure dynamically the level of detail being returned in Slack messages (T011) so that we can avoid hitting Slack's message size limits with large diffs or verbose agent reasoning. This will be a simple enum (e.g., `DetailLevel::None`, `DetailLevel::Low`, `Medium`, `High`) that the user can set in the config file or via a slash command. The `AgentDriver` implementations will check this setting before sending events to Slack and truncate or summarize the content accordingly.
-- Need /arc subcommands to fetch a list of all agents, skills, and instructions available in the project workspace.
-- Need /arc subcommands for /research, /review, /tasks. /plan.
-- Identify a subset of the GHCP CLI slash commands that need to be exposed through the ACP bridge server, such as:
-  - /clear
-  - /compact
-  - /context
-  - /quit
-  - /init
-  - /list-dirs
+## 006 — ACP Event Handler Wiring
 
-- If an auto-approve action is granted by an operator in Slack for a given command, such as cargo test, and cargo is already in the auto-approve list with a set of RegEx separated subcommands, then "test" should be added to the list of auto-approve subcommands rather than adding a new node to the auto-approve tree.
-- Consider whether adding a hook, such as .github/hooks/pre-tool-terminal-filter.ps1, would be a better fit for enforcing terminal command auto-approval rules based on the configured RegEx patterns, rather than implementing this logic directly in the `resolve_clearance` method of the `AgentDriver`. This hook could intercept terminal command executions and check them against the auto-approve list before they are sent to the agent, providing a more centralized and potentially more efficient way to manage auto-approvals without having to route every command through Slack for approval. This would also allow for more complex logic to be implemented in the hook, such as logging, notifications, or even dynamic adjustments to the auto-approve list based on certain conditions, without adding overhead to the main agent communication flow.  It would also be more deterministic as an enforcement mechanism because the agent would be required to observe the hook, whereas the agent may simply forget to check with agent-intercom's auto-approval process.
+**Priority:** Critical — ACP clearance and prompt forwarding are non-functional
+**Size:** Small (1 day)
 
-## Adversarial Review Findings (2026-03-03)
+Wire the ACP event consumer's `ClearanceRequested` and `PromptForwarded` handlers to actually register with `AcpDriver`, persist to the DB, and post Slack interactive messages. Without this, ACP agents requesting approval or forwarding prompts hang indefinitely.
 
-Source: adversarial code review of feature 005-intercom-acp-server (GPT-5.2 Codex + Claude Opus 4.6). Findings F-03, F-04, F-05 were fixed in commit `1ed6a4d`. Remaining findings are deferred.
+- **F-01**: `src/main.rs:756–763` — `ClearanceRequested` handler is a no-op. Must register clearance with `AcpDriver`, persist `approval_request` via `ApprovalRepo`, post Slack interactive approval message to session thread.
+- **F-02**: `src/main.rs:775–782` — `PromptForwarded` handler is a no-op. Must register with `acp_driver.register_prompt_request()` and surface to Slack. Mirror MCP `forward_prompt` tool behavior.
 
-### CRITICAL — Feature Gaps
+---
 
-- **F-01** `src/main.rs:756–763` — ClearanceRequested event handler is a no-op. The ACP event consumer logs `AgentEvent::ClearanceRequested` but never calls `acp_driver.register_clearance()`, never persists an `approval_request` DB record, and never posts a Slack interactive approval message. ACP agents requesting clearance will hang indefinitely. Must: (1) register clearance with AcpDriver, (2) persist approval_request via ApprovalRepo, (3) post Slack interactive approval message to session thread. (FR-005 non-functional for ACP)
-- **F-02** `src/main.rs:775–782` — PromptForwarded event handler is a no-op. Same pattern as F-01: logged but never registered with `acp_driver.register_prompt_request()` or surfaced to Slack. ACP agents forwarding prompts will hang. Must mirror MCP `forward_prompt` tool behavior. (FR-005 non-functional for ACP)
+## 007 — ACP Correctness Fixes
 
-### MEDIUM — Correctness and Compliance
+**Priority:** High — data integrity and protocol compliance
+**Size:** Small (1–2 days)
 
-- **F-06** `src/acp/reader.rs:346–355` — Queued steering messages are marked consumed even when `send_prompt` delivery fails. Messages lost on retry. Fix: only mark consumed after successful send; keep failed deliveries unconsumed for retry on next reconnect.
-- **F-07** `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes sessions in `created` state, so concurrent `session-start` calls can all pass the limit check. Also `count_active` counts ALL protocols against `acp.max_sessions`. Fix: count `created` sessions too, or add `count_active_by_protocol` filtered to ACP only.
-- **F-08** `src/slack/commands.rs:415–425` — ACP session start resolves workspace from `state.config` (static) instead of `state.workspace_mappings` (hot-reloaded). New workspace mappings added while server is running are not picked up for ACP sessions. Violates FR-014.
-- **F-09** `src/driver/acp_driver.rs:130–134` — `deregister_session` removes `stream_writers` and `agent_session_ids` but does NOT clean up `pending_clearances` or `pending_prompts_acp` for the session. These are keyed by `request_id`/`prompt_id`, not `session_id`. Once F-01/F-02 are fixed, orphaned entries will accumulate as memory leaks. Fix: scan and remove matching entries or add a reverse index.
-- **F-10** `src/mcp/sse.rs:421–446` — No deprecation warning logged when both `workspace_id` and `channel_id` query params are provided. FR-013 requires: "when both are provided, workspace_id takes precedence and a deprecation warning MUST be logged." The warning only fires when `workspace_id` is absent.
-- **F-11** `src/slack/commands.rs:810–868` — `session-restart` does not set `restart_of` field on new session. The `Session` model supports `restart_of: Option<String>` and the DB schema has the column, but the restart handler never links the new session to the old one. The new session starts a fresh Slack thread instead of continuing in the old one.
-- **F-12** `src/slack/commands.rs:655–689` — `handle_mcp_session_start` does not accept or set `channel_id` on the session. MCP sessions started via `/acom session-start` are invisible to `find_active_by_channel`, so operators in the channel see "no active session" errors.
-- **F-13** `src/acp/handshake.rs:40–47` — Static handshake correlation IDs (`PROMPT_ID = "intercom-prompt-1"`) overlap with `AcpDriver::PROMPT_COUNTER` which starts at 1, also producing `"intercom-prompt-1"`. Fix: start counter at 1000 or use UUIDs for handshake IDs.
+Batch of targeted correctness fixes found during adversarial review.
 
-### LOW — Observability
+- **F-06**: `src/acp/reader.rs:346–355` — Queued steering messages marked consumed even when `send_prompt` fails. Only mark consumed after successful send; keep failed deliveries for retry.
+- **F-07**: `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes `created`-state sessions and counts all protocols against `acp.max_sessions`. Fix: count `created` sessions, add `count_active_by_protocol`.
+- **F-08**: `src/slack/commands.rs:415–425` — ACP session start resolves workspace from static `state.config` instead of hot-reloaded `state.workspace_mappings`. Violates FR-014.
+- **F-09**: `src/driver/acp_driver.rs:130–134` — `deregister_session` doesn't clean up `pending_clearances` or `pending_prompts_acp`. Orphaned entries accumulate as memory leaks once F-01/F-02 are fixed.
+- **F-13**: `src/acp/handshake.rs:40–47` — Static handshake correlation ID `"intercom-prompt-1"` collides with `AcpDriver::PROMPT_COUNTER` starting at 1. Start counter at 1000 or use UUIDs.
 
-- **F-14** `src/acp/writer.rs:67–70` — Writer task exits silently on write error without emitting a `SessionTerminated` event. The reader will eventually detect EOF, but there is a window where queued messages are silently dropped.
+---
+
+## 008 — Session Command UX (Fuzzy ID + Picker)
+
+**Priority:** High — operator usability
+**Size:** Small (1–2 days)
+
+Improve session management commands (`session-stop`, `session-restart`, `session-pause`, `session-resume`, `session-checkpoint`) to accept short/partial session IDs and present an interactive picker when no ID is provided.
+
+- Accept a short session ID prefix (e.g., first 8 chars) and fuzzy-match against active sessions in the current channel.
+- When no ID is provided, query the DB for eligible sessions (filtered by command context — e.g., `session-pause` shows only active sessions, `session-resume` shows only paused sessions).
+- Present a numbered list or Slack dropdown for selection.
+- Display each option as `short_id — label/title`.
+
+---
+
+## 009 — MCP/ACP Session Linking Fixes
+
+**Priority:** Medium — correctness for restart and MCP session visibility
+**Size:** Small (1 day)
+
+Fix two session linking issues that break operator expectations.
+
+- **F-11**: `src/slack/commands.rs:810–868` — `session-restart` doesn't set `restart_of` field. New session starts a fresh Slack thread instead of continuing in the old one.
+- **F-12**: `src/slack/commands.rs:655–689` — `handle_mcp_session_start` doesn't set `channel_id`. MCP sessions started via `/acom session-start` are invisible to `find_active_by_channel`.
+
+---
+
+## 010 — Workspace Query Command
+
+**Priority:** Medium — debugging and operator awareness
+**Size:** Tiny (< 1 day)
+
+Add `/intercom get-workspace` command that returns the workspace associated with the active channel. Queries `channel_id → workspace_id` mapping from the DB/config. Useful for debugging, confirming context before session-start, and future commands that need workspace association.
+
+Also fix **F-10**: `src/mcp/sse.rs:421–446` — No deprecation warning when both `workspace_id` and `channel_id` query params are provided (FR-013 violation).
+
+---
+
+## 011 — Slack Message Detail Level
+
+**Priority:** Medium — avoids Slack API errors on large messages
+**Size:** Small (1 day)
+
+Add configurable detail level for Slack messages (T011). Simple enum (`None`, `Low`, `Medium`, `High`) settable via config or slash command. `AgentDriver` implementations check this before sending events and truncate/summarize accordingly. Prevents hitting Slack's message size limits with large diffs or verbose agent reasoning.
+
+---
+
+## 012 — File and Image Attachments (ACP)
+
+**Priority:** Medium — enables rich HITL workflows
+**Size:** Medium (2–3 days)
+
+Enable operators to attach files, screenshots, or long-form requirements to ACP sessions via Slack. Enables the "upload a spec then start a session" workflow.
+
+- Implement file upload detection in Slack event handlers — tag uploads with session ID.
+- Add `attach_file` tool call for agents to upload files to Slack.
+- Route operator file uploads to the correct ACP session as context.
+- Handle file metadata linking to session and workspace.
+
+---
+
+## 013 — Workspace File References (#path)
+
+**Priority:** Medium — operator convenience
+**Size:** Small (1–2 days)
+
+Parse `#path/filename` references in Slack messages (similar to GitHub Copilot Chat). Resolve to actual file paths in the workspace, read contents, and inject into agent context. Requires:
+
+- Slack message parsing for `#path` patterns.
+- Path resolution against workspace root (with security validation via `path_safety.rs`).
+- Content injection into ACP session prompt or MCP tool context.
+
+---
+
+## 014 — Auto-Approve Subcommand Merging
+
+**Priority:** Low — quality of life
+**Size:** Tiny (< 1 day)
+
+When an operator approves a terminal command in Slack (e.g., `cargo test`), and `cargo` already exists in the auto-approve list with a regex pattern, append `test` to the existing regex subcommand list instead of creating a new node. Reduces auto-approve config bloat.
+
+---
+
+## 015 — ARC Discovery Commands
+
+**Priority:** Low — operator awareness
+**Size:** Small (1 day)
+
+Add `/arc` subcommands to query project workspace capabilities:
+
+- `/arc agents` — List available `.github/agents/*.agent.md` files.
+- `/arc skills` — List available `.github/skills/*/SKILL.md` files.
+- `/arc instructions` — List available `.github/instructions/*.instructions.md` files.
+
+---
+
+## 016 — ARC Workflow Commands
+
+**Priority:** Low — operator convenience
+**Size:** Small (1–2 days)
+
+Add `/arc` subcommands that trigger common agent workflows:
+
+- `/arc research <topic>` — Start a research session.
+- `/arc review [session_id]` — Trigger a code review.
+- `/arc tasks` — List tasks from the current spec.
+- `/arc plan` — Generate an implementation plan.
+
+---
+
+## 017 — GHCP CLI Command Bridge
+
+**Priority:** Low — ACP completeness
+**Size:** Small (1–2 days)
+
+Expose a subset of GitHub Copilot CLI slash commands through the ACP bridge server:
+
+- `/clear` — Clear agent context.
+- `/compact` — Compact conversation history.
+- `/context` — Show current context.
+- `/quit` — Terminate the agent session.
+- `/init` — Initialize a new workspace.
+- `/list-dirs` — List workspace directories.
+
+---
+
+## 018 — Service Installation
+
+**Priority:** Low — deployment convenience
+**Size:** Medium (2–3 days)
+
+Add `agent-intercom service install/uninstall` commands (similar to VS Code's `code tunnel service install`). Enables running as a background service with auto-start on boot.
+
+- Support separate service instances for ACP and MCP modes.
+- Handle config file paths, environment variables, and startup parameters.
+- Work on Windows (Windows Service) and macOS/Linux (launchd/systemd).
+- Must remain optional — running from a terminal window stays fully supported.
+- Graceful handling for users without admin privileges (user-level service where possible).
+
+---
+
+## 019 — Pre-Tool Terminal Filter Hook
+
+**Priority:** Low — architectural exploration
+**Size:** Small (1 day)
+
+Evaluate whether a hook mechanism (e.g., `.github/hooks/pre-tool-terminal-filter.ps1`) would be more deterministic for enforcing terminal command auto-approval rules than the current `resolve_clearance` approach. The hook would intercept commands before execution, check against auto-approve patterns, and enforce policy without relying on the agent to call agent-intercom. More deterministic because the agent must observe the hook, whereas it may forget to check auto-approval.
+
+---
+
+## 020 — Slack UI Automated Testing
+
+**Priority:** Low — test infrastructure
+**Size:** Medium (2–3 days)
+
+Add Playwright or equivalent framework for automated testing of Slack channel interactions. Covers session management commands, approval workflows, and message formatting. Simulates operator interactions and verifies correct message posting and command behavior across scenarios (multiple sessions, different agent states).
+
+---
+
+## Observability Debt
+
+Non-blocking items to address opportunistically:
+
+- **F-14**: `src/acp/writer.rs:67–70` — Writer task exits silently on write error without emitting `SessionTerminated`. Reader will eventually detect EOF, but there's a window where queued messages are silently dropped.
+
