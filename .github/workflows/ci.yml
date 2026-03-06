@@ -35,10 +35,16 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings -D clippy::pedantic
 
-      - name: test
-        run: cargo test --all-targets
+      - name: test (lib + unit + contract)
+        run: cargo test --lib --test unit --test contract
         env:
           RUST_TEST_THREADS: 4
+
+      - name: test (integration)
+        run: cargo test --test integration
+        env:
+          RUST_TEST_THREADS: 2
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
       - name: audit
         run: |
