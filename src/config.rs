@@ -11,6 +11,25 @@ use serde::{Deserialize, Serialize};
 use crate::mode::ServerMode;
 use crate::{AppError, Result};
 
+/// Strip the Windows `\\?\` extended-length path prefix from a [`PathBuf`].
+///
+/// `Path::canonicalize()` on Windows often prepends this prefix, which leaks
+/// into file URIs, Slack messages, and subprocess arguments where it causes
+/// parse failures.  This helper removes the prefix while preserving the
+/// underlying absolute path.
+///
+/// On non-Windows targets (or paths without the prefix) the input is returned
+/// unchanged.
+#[must_use]
+pub fn strip_unc_prefix(path: PathBuf) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path
+    }
+}
+
 /// A single workspace-to-channel mapping entry configured via `[[workspace]]`.
 ///
 /// Each entry maps a short `workspace_id` string (e.g. `"my-repo"`) to a
@@ -497,7 +516,7 @@ impl GlobalConfig {
             .default_workspace_root
             .canonicalize()
             .map_err(|err| AppError::Config(format!("default_workspace_root invalid: {err}")))?;
-        self.default_workspace_root = canonical_root;
+        self.default_workspace_root = strip_unc_prefix(canonical_root);
 
         self.validate_workspace_mappings()?;
 

@@ -117,7 +117,7 @@ async fn run(args: Cli) -> Result<()> {
         let canonical = std::path::Path::new(&ws)
             .canonicalize()
             .map_err(|err| AppError::Config(format!("invalid workspace override: {err}")))?;
-        config.default_workspace_root = canonical;
+        config.default_workspace_root = agent_intercom::config::strip_unc_prefix(canonical);
     }
 
     // Override HTTP port from CLI if provided.
