@@ -272,17 +272,15 @@ async fn unix_kill_process_group_terminates_child() {
     let pid = child.id().expect("child must have a PID before kill");
 
     // Allow time for the child's process group to be established.
-    // On heavily-loaded CI runners the setpgid(0,0) in the child may
-    // not complete before the parent continues.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Kill the entire process group (SIGTERM + SIGKILL safety net).
+    // Kill the entire process group via direct syscall (SIGTERM + SIGKILL).
     kill_process_group(pid).await;
 
-    // Process must exit within 5 s of the combined SIGTERM + SIGKILL.
-    let result = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    // Process must exit promptly after SIGKILL — give it 2s for reaping.
+    let result = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
     assert!(
         result.is_ok(),
-        "process must exit within 5s after kill_process_group"
+        "process must exit within 2s after kill_process_group"
     );
 }

@@ -261,61 +261,41 @@ pub async fn kill_process_tree(pid: u32) {
 
 /// Kill a process group and all its members on Unix.
 ///
-/// Sends `SIGTERM` to the negative PGID (`kill -TERM -<pid>`), giving
-/// processes a brief grace period, then sends `SIGKILL` to the same
-/// process group to guarantee termination.  When the agent was spawned
-/// with `process_group(0)`, the child's PGID equals its own PID, so both
-/// signals target the child and all its descendants.
+/// Sends `SIGTERM` to the process group identified by `pid` (where the PGID
+/// equals the PID when the agent was spawned with `process_group(0)`), gives
+/// processes a 100 ms grace period, then sends `SIGKILL` to the same group.
 ///
-/// The two-signal approach handles two failure modes:
-/// - Processes that ignore `SIGTERM` are force-killed by `SIGKILL`.
-/// - Environments where group-level `SIGTERM` is silently dropped (e.g.
-///   some CI runners with process isolation) are covered because `SIGKILL`
-///   is also sent to the group.
+/// Uses `killpg(2)` via the [`nix`] crate for direct syscall delivery,
+/// bypassing the subprocess `kill` binary that may silently fail in
+/// containerized environments.
 ///
-/// The function is best-effort: errors from `kill` are logged but not
-/// returned.
+/// `ESRCH` errors (no such process group) on `SIGKILL` are silently
+/// ignored — they indicate the process already exited from `SIGTERM`.
+/// All other errors are logged as warnings but not returned.
 #[cfg(unix)]
 pub async fn kill_process_group(pid: u32) {
-    use tokio::process::Command;
+    use nix::sys::signal::{killpg, Signal};
+    use nix::unistd::Pid;
+
+    let pgid = Pid::from_raw(pid as i32);
 
     // Step 1: SIGTERM the entire process group for graceful shutdown.
-    let result = Command::new("kill")
-        .args(["-TERM", &format!("-{pid}")])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
-    match &result {
-        Ok(status) if status.success() => {
-            info!(pid, "sent SIGTERM to process group");
-        }
-        Ok(status) => {
-            warn!(
-                pid,
-                exit_code = ?status.code(),
-                "kill -TERM on group exited with non-zero status"
-            );
-        }
-        Err(err) => {
-            warn!(pid, %err, "failed to invoke kill for process group SIGTERM");
-        }
+    match killpg(pgid, Signal::SIGTERM) {
+        Ok(()) => info!(pid, "sent SIGTERM to process group"),
+        Err(err) => warn!(pid, %err, "SIGTERM to process group failed"),
     }
 
     // Step 2: Brief grace period for graceful shutdown handlers.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // Step 3: SIGKILL the entire process group as a safety net.
-    // Sending to the group (negative PGID) ensures descendants are also
-    // terminated when SIGTERM was silently dropped or ignored.
-    // Silently ignore errors here — the process may have already exited.
-    let _ = Command::new("kill")
-        .args(["-KILL", &format!("-{pid}")])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
-    info!(pid, "sent SIGKILL to process group");
+    // Handles processes that ignore SIGTERM; also covers the case where
+    // the group SIGTERM was silently dropped.
+    match killpg(pgid, Signal::SIGKILL) {
+        Ok(()) => info!(pid, "sent SIGKILL to process group"),
+        Err(nix::errno::Errno::ESRCH) => { /* process already exited — expected */ }
+        Err(err) => warn!(pid, %err, "SIGKILL to process group failed"),
+    }
 }
 
 // ── Orphan process detection (FR-037, T126) ───────────────────────────────────
