@@ -31,6 +31,9 @@ logs/
 temp/
 %SystemDrive%/*
 
+# Development debug scripts — contain env-specific config, never committed
+run-debug-*.ps1
+
 # SQLite runtime database files
 data/*.db
 data/*.db-shm

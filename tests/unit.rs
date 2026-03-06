@@ -2,6 +2,7 @@
 
 mod unit {
     mod acp_codec_tests;
+    mod acp_handshake_tests;
     mod acp_session_tests;
     mod approval_repo_tests;
     mod ask_approval_tests;

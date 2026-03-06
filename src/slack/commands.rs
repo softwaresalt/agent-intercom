@@ -558,6 +558,13 @@ async fn handle_acp_session_start(
             let repo = SessionRepo::new(Arc::clone(&bg_state.db));
             repo.set_terminated(&bg_session_id, SessionStatus::Interrupted)
                 .await
+                .inspect_err(|e| {
+                    warn!(
+                        session_id = %bg_session_id,
+                        %e,
+                        "failed to mark session interrupted after startup failure"
+                    );
+                })
                 .ok();
 
             // Notify the operator of the failure via Slack.
@@ -630,6 +637,13 @@ async fn finish_acp_session_start(
     if let Err(err) = handshake_result {
         repo.set_terminated(session_id, SessionStatus::Interrupted)
             .await
+            .inspect_err(|e| {
+                warn!(
+                    %session_id,
+                    %e,
+                    "failed to mark session interrupted after handshake failure"
+                );
+            })
             .ok();
         return Err(err);
     }

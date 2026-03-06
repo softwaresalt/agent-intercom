@@ -135,12 +135,14 @@ Workspace-to-channel mapping entries route agent connections to the correct Slac
 | `workspace_id` | string | Yes | Short identifier used in the `?workspace_id=` query parameter. Must be unique and non-empty. |
 | `channel_id` | string | Yes | Slack channel ID that messages for this workspace are routed to. |
 | `label` | string | No | Human-readable label shown in logs and Slack messages. |
+| `path` | string | No | Absolute filesystem path to the workspace root. **Required for ACP mode** — used as the agent subprocess's working directory (`cwd`). In MCP mode this field is optional and informational. |
 
 ```toml
 [[workspace]]
 workspace_id = "my-repo"
 channel_id   = "C0123456789"
 label        = "My Repository"
+path         = "/home/dev/projects/my-repo"   # ACP agent cwd
 
 [[workspace]]
 workspace_id = "api-service"
@@ -171,6 +173,12 @@ When an agent connects, the server resolves the target channel as follows:
 
 `[[workspace]]` entries are hot-reloaded — changes take effect for new sessions without restarting the server.
 
+### ACP Workspace Routing
+
+In ACP mode, the `/arc session-start <workspace> <prompt>` command resolves the target workspace by matching the first argument against `workspace_id` values. The matched entry's `path` field becomes the agent subprocess's working directory. If no `path` is set, the server falls back to `default_workspace_root`.
+
+When only one `[[workspace]]` entry exists, the workspace argument can be omitted — the server uses the sole entry automatically.
+
 > **Migration note:** The `?channel_id=` query parameter is the original approach and remains supported for backwards compatibility. The `?workspace_id=` approach is preferred for new installations because channel reassignments only require updating `config.toml`, not every workspace's `mcp.json`. See [Migration Guide](migration-guide.md#channel_id-to-workspace_id-migration) for transition steps.
 
 ---
@@ -190,7 +198,9 @@ In ACP mode, credentials are loaded from mode-prefixed environment variables (`S
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `max_sessions` | integer | `5` | Maximum concurrent ACP sessions. Requests beyond this limit are rejected with a descriptive error. |
-| `startup_timeout_seconds` | integer | `30` | Seconds to wait for the agent subprocess to emit its ready signal on stdout. If no ready line arrives the spawner kills the process and returns an error. |
+| `startup_timeout_seconds` | integer | `30` | Seconds to wait for the agent subprocess to complete the ACP handshake. If no response arrives the spawner kills the process and returns an error. |
+| `http_port` | integer | `3001` | HTTP port for the ACP transport. Separate from the MCP port (default 3000) so both modes can run simultaneously. |
+| `max_msg_rate` | integer | `10` | Maximum inbound messages per second from an agent subprocess before rate limiting engages. |
 
 ```toml
 [acp]

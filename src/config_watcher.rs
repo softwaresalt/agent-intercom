@@ -217,10 +217,10 @@ impl ConfigWatcher {
         workspace_id: Option<&str>,
         channel_id: Option<&str>,
     ) -> Option<String> {
-        let guard = self
-            .mappings
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let guard = self.mappings.read().unwrap_or_else(|e| {
+            warn!("workspace_mappings lock was poisoned, recovering with inner value");
+            e.into_inner()
+        });
         if let Some(ws_id) = workspace_id {
             guard
                 .iter()
