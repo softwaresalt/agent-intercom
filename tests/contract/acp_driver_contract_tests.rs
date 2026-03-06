@@ -1,5 +1,5 @@
 //! Contract tests for `AcpDriver` — verifies clearance resolution, prompt
-//! forwarding, deregister cleanup, interrupt idempotency, and resolve_prompt
+//! forwarding, deregister cleanup, interrupt idempotency, and `resolve_prompt`
 //! routing (RI-08).
 //!
 //! Mirrors the MCP driver contract tests in `driver_contract_tests.rs`.
@@ -121,7 +121,7 @@ async fn acp_driver_send_prompt_delivers_to_session() {
 
 // ── send_prompt — missing agent session ID ──────────────────────────────────
 
-/// Sending a prompt without a registered agent session ID returns NotFound.
+/// Sending a prompt without a registered agent session ID returns `NotFound`.
 #[tokio::test]
 async fn acp_driver_send_prompt_missing_agent_sid_returns_not_found() {
     let (driver, _rx) = setup_driver_with_session("sess-004").await;
@@ -166,7 +166,7 @@ async fn acp_driver_interrupt_disconnected_is_noop() {
 
 // ── deregister_session — cleanup ────────────────────────────────────────────
 
-/// After deregistering, send_prompt returns NotFound (writer removed).
+/// After deregistering, `send_prompt` returns `NotFound` (writer removed).
 #[tokio::test]
 async fn acp_driver_deregister_removes_session() {
     let (driver, _rx) = setup_driver_with_session("sess-006").await;
@@ -276,7 +276,7 @@ async fn acp_driver_resolve_wait_defaults_to_continue() {
 
 // ── resolve_wait — missing agent session ID ─────────────────────────────────
 
-/// Wait without agent session ID returns NotFound.
+/// Wait without agent session ID returns `NotFound`.
 #[tokio::test]
 async fn acp_driver_resolve_wait_missing_agent_sid_returns_not_found() {
     let (driver, _rx) = setup_driver_with_session("sess-010").await;
