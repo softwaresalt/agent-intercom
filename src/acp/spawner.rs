@@ -266,6 +266,10 @@ pub async fn kill_process_tree(pid: u32) {
 /// `process_group(0)`, the child's PGID equals its own PID, so this kills
 /// the child and all its descendants.
 ///
+/// If the group-level `SIGTERM` fails (e.g. the process group was not yet
+/// established), falls back to `SIGKILL` on the direct PID to ensure the
+/// child does not outlive the server.
+///
 /// The function is best-effort: if the `kill` binary is unavailable or
 /// fails, a warning is logged but no error is returned.
 #[cfg(unix)]
@@ -280,16 +284,37 @@ pub async fn kill_process_group(pid: u32) {
     match result {
         Ok(status) if status.success() => {
             info!(pid, "process group terminated via kill -TERM");
+            return;
         }
         Ok(status) => {
             warn!(
                 pid,
                 exit_code = ?status.code(),
-                "kill -TERM exited with non-zero status — some children may survive"
+                "kill -TERM on group failed — falling back to direct SIGKILL"
             );
         }
         Err(err) => {
-            warn!(pid, %err, "failed to invoke kill for process group termination");
+            warn!(pid, %err, "failed to invoke kill for process group — falling back to direct SIGKILL");
+        }
+    }
+
+    // Fallback: SIGKILL the PID directly (does not propagate to descendants,
+    // but at least prevents the lead process from becoming an orphan).
+    let fallback = Command::new("kill")
+        .args(["-KILL", &format!("{pid}")])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    match fallback {
+        Ok(s) if s.success() => {
+            info!(pid, "process killed directly via SIGKILL fallback");
+        }
+        Ok(s) => {
+            warn!(pid, exit_code = ?s.code(), "SIGKILL fallback also failed");
+        }
+        Err(err) => {
+            warn!(pid, %err, "failed to invoke kill for SIGKILL fallback");
         }
     }
 }
