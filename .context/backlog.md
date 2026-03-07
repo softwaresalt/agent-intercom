@@ -202,3 +202,4 @@ Non-blocking items to address opportunistically:
 ## Unassigned
 - Readme, Setup Guide, and other documentation needs to be updated to reflect the current state of the project, especially around the new ACP features and configuration options. Important for user onboarding but can be done after critical features are implemented.
 - Consider making the Slack channel mechanism an abstraction layer that could support other platforms (e.g., Microsoft Teams, Discord, Telegram, Whatsapp) in the future. Not a priority now but could be designed with extensibility in mind.
+- Need to address problem that Slack block messages with Refine, for example, don't appear to work in the mobile app. May require a different message formatting approach or fallback for mobile users. Important for accessibility: addresses core functionality necessary for remote management.

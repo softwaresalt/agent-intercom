@@ -28,8 +28,8 @@
 
 **Purpose**: Branch creation and baseline verification
 
-- [ ] T001 Create and checkout feature branch `006-acp-event-wiring` from main
-- [ ] T002 Run quality gates to verify clean baseline: `cargo check && cargo clippy -- -D warnings && cargo fmt --all -- --check && cargo test`
+- [x] T001 Create and checkout feature branch `006-acp-event-wiring` from main
+- [x] T002 Run quality gates to verify clean baseline: `cargo check && cargo clippy -- -D warnings && cargo fmt --all -- --check && cargo test`
 
 ---
 
