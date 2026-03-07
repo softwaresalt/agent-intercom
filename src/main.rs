@@ -712,6 +712,7 @@ async fn check_interrupted_on_startup(state: &AppState) {
 /// - All other variants: logged at INFO for observability.
 ///
 /// Exits when the channel closes or `cancel` fires.
+#[allow(clippy::too_many_lines)]
 async fn run_acp_event_consumer(
     mut rx: tokio::sync::mpsc::Receiver<AgentEvent>,
     cancel: tokio_util::sync::CancellationToken,
@@ -766,13 +767,32 @@ async fn run_acp_event_consumer(
                             }
                         }
                     }
-                    Some(AgentEvent::ClearanceRequested { ref session_id, ref request_id, ref title, .. }) => {
+                    Some(AgentEvent::ClearanceRequested {
+                        ref session_id,
+                        ref request_id,
+                        ref title,
+                        ref description,
+                        ref diff,
+                        ref file_path,
+                        ref risk_level,
+                    }) => {
                         info!(
                             session_id,
                             request_id,
                             title,
                             "acp event: clearance requested"
                         );
+                        handle_clearance_requested(
+                            &state,
+                            session_id,
+                            request_id,
+                            title,
+                            description,
+                            diff.clone(),
+                            file_path,
+                            risk_level,
+                        )
+                        .await;
                     }
                     Some(AgentEvent::StatusUpdated { ref session_id, ref message }) => {
                         // Accumulate text; debounce flush posts to Slack thread.
@@ -927,6 +947,174 @@ async fn flush_text_to_slack(state: &Arc<AppState>, session_id: &str, text: &str
 
     if let Err(err) = slack.enqueue(msg).await {
         warn!(%err, session_id, "acp text flush: failed to post to Slack");
+    }
+}
+
+/// Handle the `ClearanceRequested` ACP event (FR-002, FR-003, FR-010, FR-011).
+///
+/// Creates and persists an [`ApprovalRequest`], registers it with the ACP
+/// driver for response routing, and posts an interactive approval message to
+/// the session's Slack thread (directly, to capture the message `ts`).
+///
+/// Failures at each step are logged and handled gracefully — no panic, no
+/// propagation. If the session is not found, the event is discarded silently
+/// (with a warning). If the DB write fails, the driver registration is also
+/// skipped (SC-003) to avoid unaudited in-memory state.
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
+async fn handle_clearance_requested(
+    state: &Arc<AppState>,
+    session_id: &str,
+    request_id: &str,
+    title: &str,
+    description: &str,
+    diff: Option<String>,
+    file_path: &str,
+    risk_level_str: &str,
+) {
+    use std::path::Path;
+
+    use agent_intercom::diff::validate_workspace_path;
+    use agent_intercom::mcp::tools::util::compute_file_hash;
+    use agent_intercom::models::approval::{parse_risk_level, ApprovalRequest};
+    use agent_intercom::persistence::approval_repo::ApprovalRepo;
+    use agent_intercom::persistence::session_repo::SessionRepo;
+    use agent_intercom::slack::blocks;
+    use agent_intercom::slack::client::SlackMessage;
+    use slack_morphism::prelude::{SlackChannelId, SlackTs};
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // Step 1: look up the owning session — discard if not found.
+    let session = match session_repo.get_by_id(session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            warn!(
+                session_id,
+                "clearance requested for unknown session — discarding"
+            );
+            return;
+        }
+        Err(err) => {
+            warn!(%err, session_id, "clearance requested: session db lookup failed — discarding");
+            return;
+        }
+    };
+
+    // Step 2: parse risk level (case-sensitive, default Low per FR-011).
+    let risk_level = parse_risk_level(risk_level_str);
+
+    // Step 3: validate the file path and compute its hash.
+    // On path violation, use the "new_file" sentinel — the approval still
+    // proceeds but without an integrity check against a specific file.
+    let workspace_root = Path::new(&session.workspace_root);
+    let (validated_path, original_hash) = match validate_workspace_path(workspace_root, file_path) {
+        Ok(abs_path) => {
+            let hash = compute_file_hash(&abs_path).await.unwrap_or_else(|err| {
+                warn!(%err, session_id, file_path, "failed to compute file hash");
+                "new_file".to_owned()
+            });
+            (Some(abs_path), hash)
+        }
+        Err(err) => {
+            warn!(%err, session_id, file_path, "path validation failed — using 'new_file' sentinel");
+            (None, "new_file".to_owned())
+        }
+    };
+    let effective_file_path = validated_path.as_deref().map_or_else(
+        || file_path.to_owned(),
+        |p| p.to_string_lossy().into_owned(),
+    );
+
+    // Step 4: construct the approval request.
+    // Use the agent's `request_id` as `approval.id` so that:
+    // - The Slack button value matches the driver registration key
+    // - `clearance/response` carries `"id": request_id` (per ACP JSON-RPC correlation)
+    // - `approval_repo.get_by_id(request_id)` works in the Slack approval handler
+    let diff_content = diff.unwrap_or_default();
+    let mut approval = ApprovalRequest::new(
+        session_id.to_owned(),
+        title.to_owned(),
+        Some(description.to_owned()),
+        diff_content.clone(),
+        effective_file_path.clone(),
+        risk_level,
+        original_hash,
+    );
+    approval.id = request_id.to_owned();
+    let approval_id = approval.id.clone();
+
+    // Step 5: persist to DB — skip driver registration on failure (SC-003).
+    let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+    if let Err(err) = approval_repo.create(&approval).await {
+        warn!(%err, session_id, "failed to persist clearance request — skipping registration");
+        return;
+    }
+
+    // Step 6: register with ACP driver for response routing.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver
+            .register_clearance(session_id, &approval_id)
+            .await;
+    }
+
+    // Step 7: post interactive approval message to Slack.
+    let Some(ref slack) = state.slack else {
+        info!(
+            session_id,
+            approval_id, "clearance persisted; no Slack service configured"
+        );
+        return;
+    };
+
+    let channel_id = match session.channel_id.as_deref() {
+        Some(ch) if !ch.is_empty() => ch.to_owned(),
+        _ => {
+            if state.config.slack.channel_id.is_empty() {
+                info!(
+                    session_id,
+                    approval_id, "clearance persisted; no Slack channel configured"
+                );
+                return;
+            }
+            state.config.slack.channel_id.clone()
+        }
+    };
+
+    let session_thread_ts = session.thread_ts.as_deref().map(|s| SlackTs(s.to_owned()));
+
+    let mut message_blocks = blocks::build_approval_blocks(
+        title,
+        Some(description),
+        &diff_content,
+        &effective_file_path,
+        risk_level,
+    );
+    message_blocks.push(blocks::approval_buttons(&approval_id));
+
+    let msg = SlackMessage {
+        channel: SlackChannelId(channel_id),
+        text: Some(format!("\u{1f4cb} ACP Approval Request: {title}")),
+        blocks: Some(message_blocks),
+        thread_ts: session_thread_ts.clone(),
+    };
+
+    match slack.post_message_direct(msg).await {
+        Ok(ts) => {
+            // If this session had no thread root yet, use the approval post as root.
+            if session_thread_ts.is_none() {
+                if let Err(err) = session_repo.set_thread_ts(session_id, &ts.0).await {
+                    warn!(%err, session_id, "failed to record thread_ts from clearance post");
+                }
+            }
+            // Record the Slack ts so the button-replacement handler can update the message.
+            if let Err(err) = approval_repo.update_slack_ts(&approval_id, &ts.0).await {
+                warn!(%err, approval_id, "failed to record slack_ts on clearance approval");
+            }
+        }
+        Err(err) => {
+            warn!(%err, session_id, approval_id, "failed to post clearance approval message to Slack");
+        }
     }
 }
 

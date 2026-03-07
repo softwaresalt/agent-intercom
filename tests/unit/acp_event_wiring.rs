@@ -322,3 +322,199 @@ fn prompt_blocks_output_is_deterministic() {
     let json2 = serde_json::to_string(&call2).expect("serialise call2");
     assert_eq!(json1, json2, "build_prompt_blocks must be deterministic");
 }
+
+// ── S018–S023: Risk level parse-or-default semantics ─────────────────────────
+
+use agent_intercom::models::approval::parse_risk_level;
+
+/// S018 — "low" (lowercase) parses to `RiskLevel::Low`.
+#[test]
+fn parse_risk_level_low() {
+    assert_eq!(parse_risk_level("low"), RiskLevel::Low);
+}
+
+/// S019 — "high" (lowercase) parses to `RiskLevel::High`.
+#[test]
+fn parse_risk_level_high() {
+    assert_eq!(parse_risk_level("high"), RiskLevel::High);
+}
+
+/// S020 — "critical" (lowercase) parses to `RiskLevel::Critical`.
+#[test]
+fn parse_risk_level_critical() {
+    assert_eq!(parse_risk_level("critical"), RiskLevel::Critical);
+}
+
+/// S021 — Unknown string "extreme" defaults to `RiskLevel::Low`.
+#[test]
+fn parse_risk_level_unknown_defaults_to_low() {
+    assert_eq!(parse_risk_level("extreme"), RiskLevel::Low);
+}
+
+/// S022 — Empty string defaults to `RiskLevel::Low`.
+#[test]
+fn parse_risk_level_empty_defaults_to_low() {
+    assert_eq!(parse_risk_level(""), RiskLevel::Low);
+}
+
+/// S023 — Mixed-case "High" and "LOW" both default to `RiskLevel::Low`
+/// (matching is case-sensitive per FR-011).
+#[test]
+fn parse_risk_level_mixed_case_defaults_to_low() {
+    assert_eq!(
+        parse_risk_level("High"),
+        RiskLevel::Low,
+        "matching is case-sensitive: 'High' must default to Low"
+    );
+    assert_eq!(
+        parse_risk_level("LOW"),
+        RiskLevel::Low,
+        "matching is case-sensitive: 'LOW' must default to Low"
+    );
+}
+
+// ── S030–S035: SHA-256 hash computation (path safety) ────────────────────────
+
+use agent_intercom::mcp::tools::util::compute_file_hash;
+
+/// S030 — Non-existent file path returns the `"new_file"` sentinel.
+#[tokio::test]
+async fn hash_nonexistent_returns_new_file_sentinel() {
+    let path = std::path::Path::new("/this/path/does/not/exist/abc123.rs");
+    let hash = compute_file_hash(path)
+        .await
+        .expect("hash computation must not error for missing file");
+    assert_eq!(
+        hash, "new_file",
+        "missing file must return 'new_file' sentinel"
+    );
+}
+
+/// S031 — Empty file returns the SHA-256 digest of zero bytes (not `"new_file"`).
+#[tokio::test]
+async fn hash_empty_file_returns_sha256_of_empty_bytes() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let path = dir.path().join("empty.txt");
+    tokio::fs::write(&path, b"")
+        .await
+        .expect("write empty file");
+    let hash = compute_file_hash(&path).await.expect("hash empty file");
+    // SHA-256 of empty input is known: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    assert_eq!(
+        hash,
+        "e3b0c44298fc1c149afbf4c8996fb924\
+         27ae41e4649b934ca495991b7852b855",
+        "empty file must hash to SHA-256 of zero bytes"
+    );
+}
+
+/// S032 — File with known content returns a reproducible hex digest.
+#[tokio::test]
+async fn hash_file_with_content_returns_hex_digest() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let path = dir.path().join("content.txt");
+    tokio::fs::write(&path, b"hello world")
+        .await
+        .expect("write content file");
+    let hash = compute_file_hash(&path).await.expect("hash content file");
+    // Not "new_file"
+    assert_ne!(hash, "new_file", "existing file must not return 'new_file'");
+    // Must be a 64-char hex string (SHA-256)
+    assert_eq!(hash.len(), 64, "SHA-256 hex digest must be 64 characters");
+    assert!(
+        hash.chars().all(|c| c.is_ascii_hexdigit()),
+        "hash must be hex characters only"
+    );
+}
+
+/// S033 — Path traversal ("../../etc/passwd") is rejected by `validate_workspace_path`.
+#[test]
+fn path_traversal_rejected_by_path_safety() {
+    use agent_intercom::diff::validate_workspace_path;
+    let dir = tempfile::tempdir().expect("temp dir");
+    let result = validate_workspace_path(dir.path(), "../../etc/passwd");
+    assert!(
+        result.is_err(),
+        "path traversal must be rejected by validate_workspace_path"
+    );
+}
+
+/// S034 — Absolute path outside workspace is rejected by `validate_workspace_path`.
+#[test]
+fn absolute_path_outside_workspace_rejected() {
+    use agent_intercom::diff::validate_workspace_path;
+    let dir = tempfile::tempdir().expect("temp dir");
+    let outside = if cfg!(windows) {
+        "C:\\Windows\\System32\\bad.exe"
+    } else {
+        "/etc/shadow"
+    };
+    let result = validate_workspace_path(dir.path(), outside);
+    assert!(
+        result.is_err(),
+        "absolute path outside workspace must be rejected"
+    );
+}
+
+/// S035 — Valid relative path within workspace succeeds.
+#[test]
+fn valid_path_within_workspace_succeeds() {
+    use agent_intercom::diff::validate_workspace_path;
+    let dir = tempfile::tempdir().expect("temp dir");
+    // Should not error — even if file doesn't exist, path is valid relative to workspace
+    // (path_safety only rejects traversal, not missing files)
+    let result = validate_workspace_path(dir.path(), "src/main.rs");
+    assert!(
+        result.is_ok(),
+        "valid relative path within workspace must succeed: {result:?}"
+    );
+}
+
+// ── S055: ClearanceRequested→ApprovalRequest field mapping ────────────────────
+
+use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus};
+
+/// S055 — `ApprovalRequest::new(...)` maps all `ClearanceRequested` fields correctly.
+#[test]
+fn approval_request_field_mapping() {
+    let session_id = "session:acp-01".to_owned();
+    let title = "Add retry logic".to_owned();
+    let description = Some("Adds retry_count field".to_owned());
+    let diff = "+pub retry_count: u32,".to_owned();
+    let file_path = "src/models/approval.rs".to_owned();
+    let risk_level = RiskLevel::High;
+    let original_hash = "abc123deadbeef".to_owned();
+
+    let req = ApprovalRequest::new(
+        session_id.clone(),
+        title.clone(),
+        description.clone(),
+        diff.clone(),
+        file_path.clone(),
+        risk_level,
+        original_hash.clone(),
+    );
+
+    assert_eq!(req.session_id, session_id, "session_id must be copied");
+    assert_eq!(req.title, title, "title must be copied");
+    assert_eq!(req.description, description, "description must be copied");
+    assert_eq!(req.diff_content, diff, "diff_content must be copied");
+    assert_eq!(req.file_path, file_path, "file_path must be copied");
+    assert_eq!(req.risk_level, risk_level, "risk_level must be copied");
+    assert_eq!(
+        req.original_hash, original_hash,
+        "original_hash must be copied"
+    );
+    assert_eq!(
+        req.status,
+        ApprovalStatus::Pending,
+        "status must default to Pending"
+    );
+    assert!(
+        req.consumed_at.is_none(),
+        "consumed_at must default to None"
+    );
+    assert!(req.slack_ts.is_none(), "slack_ts must default to None");
+    // id must be a non-empty string
+    assert!(!req.id.is_empty(), "id must be generated (non-empty)");
+}

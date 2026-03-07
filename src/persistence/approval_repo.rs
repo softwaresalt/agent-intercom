@@ -201,6 +201,24 @@ impl ApprovalRepo {
         Ok(())
     }
 
+    /// Set the Slack message timestamp on an approval request after the message is posted.
+    ///
+    /// The `slack_ts` value is used for subsequent `chat.update` calls that replace
+    /// the approval buttons after the operator responds.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn update_slack_ts(&self, id: &str, slack_ts: &str) -> Result<()> {
+        sqlx::query("UPDATE approval_request SET slack_ts = ?1 WHERE id = ?2")
+            .bind(slack_ts)
+            .bind(id)
+            .execute(self.db.as_ref())
+            .await?;
+
+        Ok(())
+    }
+
     /// Mark an approved request as consumed with a timestamp.
     ///
     /// # Errors
