@@ -85,6 +85,7 @@ When an ACP agent's first interaction with the operator is a clearance request o
 - **FR-013**: System MUST validate file paths via `path_safety` before computing content hashes. Paths outside the workspace root MUST be rejected (consistent with `AppError::PathViolation`). For valid paths where the file exists, the system MUST compute a SHA-256 content hash to enable conflict detection during later diff application. For non-existent files or rejected paths, the system MUST set the hash to the `"new_file"` sentinel value.
 - **FR-014**: System MUST emit structured `tracing` spans at `info` level for each event handler invocation, including the session ID, event type, and request/prompt ID. Error paths MUST emit `warn!` level spans with the error detail.
 - **FR-015**: System MUST support configurable timeout periods for ACP clearance requests and continuation prompts. The timeout mechanism and its interaction with `AcpDriver` pending maps is deferred to a dedicated timeout feature; this feature documents the requirement for future implementation.
+- **FR-016**: System SHOULD bound the size of `AcpDriver` pending maps. When `AcpConfig.max_sessions` concurrent sessions are active, the maximum number of pending entries per map is bounded by the session count. Explicit TTL-based eviction and capacity enforcement are deferred to the timeout feature (FR-015) but the handler MUST NOT panic or corrupt state if the map grows beyond expected bounds.
 
 ### Key Entities
 

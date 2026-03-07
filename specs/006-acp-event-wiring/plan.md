@@ -134,6 +134,12 @@ Unlike MCP tools (which register oneshots in `state.pending_approvals` and block
 
 *Rationale*: ACP agents don't block on a tool call — they continue streaming and the response arrives as a separate message on their NDJSON stream.
 
+**D5: Driver Access via `AppState.driver` Trait Object**
+
+ACP event handlers access the driver through `state.driver` (`Arc<dyn AgentDriver>`). The handler calls `register_clearance` and `register_prompt_request` on the trait object directly — no downcast to `AcpDriver` is needed because these methods are defined on the `AgentDriver` trait. The `run_acp_event_consumer` function already receives `Arc<AppState>` which includes the driver field.
+
+*Rationale*: Using the trait object preserves polymorphism and avoids coupling event handlers to the concrete `AcpDriver` type. The `AgentDriver` trait already exposes all methods needed by the handlers.
+
 ## Complexity Tracking
 
 | Item | Principle | Description | Resolution |

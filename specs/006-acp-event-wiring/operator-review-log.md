@@ -30,12 +30,12 @@
 | UF-11 | HIGH | majority (B,C) | Data model gaps | Applied | Updated data-model.md with request_id, driver registration note. |
 | UF-12 | HIGH | majority (A,B) | T023/T024 parallel ordering | Applied | Removed [P] from T024. Made sequential dependency. |
 | UF-13 | HIGH | majority (A,C) | No unauthorized user scenario | Applied | Added S067 for unauthorized Slack user on ACP message. |
-| UF-14 | HIGH | majority (B,C) | Pending map lifecycle gaps | Deferred | Pending map TTL/eviction is a cross-cutting concern for the timeout feature. Documented in Complexity Tracking. |
+| UF-14 | HIGH | majority (B,C) | Pending map lifecycle gaps | Applied | Added FR-016 bounding pending map size. TTL eviction deferred to timeout feature (FR-015). |
 | UF-15 | HIGH | majority (A,B) | Phase ordering issues | Applied | Updated parallel opportunities table. Phase 4 hard dep on Phase 3. |
 | UF-16 | HIGH | single (A) | Missing approval_buttons extraction | Applied | Added approval_buttons() and prompt_buttons() to T004. |
 | UF-17 | HIGH | single (A) | Single commit for 6 phases | Applied | Replaced T024 with per-phase commit instruction. |
-| UF-18 | HIGH | single (B) | Driver access strategy undefined | Deferred | Implementer will resolve during Phase 3 based on existing codebase patterns. |
-| UF-19 | HIGH | single (B) | Slack success but thread_ts DB failure | Deferred | Edge case covered by D3 log-and-continue. Implementer to add integration test. |
+| UF-18 | HIGH | single (B) | Driver access strategy undefined | Applied | Added D5 to plan.md: driver access via `AppState.driver` trait object, no downcast needed. |
+| UF-19 | HIGH | single (B) | Slack success but thread_ts DB failure | Applied | Added S068 for self-healing thread_ts retry. D3 log-and-continue applies. |
 
 ### MEDIUM (Operator Review — Auto-Decided: User Unavailable)
 
@@ -44,7 +44,7 @@
 | UF-20 | MEDIUM | single (C) | Terminology drift | Approved | Glossary added in UF-06 remediation. Remaining drift acceptable for now. |
 | UF-21 | MEDIUM | single (A) | No driver registration failure scenario | Approved | Added S057, S058. |
 | UF-22 | MEDIUM | single (C) | FR-003 missing threshold | Approved | Added INLINE_DIFF_THRESHOLD mention to FR-003. |
-| UF-23 | MEDIUM | single (C) | Full round-trip integration untested | Deferred | Implementation-time concern. Implementer to add during Phase 5/6. |
+| UF-23 | MEDIUM | single (C) | Full round-trip integration untested | Applied | Added round-trip test to T020(c). Covers event→driver→Slack→button→resolve flow. |
 | UF-24 | MEDIUM | single (C) | US3 scenario 1 conflation | Approved | Already split in spec.md (1a/1b). |
 | UF-25 | MEDIUM | single (C) | Workspace resolution failure | Approved | Added S059. |
 | UF-26 | MEDIUM | single (A) | No NFR section | Approved | Added NFR-001 through NFR-003. |
@@ -53,7 +53,7 @@
 | UF-29 | MEDIUM | single (A) | Post-termination prompt response | Approved | Added S063 (symmetric with S054). |
 | UF-30 | MEDIUM | single (A) | Two first-events race | Approved | Added S064. |
 | UF-31 | MEDIUM | single (A) | Malformed event data | Approved | Added S065, S066. |
-| UF-32 | MEDIUM | single (B) | RQ references undefined | Deferred | Research.md is a companion artifact; references are navigable. |
+| UF-32 | MEDIUM | single (B) | RQ references undefined | Applied | Inlined parsing rules from RQ-4/RQ-5 into T014 task description. Removed dangling references. |
 | UF-33 | MEDIUM | single (B) | No idempotency for duplicates | Approved | Added NFR-003 (graceful handling, enforcement deferred). |
 
 ### LOW (Recorded as Suggestions)
@@ -82,9 +82,10 @@
 
 ## Summary
 
-- **Approved**: 27 findings applied (6 CRITICAL + 8 HIGH + 13 MEDIUM)
-- **Deferred**: 6 findings (3 HIGH + 3 MEDIUM) — implementation-time or cross-cutting concerns
+- **Approved**: 33 findings applied (6 CRITICAL + 13 HIGH + 14 MEDIUM)
+- **Deferred**: 0 findings
 - **Recorded**: 9 LOW findings as suggestions
-- **Scenarios**: 56 → 67 (+11 from adversarial review)
-- **FRs**: 13 → 15 (+FR-014 tracing, +FR-015 timeout)
+- **Scenarios**: 56 → 68 (+12 from adversarial review)
+- **FRs**: 13 → 16 (+FR-014 tracing, +FR-015 timeout, +FR-016 pending map bounds)
 - **NFRs**: 0 → 3 (new section)
+- **Design Decisions**: 4 → 5 (+D5 driver access strategy)

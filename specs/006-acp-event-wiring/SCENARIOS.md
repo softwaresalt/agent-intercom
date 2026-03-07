@@ -179,6 +179,7 @@ Validates the event-to-record field transformations defined in `data-model.md`. 
 | S065 | ClearanceRequested with missing required fields | Event arrives with null/empty session_id | Handler validates event fields | Handler emits `warn!` with field validation detail; event discarded without DB persist or driver registration | No ApprovalRequest row; no driver pending entry; warn! log | boundary |
 | S066 | PromptForwarded with empty prompt_text | Event arrives with `prompt_text=""` (empty string, not null) | Handler processes event | Handler persists record with empty prompt_text; Slack message shows empty prompt body; no error | ContinuationPrompt.prompt_text = ""; Slack blocks posted with empty text section | boundary |
 | S067 | Unauthorized Slack user clicks Accept on ACP clearance message | ACP clearance posted to Slack; non-owner user clicks Accept | Slack authorization guard in events.rs | Guard rejects action (user not session owner); no state mutation; no driver resolution | Approval status unchanged (Pending); no AcpDriver resolution; guard logged | security |
+| S068 | Slack post succeeds but thread_ts DB persistence fails | Active session with no thread; ClearanceRequested; post_message_direct succeeds (returns ts); set_thread_ts DB write fails | Handler attempts to save thread_ts after successful Slack post | Handler emits `warn!` with DB error; approval record has slack_ts set but session.thread_ts remains None; subsequent events will also attempt direct post (self-healing on next success) | Approval record has slack_ts; session thread_ts NOT updated; no crash; next event retries thread creation | error |
 
 ---
 
@@ -190,7 +191,7 @@ Validates the event-to-record field transformations defined in `data-model.md`. 
 - [x] Boundary values (empty, max-length, zero, negative) — S002 (None diff), S008 (empty description), S009 (large diff), S017 (empty prompt), S022/S029 (empty strings), S032 (empty file), S061 (directory path), S066 (empty prompt_text)
 - [x] Permission and authorization failures — S033-S035 (path traversal/injection), S060 (symlink outside workspace), S067 (unauthorized Slack user)
 - [x] Concurrent access patterns — S047-S050 (rapid succession, multi-session, interleaved), S064 (two first-events race)
-- [x] Graceful degradation scenarios — S006/S015 (Slack unavailable), S007/S016 (DB failure), S052-S053 (shutdown), S057-S058 (driver registration failure), S062 (Slack rate limit)
+- [x] Graceful degradation scenarios — S006/S015 (Slack unavailable), S007/S016 (DB failure), S052-S053 (shutdown), S057-S058 (driver registration failure), S062 (Slack rate limit), S068 (Slack success but thread_ts DB failure)
 
 ## Cross-Reference Validation
 
@@ -202,7 +203,7 @@ Validates the event-to-record field transformations defined in `data-model.md`. 
 
 ## Notes
 
-- Scenario IDs are globally sequential (S001–S067) across all components
+- Scenario IDs are globally sequential (S001–S068) across all components
 - Categories: `happy-path`, `edge-case`, `error`, `boundary`, `concurrent`, `security`
 - S057–S067 added during adversarial review remediation
 - Each row is deterministic — exactly one expected outcome per input state
