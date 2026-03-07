@@ -72,7 +72,7 @@ When an ACP agent's first interaction with the operator is a clearance request o
 
 - **FR-001**: System MUST register each incoming `ClearanceRequested` event with the ACP driver's pending clearance map, associating the request ID with the session ID.
 - **FR-002**: System MUST persist each incoming `ClearanceRequested` event as an approval request record in the database, capturing title, description, diff, file path, and risk level.
-- **FR-003**: System MUST post an interactive approval message to the session's Slack thread when a `ClearanceRequested` event is received, containing the file path, risk level indicator, diff content, and Accept/Reject action buttons.
+- **FR-003**: System MUST post an interactive approval message to the session's Slack thread when a `ClearanceRequested` event is received, containing the file path, risk level indicator, diff content (inline up to `INLINE_DIFF_THRESHOLD` lines; larger diffs are truncated with a line-count indicator), and Accept/Reject action buttons.
 - **FR-004**: System MUST register each incoming `PromptForwarded` event with the ACP driver's pending prompt map, associating the prompt ID with the session ID.
 - **FR-005**: System MUST persist each incoming `PromptForwarded` event as a continuation prompt record in the database, capturing prompt text and prompt type.
 - **FR-006**: System MUST post an interactive prompt message to the session's Slack thread when a `PromptForwarded` event is received, containing the prompt text, prompt type label, and Continue/Refine/Stop action buttons.
@@ -88,8 +88,14 @@ When an ACP agent's first interaction with the operator is a clearance request o
 
 ### Key Entities
 
-- **Approval Request**: Represents a pending file operation clearance. Attributes: unique ID, session ID, title, description, diff content, file path, risk level, approval status, content hash, Slack message timestamp, creation timestamp.
+- **Approval Request**: Represents a pending file operation clearance. Attributes: unique ID, session ID, request ID (ACP protocol identifier), title, description, diff content, file path, risk level, approval status, content hash (original_hash), Slack message timestamp, creation timestamp.
 - **Continuation Prompt**: Represents a pending operator decision point. Attributes: unique ID, session ID, prompt text, prompt type, elapsed seconds, actions taken, operator decision, instruction text, Slack message timestamp, creation timestamp.
+
+### Non-Functional Requirements
+
+- **NFR-001**: Event-to-Slack-post latency SHOULD be under 2 seconds under single-session, normal Slack API conditions (p99 < 500ms). This is a target, not a hard gate.
+- **NFR-002**: The system SHOULD handle events from up to 5 concurrent ACP sessions (configurable via `AcpConfig.max_sessions`) without resource contention.
+- **NFR-003**: Duplicate events with the same `request_id` or `prompt_id` SHOULD be handled gracefully. The system MAY create separate records for duplicate events (idempotency enforcement is deferred to a future feature) but MUST NOT crash or corrupt state.
 
 ## Assumptions
 

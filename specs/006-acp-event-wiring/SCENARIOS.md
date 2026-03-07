@@ -164,30 +164,47 @@ Validates the event-to-record field transformations defined in `data-model.md`. 
 | S055 | ClearanceRequested maps to ApprovalRequest with correct defaults | Event: all fields populated; `diff=Some("...")`, `risk_level="high"` | Handler constructs ApprovalRequest via `ApprovalRequest::new()` | Fields: `id` = auto UUID, `session_id` = event.session_id, `title` = event.title, `description` = Some(event.description), `diff_content` = event.diff.unwrap_or_default(), `file_path` = event.file_path, `risk_level` = High, `original_hash` = computed SHA-256, `status` = Pending, `consumed_at` = None, `created_at` = Utc::now() | ApprovalRequest record matches data-model.md field mapping table | happy-path |
 | S056 | PromptForwarded maps to ContinuationPrompt with ACP-specific defaults | Event: `prompt_type="clarification"`, `prompt_text="Need input"` | Handler constructs ContinuationPrompt via `ContinuationPrompt::new()` | Fields: `id` = auto UUID, `session_id` = event.session_id, `prompt_text` = event.prompt_text, `prompt_type` = Clarification, `elapsed_seconds` = None, `actions_taken` = None, `decision` = None, `instruction` = None, `slack_ts` = None (queued path), `created_at` = Utc::now() | ContinuationPrompt record matches data-model.md; ACP-only fields (elapsed_seconds, actions_taken) are None | happy-path |
 
+### Adversarial Review Additions (S057–S067)
+
+| ID | Scenario | Input State | Trigger | Expected Behavior | Verifiable Outcome | Category |
+|---|---|---|---|---|---|---|
+| S057 | AcpDriver::register_clearance returns error | Active session; ClearanceRequested arrives; driver rejects registration (e.g., duplicate request_id) | Handler calls register_clearance() | Handler emits `warn!` with error detail; continues without Slack post; DB record still persisted | warn! log emitted; no Slack message; ApprovalRequest row exists in DB | error |
+| S058 | AcpDriver::register_prompt_request returns error | Active session; PromptForwarded arrives; driver rejects registration | Handler calls register_prompt_request() | Handler emits `warn!`; continues without Slack post; DB record still persisted | warn! log emitted; no Slack message; ContinuationPrompt row exists in DB | error |
+| S059 | Workspace resolution failure during hash computation | Active session; ClearanceRequested with valid file_path; session has no workspace_id or workspace not in config | Handler attempts to resolve workspace root | Handler emits `warn!`; sets original_hash to `"new_file"` sentinel; continues with persistence and Slack post | ApprovalRequest.original_hash = "new_file"; warn! log includes session_id and workspace context | edge-case |
+| S060 | File path is a symlink resolving outside workspace | Active session; ClearanceRequested with `file_path="link_to_outside"` where symlink target is outside workspace | path_safety resolves canonical path | path_safety rejects after canonicalization; handler emits `warn!`; hash set to `"new_file"` | Path NOT followed outside workspace; ApprovalRequest.original_hash = "new_file" | security |
+| S061 | File path points to a directory instead of a file | Active session; ClearanceRequested with `file_path="src/"` (a directory) | Handler attempts hash computation | Hash computation fails gracefully (not a regular file); hash set to `"new_file"` sentinel | ApprovalRequest.original_hash = "new_file"; no panic | boundary |
+| S062 | Slack API returns 429 (rate limit) on post_message_direct | Active session; ClearanceRequested; Slack API returns 429 with Retry-After header | Handler calls post_message_direct() | Handler emits `warn!` with rate-limit detail; approval record persisted without slack_ts; driver registration intact | ApprovalRequest.slack_ts = None; driver pending entry exists; warn! log emitted | error |
+| S063 | Post-termination prompt response (symmetric with S054) | Session terminated; operator clicks Continue on a previously-posted ACP prompt | Slack button handler calls resolve_prompt() | AcpDriver returns error (session writer gone); Slack handler posts ephemeral error to operator | No agent receives the response; ephemeral message shown to operator | edge-case |
+| S064 | Two first-events for same session both see thread_ts=None | Active session with no thread; ClearanceRequested and PromptForwarded arrive nearly simultaneously | Both handlers read thread_ts=None and call post_message_direct() | Both messages posted successfully; first set_thread_ts() wins (idempotent write); second set_thread_ts() is no-op or ignored | Two Slack messages exist; session.thread_ts set to first message's ts; no data corruption | concurrent |
+| S065 | ClearanceRequested with missing required fields | Event arrives with null/empty session_id | Handler validates event fields | Handler emits `warn!` with field validation detail; event discarded without DB persist or driver registration | No ApprovalRequest row; no driver pending entry; warn! log | boundary |
+| S066 | PromptForwarded with empty prompt_text | Event arrives with `prompt_text=""` (empty string, not null) | Handler processes event | Handler persists record with empty prompt_text; Slack message shows empty prompt body; no error | ContinuationPrompt.prompt_text = ""; Slack blocks posted with empty text section | boundary |
+| S067 | Unauthorized Slack user clicks Accept on ACP clearance message | ACP clearance posted to Slack; non-owner user clicks Accept | Slack authorization guard in events.rs | Guard rejects action (user not session owner); no state mutation; no driver resolution | Approval status unchanged (Pending); no AcpDriver resolution; guard logged | security |
+
 ---
 
 ## Edge Case Coverage Checklist
 
-- [x] Malformed inputs and invalid arguments — S021-S023 (risk_level), S028-S029 (prompt_type), S033-S035 (file_path)
-- [x] Missing dependencies and unavailable resources — S005-S006, S014-S015 (session/Slack missing)
-- [x] State errors and race conditions — S050 (registration/persistence consistency), S054 (post-termination response)
-- [x] Boundary values (empty, max-length, zero, negative) — S002 (None diff), S008 (empty description), S009 (large diff), S017 (empty prompt), S022/S029 (empty strings), S032 (empty file)
-- [x] Permission and authorization failures — S033-S035 (path traversal/injection)
-- [x] Concurrent access patterns — S047-S050 (rapid succession, multi-session, interleaved)
-- [x] Graceful degradation scenarios — S006/S015 (Slack unavailable), S007/S016 (DB failure), S052-S053 (shutdown)
+- [x] Malformed inputs and invalid arguments — S021-S023 (risk_level), S028-S029 (prompt_type), S033-S035 (file_path), S065 (missing session_id), S066 (empty prompt_text)
+- [x] Missing dependencies and unavailable resources — S005-S006, S014-S015 (session/Slack missing), S059 (workspace missing)
+- [x] State errors and race conditions — S050 (registration/persistence ordering), S054 (post-termination clearance response), S063 (post-termination prompt response)
+- [x] Boundary values (empty, max-length, zero, negative) — S002 (None diff), S008 (empty description), S009 (large diff), S017 (empty prompt), S022/S029 (empty strings), S032 (empty file), S061 (directory path), S066 (empty prompt_text)
+- [x] Permission and authorization failures — S033-S035 (path traversal/injection), S060 (symlink outside workspace), S067 (unauthorized Slack user)
+- [x] Concurrent access patterns — S047-S050 (rapid succession, multi-session, interleaved), S064 (two first-events race)
+- [x] Graceful degradation scenarios — S006/S015 (Slack unavailable), S007/S016 (DB failure), S052-S053 (shutdown), S057-S058 (driver registration failure), S062 (Slack rate limit)
 
 ## Cross-Reference Validation
 
 - [x] Every entity in `data-model.md` has at least one scenario covering its state transitions — ApprovalRequest (S001, S055), ContinuationPrompt (S010, S056), AgentEvent::ClearanceRequested (S001-S009), AgentEvent::PromptForwarded (S010-S017)
 - [x] Every user story in `spec.md` has corresponding behavioral coverage — US1 (S001-S009), US2 (S010-S017), US3 (S036-S041)
-- [x] Every functional requirement (FR-001 through FR-013) has at least one scenario — FR-001 (S001), FR-002 (S001, S055), FR-003 (S001), FR-004 (S010), FR-005 (S010, S056), FR-006 (S010), FR-007 (S036), FR-008 (S036-S041), FR-009 (S005, S014), FR-010 (S006, S015), FR-011 (S018-S023), FR-012 (S024-S029), FR-013 (S030-S035)
-- [x] Every edge case in spec.md has corresponding scenarios — missing session (S005, S014), Slack unavailable (S006, S015), rapid succession (S047), post-termination (S054), unknown prompt_type (S028)
+- [x] Every functional requirement (FR-001 through FR-015) has at least one scenario — FR-001 (S001), FR-002 (S001, S055), FR-003 (S001), FR-004 (S010), FR-005 (S010, S056), FR-006 (S010), FR-007 (S036), FR-008 (S036-S041), FR-009 (S005, S014), FR-010 (S006, S015), FR-011 (S018-S023), FR-012 (S024-S029), FR-013 (S030-S035, S059-S061), FR-014 (S001 tracing verified implicitly), FR-015 (deferred — no scenario required)
+- [x] Every edge case in spec.md has corresponding scenarios — missing session (S005, S014), Slack unavailable (S006, S015), rapid succession (S047), post-termination (S054, S063), unknown prompt_type (S028)
 - [x] No scenario has ambiguous or non-deterministic expected outcomes
 
 ## Notes
 
-- Scenario IDs are globally sequential (S001–S056) across all components
+- Scenario IDs are globally sequential (S001–S067) across all components
 - Categories: `happy-path`, `edge-case`, `error`, `boundary`, `concurrent`, `security`
+- S057–S067 added during adversarial review remediation
 - Each row is deterministic — exactly one expected outcome per input state
 - Tables are grouped by component/subsystem under level-2 headings
 - Scenarios map directly to parameterized test cases (Rust `#[rstest]` blocks for unit/contract tests, async integration tests for full pipeline)
