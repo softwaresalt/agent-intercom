@@ -67,12 +67,7 @@ async fn push_event_thread_reply_routes_with_channel_and_thread_ts() {
 
     // Create a session bound to channel "C_PUSH_TEST".
     let repo = SessionRepo::new(Arc::clone(&state.db));
-    let mut session = Session::new(
-        "U_OWNER".into(),
-        root.into(),
-        None,
-        SessionMode::Remote,
-    );
+    let mut session = Session::new("U_OWNER".into(), root.into(), None, SessionMode::Remote);
     session.channel_id = Some("C_PUSH_TEST".into());
     session.thread_ts = Some("1700001000.000001".into());
     let created = repo.create(&session).await.expect("create session");
@@ -109,12 +104,7 @@ async fn push_event_store_from_slack_channel_scoped_succeeds() {
     let state = test_app_state(test_config(root)).await;
 
     let repo = SessionRepo::new(Arc::clone(&state.db));
-    let mut session = Session::new(
-        "U_OWNER".into(),
-        root.into(),
-        None,
-        SessionMode::Remote,
-    );
+    let mut session = Session::new("U_OWNER".into(), root.into(), None, SessionMode::Remote);
     session.channel_id = Some("C_TOPLEVEL".into());
     let created = repo.create(&session).await.expect("create session");
     repo.update_status(&created.id, SessionStatus::Active)
