@@ -87,14 +87,17 @@ AgentEvent  ───maps to──→  ApprovalRequest | ContinuationPrompt
 | Event Field | Record Field | Transformation |
 |-------------|-------------|----------------|
 | session_id | session_id | Direct copy |
+| request_id | request_id | Direct copy (ACP protocol-level identifier, preserved for correlation) |
 | title | title | Direct copy |
 | description | description | Some(description) |
 | diff | diff_content | unwrap_or_default() |
 | file_path | file_path | Direct copy |
-| risk_level | risk_level | parse_risk_level() → RiskLevel enum |
-| (computed) | original_hash | compute_file_hash(file_path) |
-| (generated) | id | UUID::new_v4() |
+| risk_level | risk_level | parse_risk_level_or_default() → RiskLevel enum (case-sensitive, defaults to Low) |
+| (computed) | original_hash | compute_file_hash(file_path) via path_safety; "new_file" sentinel on rejection/not-found |
+| (generated) | id | UUID::new_v4() — **used as driver registration key and Slack button action_id** |
 | (set) | status | ApprovalStatus::Pending |
+
+> **Note**: The AcpDriver is registered with `approval.id` (the DB-generated UUID), not `event.request_id`. This ensures Slack button action_ids match the driver's pending map keys. The `request_id` is preserved on the record for protocol-level correlation and logging.
 
 ### PromptForwarded → ContinuationPrompt
 

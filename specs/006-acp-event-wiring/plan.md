@@ -26,10 +26,10 @@ Wire the two no-op ACP event handlers (`ClearanceRequested`, `PromptForwarded`) 
 | Principle | Status | Notes |
 |-----------|--------|-------|
 | I. Safety-First Rust | ✅ Pass | All fallible ops use Result/AppError. No unsafe. Clippy pedantic. |
-| II. MCP Protocol Fidelity | ✅ Pass | ACP events mirror MCP tool behavior; Slack handlers dispatch via polymorphic `state.driver`. |
-| III. Test-First Development | ✅ Pass | Tests written before implementation for each handler. |
-| IV. Security Boundary Enforcement | ✅ Pass | File hash computation uses existing `path_safety.rs` for path validation. |
-| V. Structured Observability | ✅ Pass | Event handlers emit tracing spans matching existing MCP tool patterns. |
+| II. MCP Protocol Fidelity | N/A | Feature wires ACP event handlers, not MCP tools. Slack output reuses MCP block builders for visual consistency. |
+| III. Test-First Development | ✅ Pass | Tests written before implementation for each handler. Contract tier extended to ACP event handler input/output contracts (analogous to MCP tool contracts). |
+| IV. Security Boundary Enforcement | ✅ Pass | File hash computation uses existing `path_safety.rs` for path validation. FR-013 mandates MUST-level path rejection. |
+| V. Structured Observability | ✅ Pass | FR-014 mandates info-level tracing spans for each handler invocation (session_id, event type, request_id). Error paths emit warn! per D3. |
 | VI. Single-Binary Simplicity | ✅ Pass | No new dependencies. Shared logic extracted within existing modules. |
 | VII. CLI Workspace Containment | N/A | Server-side feature, not CLI. |
 | VIII. Destructive Terminal Command Approval | N/A | Not about terminal commands. |
@@ -115,11 +115,12 @@ Extract `build_approval_blocks()` and `build_prompt_blocks()` (plus helpers: `pr
 *Rationale*: Single source of truth for Slack message formatting. No duplication, no divergence risk.
 *Alternative rejected*: Inline duplication in `main.rs` — creates maintenance burden and risks visual inconsistency.
 
-**D2: Direct Post for Clearance, Queue for Prompt**
+**D2: Direct Post for Clearance, Conditional for Prompt**
 
-Mirror MCP behavior: `post_message_direct()` for clearance requests (captures Slack `ts` for thread anchoring), `enqueue()` for prompts (async delivery sufficient since thread already established).
+Clearance requests always use `post_message_direct()` (captures Slack `ts` for approval record and thread anchoring). Prompts use `post_message_direct()` when creating the session's first Slack thread (`thread_ts=None`), and `enqueue()` when a thread already exists.
 
-*Rationale*: Consistency with MCP. Clearance requests must capture timestamp for thread management (FR-007, FR-008).
+*Rationale*: Clearance requests must capture timestamp for thread management (FR-007, FR-008). Prompts that are the first event for a session must also capture `ts` to establish the thread anchor. Once a thread exists, prompts can use the async queue since `ts` capture is not needed.
+*Alternative rejected*: Always direct post for prompts — unnecessary overhead when thread already exists.
 
 **D3: Error Handling — Log and Continue**
 
@@ -135,4 +136,9 @@ Unlike MCP tools (which register oneshots in `state.pending_approvals` and block
 
 ## Complexity Tracking
 
-No constitution violations. No complexity items to track.
+| Item | Principle | Description | Resolution |
+|---|---|---|---|
+| D2/US3 conditional posting | II, VII | D2 defaults to enqueue for prompts, but T018 overrides to direct post when no thread exists. Two posting paths for the same event type. | Documented in D2 rationale. FR-007 expanded to cover both event types. |
+| SC-003 vs D3 log-and-continue | III | SC-003 originally claimed 100% persistence. D3 allows skipping DB on failure. Adversarial review (UF-02) identified the conflict. | SC-003 amended to "attempted persistence." Handler skips driver registration if DB fails to prevent unaudited state. |
+| Timeout deferral | N/A | US1.4 and US2.5 define timeout acceptance criteria but FR-015 defers implementation. | Documented in Assumptions. Timeout mechanism is a separate feature. |
+| Secret redaction | IV | Diff content posted to Slack without sanitization (UF-06). Affects both MCP and ACP paths. | Documented in Threat Model Note. Recommended as dedicated security feature. |
