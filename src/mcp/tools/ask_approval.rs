@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
-use slack_morphism::prelude::{SlackBlock, SlackChannelId};
+use slack_morphism::prelude::SlackChannelId;
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
 
@@ -19,9 +19,6 @@ use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
-
-/// Maximum number of diff lines to render inline in Slack.
-const INLINE_DIFF_THRESHOLD: usize = 20;
 
 /// A curated code excerpt supplied by the agent for operator review.
 ///
@@ -216,7 +213,7 @@ pub async fn handle(
         // ── Post to Slack ────────────────────────────────────
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
-            let mut message_blocks = build_approval_blocks(
+            let mut message_blocks = blocks::build_approval_blocks(
                 &input.title,
                 input.description.as_deref(),
                 &input.diff,
@@ -227,7 +224,7 @@ pub async fn handle(
 
             let diff_line_count = input.diff.lines().count();
 
-            if diff_line_count >= INLINE_DIFF_THRESHOLD {
+            if diff_line_count >= blocks::INLINE_DIFF_THRESHOLD {
                 // Upload large diff as a file snippet.  Pass snippet_type
                 // "text" so Slack pre-classifies the file before its content
                 // scanner runs, preventing the "Binary" label.
@@ -432,44 +429,6 @@ pub async fn handle(
     }
     .instrument(span)
     .await
-}
-
-/// Build Slack Block Kit blocks for the approval message.
-fn build_approval_blocks(
-    title: &str,
-    description: Option<&str>,
-    diff: &str,
-    file_path: &str,
-    risk_level: RiskLevel,
-) -> Vec<SlackBlock> {
-    let mut result = Vec::new();
-
-    // Header section.
-    let risk_emoji = match risk_level {
-        RiskLevel::Low => "\u{1f7e2}",
-        RiskLevel::High => "\u{1f7e1}",
-        RiskLevel::Critical => "\u{1f534}",
-    };
-    result.push(blocks::text_section(&format!(
-        "{risk_emoji} *{title}*\n\u{1f4c4} `{file_path}` | Risk: *{risk_level:?}*"
-    )));
-
-    // Description, if provided.
-    if let Some(desc) = description {
-        result.push(blocks::text_section(desc));
-    }
-
-    // Inline diff for small changes.
-    let diff_line_count = diff.lines().count();
-    if diff_line_count < INLINE_DIFF_THRESHOLD {
-        result.push(blocks::diff_section(diff));
-    } else {
-        result.push(blocks::text_section(&format!(
-            "\u{1f4ce} Diff uploaded as file ({diff_line_count} lines)"
-        )));
-    }
-
-    result
 }
 
 /// Read the original file content for uploading as a Slack attachment (T084-T086).

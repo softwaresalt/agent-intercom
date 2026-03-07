@@ -4,40 +4,12 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-/// Truncate `text` to at most `max_len` bytes, breaking at the nearest
-/// preceding char boundary so the result is always valid UTF-8.
-/// Appends `"..."` when truncation occurs and `max_len >= 3`.
-/// For `max_len < 3`, returns a prefix truncated to the nearest char
-/// boundary without an ellipsis.
-#[must_use]
-pub fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        return text.to_owned();
-    }
-
-    // When max_len is too small for an ellipsis, return a boundary-safe
-    // prefix without "..." so the result never exceeds max_len.
-    if max_len < 3 {
-        let boundary = text
-            .char_indices()
-            .map(|(i, _)| i)
-            .take_while(|&i| i <= max_len)
-            .last()
-            .unwrap_or(0);
-        return text[..boundary].to_owned();
-    }
-
-    // Find the largest char-boundary ≤ max_len - 3 (room for "...").
-    let limit = max_len.saturating_sub(3);
-    let boundary = text
-        .char_indices()
-        .map(|(i, _)| i)
-        .take_while(|&i| i <= limit)
-        .last()
-        .unwrap_or(0);
-
-    format!("{}...", &text[..boundary])
-}
+/// Truncate `text` to at most `max_len` bytes.
+///
+/// Re-exported from `slack::blocks::truncate_text` — the canonical
+/// implementation lives there so both MCP handlers and ACP event handlers
+/// share identical truncation logic.
+pub use crate::slack::blocks::truncate_text;
 
 /// Compute the SHA-256 hex digest of a file's contents.
 ///

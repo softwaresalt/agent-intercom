@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
-use slack_morphism::prelude::{SlackBlock, SlackChannelId};
+use slack_morphism::prelude::SlackChannelId;
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
 
@@ -19,8 +19,6 @@ use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
-
-use super::util::truncate_text;
 
 /// Input parameters for the `forward_prompt` tool per mcp-tools.json contract.
 #[derive(Debug, serde::Deserialize)]
@@ -133,7 +131,7 @@ pub async fn handle(
         // ── Post to Slack ────────────────────────────────────
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
-            let message_blocks = build_prompt_blocks(
+            let message_blocks = blocks::build_prompt_blocks(
                 &input.prompt_text,
                 input.prompt_type,
                 input.elapsed_seconds,
@@ -147,8 +145,8 @@ pub async fn handle(
                     channel,
                     text: Some(format!(
                         "\u{1f4ac} {} Prompt: {}",
-                        prompt_type_label(input.prompt_type),
-                        truncate_text(&input.prompt_text, 100),
+                        blocks::prompt_type_label(input.prompt_type),
+                        blocks::truncate_text(&input.prompt_text, 100),
                     )),
                     blocks: Some(message_blocks),
                     // S037: post inside the session's Slack thread.
@@ -203,7 +201,7 @@ pub async fn handle(
                         channel,
                         text: Some(format!(
                             "\u{23f1}\u{fe0f} Prompt '{}' timed out \u{2014} auto-continuing",
-                            truncate_text(&input.prompt_text, 60),
+                            blocks::truncate_text(&input.prompt_text, 60),
                         )),
                         blocks: Some(vec![blocks::severity_section(
                             "warning",
@@ -255,60 +253,4 @@ pub async fn handle(
     }
     .instrument(span)
     .await
-}
-
-/// Build Slack Block Kit blocks for the prompt message.
-fn build_prompt_blocks(
-    prompt_text: &str,
-    prompt_type: PromptType,
-    elapsed_seconds: Option<i64>,
-    actions_taken: Option<i64>,
-    prompt_id: &str,
-) -> Vec<SlackBlock> {
-    let mut result = Vec::new();
-
-    // Header with prompt type icon.
-    let icon = prompt_type_icon(prompt_type);
-    let label = prompt_type_label(prompt_type);
-    result.push(blocks::text_section(&format!("{icon} *{label} Prompt*")));
-
-    // Prompt text.
-    result.push(blocks::text_section(prompt_text));
-
-    // Context line with elapsed time and actions.
-    let mut context_parts = Vec::new();
-    if let Some(secs) = elapsed_seconds {
-        context_parts.push(format!("\u{23f1}\u{fe0f} {secs}s elapsed"));
-    }
-    if let Some(count) = actions_taken {
-        context_parts.push(format!("\u{1f4cb} {count} actions taken"));
-    }
-    if !context_parts.is_empty() {
-        result.push(blocks::text_section(&context_parts.join(" | ")));
-    }
-
-    // Action buttons.
-    result.push(blocks::prompt_buttons(prompt_id));
-
-    result
-}
-
-/// Get the display icon for a prompt type.
-fn prompt_type_icon(prompt_type: PromptType) -> &'static str {
-    match prompt_type {
-        PromptType::Continuation => "\u{1f504}",
-        PromptType::Clarification => "\u{2753}",
-        PromptType::ErrorRecovery => "\u{26a0}\u{fe0f}",
-        PromptType::ResourceWarning => "\u{1f4ca}",
-    }
-}
-
-/// Get the display label for a prompt type.
-fn prompt_type_label(prompt_type: PromptType) -> &'static str {
-    match prompt_type {
-        PromptType::Continuation => "Continuation",
-        PromptType::Clarification => "Clarification",
-        PromptType::ErrorRecovery => "Error Recovery",
-        PromptType::ResourceWarning => "Resource Warning",
-    }
 }
