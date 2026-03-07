@@ -195,3 +195,5 @@ Non-blocking items to address opportunistically:
 
 - **F-14**: `src/acp/writer.rs:67–70` — Writer task exits silently on write error without emitting `SessionTerminated`. Reader will eventually detect EOF, but there's a window where queued messages are silently dropped.
 
+## Unassigned
+- Ability to change the model or agents being used with a subcommand like `/acom session-update --model gpt-4 --agent my-agent`. Requires dynamic reloading of agent drivers and careful handling of in-flight sessions. Potentially large scope, so deprioritized for now.
