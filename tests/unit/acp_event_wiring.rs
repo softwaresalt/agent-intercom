@@ -470,6 +470,133 @@ fn valid_path_within_workspace_succeeds() {
     );
 }
 
+// ── S024–S029: prompt_type parse-or-default semantics ────────────────────────
+
+use agent_intercom::models::prompt::parse_prompt_type;
+
+/// S024 — `"continuation"` maps to `PromptType::Continuation`.
+#[test]
+fn parse_prompt_type_continuation() {
+    assert_eq!(
+        parse_prompt_type("continuation"),
+        PromptType::Continuation,
+        "S024: 'continuation' must map to PromptType::Continuation"
+    );
+}
+
+/// S025 — `"clarification"` maps to `PromptType::Clarification`.
+#[test]
+fn parse_prompt_type_clarification() {
+    assert_eq!(
+        parse_prompt_type("clarification"),
+        PromptType::Clarification,
+        "S025: 'clarification' must map to PromptType::Clarification"
+    );
+}
+
+/// S026 — `"error_recovery"` maps to `PromptType::ErrorRecovery`.
+#[test]
+fn parse_prompt_type_error_recovery() {
+    assert_eq!(
+        parse_prompt_type("error_recovery"),
+        PromptType::ErrorRecovery,
+        "S026: 'error_recovery' must map to PromptType::ErrorRecovery"
+    );
+}
+
+/// S027 — `"resource_warning"` maps to `PromptType::ResourceWarning`.
+#[test]
+fn parse_prompt_type_resource_warning() {
+    assert_eq!(
+        parse_prompt_type("resource_warning"),
+        PromptType::ResourceWarning,
+        "S027: 'resource_warning' must map to PromptType::ResourceWarning"
+    );
+}
+
+/// S028 — Unknown string `"custom_agent_query"` defaults to `PromptType::Continuation`.
+#[test]
+fn parse_prompt_type_unknown_defaults_to_continuation() {
+    assert_eq!(
+        parse_prompt_type("custom_agent_query"),
+        PromptType::Continuation,
+        "S028: unknown string must default to PromptType::Continuation"
+    );
+}
+
+/// S029 — Empty string defaults to `PromptType::Continuation`.
+#[test]
+fn parse_prompt_type_empty_defaults_to_continuation() {
+    assert_eq!(
+        parse_prompt_type(""),
+        PromptType::Continuation,
+        "S029: empty string must default to PromptType::Continuation"
+    );
+}
+
+// ── S056: PromptForwarded→ContinuationPrompt field mapping ───────────────────
+
+use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision};
+
+/// S056 — `ContinuationPrompt::new(...)` created from a `PromptForwarded` event
+/// has the correct field values: `session_id`/`prompt_text` copied directly,
+/// `elapsed_seconds=None`, `actions_taken=None`, `decision=None`, `slack_ts=None`.
+#[test]
+fn prompt_forwarded_field_mapping() {
+    let session_id = "session:acp-02".to_owned();
+    let prompt_text = "Should I continue with the refactoring?".to_owned();
+    let prompt_type = parse_prompt_type("clarification");
+
+    let prompt = ContinuationPrompt::new(
+        session_id.clone(),
+        prompt_text.clone(),
+        prompt_type,
+        None, // elapsed_seconds — ACP-specific: always None in event handler
+        None, // actions_taken — ACP-specific: always None in event handler
+    );
+
+    assert_eq!(
+        prompt.session_id, session_id,
+        "S056: session_id must be copied"
+    );
+    assert_eq!(
+        prompt.prompt_text, prompt_text,
+        "S056: prompt_text must be copied"
+    );
+    assert_eq!(
+        prompt.prompt_type,
+        PromptType::Clarification,
+        "S056: prompt_type must be parsed enum"
+    );
+    assert!(
+        prompt.elapsed_seconds.is_none(),
+        "S056: elapsed_seconds must be None (ACP-specific)"
+    );
+    assert!(
+        prompt.actions_taken.is_none(),
+        "S056: actions_taken must be None (ACP-specific)"
+    );
+    assert!(
+        prompt.decision.is_none(),
+        "S056: decision must default to None"
+    );
+    assert!(
+        prompt.instruction.is_none(),
+        "S056: instruction must default to None"
+    );
+    assert!(
+        prompt.slack_ts.is_none(),
+        "S056: slack_ts must default to None"
+    );
+    assert!(
+        !prompt.id.is_empty(),
+        "S056: id must be generated (non-empty)"
+    );
+
+    // PromptDecision variants are accessible (compile check)
+    let _: PromptDecision = PromptDecision::Continue;
+}
+
 // ── S055: ClearanceRequested→ApprovalRequest field mapping ────────────────────
 
 use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus};

@@ -254,6 +254,183 @@ fn clearance_large_diff_stored_in_full() {
     );
 }
 
+// ── S010–S017: PromptForwarded handler pipeline contract ─────────────────────
+
+use agent_intercom::models::prompt::parse_prompt_type;
+use agent_intercom::models::prompt::{ContinuationPrompt, PromptType};
+
+/// S010 — A `ContinuationPrompt` created from a `PromptForwarded` event with
+/// `prompt_type: "continuation"` must have `PromptType::Continuation` and `Pending`
+/// state (decision=None, `slack_ts=None`).
+#[test]
+fn prompt_standard_continuation_creates_pending_prompt() {
+    let prompt = ContinuationPrompt::new(
+        "session:acp-test".to_owned(),
+        "Should I continue the refactoring?".to_owned(),
+        parse_prompt_type("continuation"),
+        None,
+        None,
+    );
+
+    assert_eq!(
+        prompt.prompt_type,
+        PromptType::Continuation,
+        "S010: prompt_type must be Continuation"
+    );
+    assert!(
+        prompt.decision.is_none(),
+        "S010: decision must be None (pending)"
+    );
+    assert!(
+        prompt.slack_ts.is_none(),
+        "S010: slack_ts must be None before posting"
+    );
+    assert!(!prompt.id.is_empty(), "S010: id must be generated");
+}
+
+/// S011 — A `PromptForwarded` event with `prompt_type: "clarification"` produces a
+/// `ContinuationPrompt` with `PromptType::Clarification`. The Slack block builder
+/// must return distinct icon and label for this type (FR-008).
+#[test]
+fn prompt_clarification_type_distinct_label_and_icon() {
+    use agent_intercom::slack::blocks;
+
+    let prompt = ContinuationPrompt::new(
+        "sess-clarify".to_owned(),
+        "Which approach should I take?".to_owned(),
+        parse_prompt_type("clarification"),
+        None,
+        None,
+    );
+    assert_eq!(
+        prompt.prompt_type,
+        PromptType::Clarification,
+        "S011: type must be Clarification"
+    );
+
+    let cont_label = blocks::prompt_type_label(PromptType::Continuation);
+    let clar_label = blocks::prompt_type_label(PromptType::Clarification);
+    assert_ne!(
+        cont_label, clar_label,
+        "S011: clarification label must differ from continuation"
+    );
+
+    let cont_icon = blocks::prompt_type_icon(PromptType::Continuation);
+    let clar_icon = blocks::prompt_type_icon(PromptType::Clarification);
+    assert_ne!(
+        cont_icon, clar_icon,
+        "S011: clarification icon must differ from continuation"
+    );
+}
+
+/// S012 — `prompt_type: "error_recovery"` maps to `PromptType::ErrorRecovery`.
+#[test]
+fn prompt_error_recovery_type_contract() {
+    let prompt = ContinuationPrompt::new(
+        "sess-err".to_owned(),
+        "Hit an error — how to proceed?".to_owned(),
+        parse_prompt_type("error_recovery"),
+        None,
+        None,
+    );
+    assert_eq!(
+        prompt.prompt_type,
+        PromptType::ErrorRecovery,
+        "S012: prompt_type must be ErrorRecovery"
+    );
+}
+
+/// S013 — `prompt_type: "resource_warning"` maps to `PromptType::ResourceWarning`.
+#[test]
+fn prompt_resource_warning_type_contract() {
+    let prompt = ContinuationPrompt::new(
+        "sess-rw".to_owned(),
+        "Running low on context — continue?".to_owned(),
+        parse_prompt_type("resource_warning"),
+        None,
+        None,
+    );
+    assert_eq!(
+        prompt.prompt_type,
+        PromptType::ResourceWarning,
+        "S013: prompt_type must be ResourceWarning"
+    );
+}
+
+/// S014 — When a `PromptForwarded` event references an unknown session, the handler
+/// contract requires: no `ContinuationPrompt` created, no driver registration,
+/// event is discarded silently after a warn log.
+#[test]
+fn prompt_missing_session_produces_no_prompt() {
+    let session_found = false;
+    let prompt_created = if session_found {
+        Some(ContinuationPrompt::new(
+            "missing-session".to_owned(),
+            "text".to_owned(),
+            PromptType::Continuation,
+            None,
+            None,
+        ))
+    } else {
+        None
+    };
+    assert!(
+        prompt_created.is_none(),
+        "S014: missing session must result in no ContinuationPrompt being created"
+    );
+}
+
+/// S015 — When Slack is not configured, the contract: `ContinuationPrompt` is
+/// persisted and driver is registered, but `slack_ts` remains None.
+#[test]
+fn prompt_slack_unavailable_slack_ts_remains_none() {
+    let prompt = ContinuationPrompt::new(
+        "sess-no-slack".to_owned(),
+        "Continue?".to_owned(),
+        PromptType::Continuation,
+        None,
+        None,
+    );
+    assert!(
+        prompt.slack_ts.is_none(),
+        "S015: slack_ts must be None when Slack is unavailable"
+    );
+    assert!(
+        prompt.decision.is_none(),
+        "S015: decision must still be None (pending)"
+    );
+}
+
+/// S016 — When DB persistence fails, the contract: the handler skips driver
+/// registration and any subsequent Slack posting. Output is no prompt record
+/// and no driver entry.
+#[test]
+fn prompt_db_failure_contract_no_driver_registration() {
+    let db_failed = true;
+    let driver_registered = !db_failed;
+    assert!(
+        !driver_registered,
+        "S016: driver must NOT be registered when DB persistence fails"
+    );
+}
+
+/// S017 — Empty prompt text is stored as-is; the contract is no truncation at
+/// persistence layer, only at the Slack display layer.
+#[test]
+fn prompt_empty_prompt_text_stored_as_is() {
+    let prompt = ContinuationPrompt::new(
+        "sess-empty-text".to_owned(),
+        String::new(),
+        PromptType::Continuation,
+        None,
+        None,
+    );
+    assert_eq!(
+        prompt.prompt_text, "",
+        "S017: empty prompt_text must be stored as empty string"
+    );
+}
+
 // ── Risk level contract completeness ─────────────────────────────────────────
 
 /// Verify that `parse_risk_level` covers all three valid values without

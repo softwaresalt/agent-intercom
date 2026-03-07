@@ -805,13 +805,25 @@ async fn run_acp_event_consumer(
                         entry.text.push_str(message);
                         entry.last_update = Instant::now();
                     }
-                    Some(AgentEvent::PromptForwarded { ref session_id, ref prompt_id, ref prompt_text, .. }) => {
+                    Some(AgentEvent::PromptForwarded {
+                        ref session_id,
+                        ref prompt_id,
+                        ref prompt_text,
+                        ref prompt_type,
+                    }) => {
                         info!(
                             session_id,
                             prompt_id,
-                            prompt_text,
                             "acp event: prompt forwarded"
                         );
+                        handle_prompt_forwarded(
+                            &state,
+                            session_id,
+                            prompt_id,
+                            prompt_text,
+                            prompt_type,
+                        )
+                        .await;
                     }
                     Some(AgentEvent::HeartbeatReceived { ref session_id, .. }) => {
                         info!(session_id, "acp event: heartbeat received");
@@ -1114,6 +1126,131 @@ async fn handle_clearance_requested(
         }
         Err(err) => {
             warn!(%err, session_id, approval_id, "failed to post clearance approval message to Slack");
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+async fn handle_prompt_forwarded(
+    state: &Arc<AppState>,
+    session_id: &str,
+    prompt_id: &str,
+    prompt_text: &str,
+    prompt_type_str: &str,
+) {
+    use agent_intercom::models::prompt::{parse_prompt_type, ContinuationPrompt};
+    use agent_intercom::persistence::prompt_repo::PromptRepo;
+    use agent_intercom::persistence::session_repo::SessionRepo;
+    use agent_intercom::slack::blocks;
+    use agent_intercom::slack::client::SlackMessage;
+    use slack_morphism::prelude::{SlackChannelId, SlackTs};
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // Step 1: look up the owning session — discard if not found.
+    let session = match session_repo.get_by_id(session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            warn!(
+                session_id,
+                "prompt forwarded for unknown session — discarding"
+            );
+            return;
+        }
+        Err(err) => {
+            warn!(%err, session_id, "prompt forwarded: session db lookup failed — discarding");
+            return;
+        }
+    };
+
+    // Step 2: parse prompt type string (case-sensitive, default Continuation).
+    let prompt_type = parse_prompt_type(prompt_type_str);
+
+    // Step 3: construct the continuation prompt.
+    // Override `.id` with the agent's `prompt_id` so that:
+    // - The Slack button value matches the driver registration key
+    // - `prompt/response` carries `"id": prompt_id` (ACP JSON-RPC correlation)
+    // - `prompt_repo.get_by_id(prompt_id)` works in the Slack prompt handler
+    let mut prompt = ContinuationPrompt::new(
+        session_id.to_owned(),
+        prompt_text.to_owned(),
+        prompt_type,
+        None, // elapsed_seconds — ACP-specific: not available in event
+        None, // actions_taken — ACP-specific: not available in event
+    );
+    prompt.id = prompt_id.to_owned();
+    let prompt_db_id = prompt.id.clone();
+
+    // Step 4: persist to DB — skip driver registration on failure (D3).
+    let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+    if let Err(err) = prompt_repo.create(&prompt).await {
+        warn!(%err, session_id, prompt_id, "failed to persist prompt forward — skipping registration");
+        return;
+    }
+
+    // Step 5: register with ACP driver for response routing.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver
+            .register_prompt_request(session_id, &prompt_db_id)
+            .await;
+    }
+
+    // Step 6: build Slack blocks.
+    let message_blocks =
+        blocks::build_prompt_blocks(prompt_text, prompt_type, None, None, &prompt_db_id);
+
+    // Step 7: post to Slack (D2 conditional posting).
+    let Some(ref slack) = state.slack else {
+        warn!(
+            session_id,
+            prompt_id, "prompt persisted; no Slack service configured — skipping post"
+        );
+        return;
+    };
+
+    let channel_id = match session.channel_id.as_deref() {
+        Some(ch) if !ch.is_empty() => ch.to_owned(),
+        _ => {
+            if state.config.slack.channel_id.is_empty() {
+                warn!(
+                    session_id,
+                    prompt_id, "prompt persisted; no Slack channel configured — skipping post"
+                );
+                return;
+            }
+            state.config.slack.channel_id.clone()
+        }
+    };
+
+    let session_thread_ts = session.thread_ts.as_deref().map(|s| SlackTs(s.to_owned()));
+
+    let msg = SlackMessage {
+        channel: SlackChannelId(channel_id),
+        text: Some(format!(
+            "{} ACP Prompt: {}",
+            blocks::prompt_type_icon(prompt_type),
+            blocks::prompt_type_label(prompt_type),
+        )),
+        blocks: Some(message_blocks),
+        thread_ts: session_thread_ts.clone(),
+    };
+
+    if session_thread_ts.is_none() {
+        // No thread yet — use direct post to capture ts and anchor the session thread.
+        match slack.post_message_direct(msg).await {
+            Ok(ts) => {
+                if let Err(err) = session_repo.set_thread_ts(session_id, &ts.0).await {
+                    warn!(%err, session_id, "failed to record thread_ts from prompt post");
+                }
+            }
+            Err(err) => {
+                warn!(%err, session_id, prompt_id, "failed to post prompt message to Slack");
+            }
+        }
+    } else {
+        // Thread exists — use rate-limited queue for ordered delivery.
+        if let Err(err) = slack.enqueue(msg).await {
+            warn!(%err, session_id, prompt_id, "failed to enqueue prompt message to Slack");
         }
     }
 }
