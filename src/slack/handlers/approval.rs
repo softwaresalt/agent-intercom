@@ -17,8 +17,9 @@ use crate::audit::{AuditEntry, AuditEventType};
 use crate::mcp::handler::{AppState, ApprovalResponse};
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
+use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
-use crate::slack::handlers::command_approve;
+use crate::slack::handlers::{check_session_ownership, command_approve};
 
 /// Process a single approval button action from Slack.
 ///
@@ -151,6 +152,28 @@ pub async fn handle_approval_action(
         }
     }
 
+    // ── T068c / FR-031: Verify session ownership ─────────
+    // Look up the approval record to find its session, then confirm the
+    // acting user is the session owner. Command approvals (handled above)
+    // have no DB record and are therefore exempt from this check.
+    {
+        let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+        if let Ok(Some(record)) = approval_repo.get_by_id(request_id).await {
+            let session_repo = SessionRepo::new(Arc::clone(&state.db));
+            if let Ok(Some(session)) = session_repo.get_by_id(&record.session_id).await {
+                if let Err(err) = check_session_ownership(&session, user_id) {
+                    warn!(
+                        user_id,
+                        request_id,
+                        owner = %session.owner_user_id,
+                        "approval action rejected: non-owner attempt (FR-031)"
+                    );
+                    return Err(err.to_string());
+                }
+            }
+        }
+    }
+
     // ── Determine status from action_id ──────────────────
     let (status, reason) = if action_id == "approve_accept" {
         (ApprovalStatus::Approved, None::<String>)
@@ -222,26 +245,15 @@ pub async fn handle_approval_action(
         }
     }
 
-    // ── Resolve oneshot channel ──────────────────────────
+    // ── Resolve oneshot channel via driver ───────────────
     {
-        let mut pending = state.pending_approvals.lock().await;
-        if let Some(tx) = pending.remove(request_id) {
-            let response = ApprovalResponse {
-                status: match status {
-                    ApprovalStatus::Approved => "approved".to_owned(),
-                    ApprovalStatus::Rejected => "rejected".to_owned(),
-                    _ => "unknown".to_owned(),
-                },
-                reason: reason.clone(),
-            };
-            if tx.send(response).is_err() {
-                warn!(request_id, "oneshot receiver already dropped");
-            }
-        } else {
-            warn!(
-                request_id,
-                "no pending oneshot found (request may have timed out)"
-            );
+        let approved = matches!(status, ApprovalStatus::Approved);
+        if let Err(err) = state
+            .driver
+            .resolve_clearance(request_id, approved, reason.clone())
+            .await
+        {
+            warn!(request_id, %err, "failed to resolve clearance oneshot");
         }
     }
 

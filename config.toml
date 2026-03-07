@@ -1,48 +1,73 @@
-# agent-intercom configuration
+# agent-intercom configuration (debug)
 #
-# Slack credentials are loaded from environment variables (not this file):
-#   SLACK_BOT_TOKEN  - Bot user OAuth token (xoxb-...)
-#   SLACK_APP_TOKEN  - App-level token for Socket Mode (xapp-...)
-#   SLACK_TEAM_ID    - Slack workspace team ID (T...)
+# This file is used by both run-debug.ps1 (MCP mode) and run-debug-acp.ps1
+# (ACP mode). Shared settings live at the top; mode-specific sections are
+# documented inline.
 #
-# Authorized operator IDs are loaded from an environment variable:
-#   SLACK_MEMBER_IDS  - Comma-separated Slack user IDs allowed to
-#                                    approve requests and issue commands
-#                                    (e.g. U0123456789,U9876543210)
+# ── Slack credentials ────────────────────────────────────────────────────────
 #
-# Alternatively, store Slack tokens in the OS keychain under service
-# "agent-intercom" with keys: slack_bot_token, slack_app_token, slack_team_id
+# Credentials are loaded from environment variables (not this file):
 #
-# Per-workspace Slack channel:
-#   Each VS Code workspace MUST specify the target Slack channel by appending
-#   a `channel_id` query parameter to the SSE URL in .vscode/mcp.json.
-#   There is no global fallback — the channel_id is always workspace-specific.
+#   MCP mode (run-debug.ps1):
+#     SLACK_BOT_TOKEN   Bot user OAuth token          (xoxb-...)
+#     SLACK_APP_TOKEN   App-level token (Socket Mode)  (xapp-...)
+#     SLACK_TEAM_ID     Slack workspace team ID         (T...)
+#     SLACK_MEMBER_IDS  Comma-separated authorized Slack user IDs
 #
-#   Example .vscode/mcp.json for a workspace targeting a specific channel:
+#   ACP mode (run-debug-acp.ps1):
+#     Tries _ACP-suffixed vars first (SLACK_BOT_TOKEN_ACP, etc.),
+#     then falls back to the shared names above.  This lets you run
+#     MCP and ACP simultaneously with separate Slack apps.
 #
+# Alternatively, store tokens in the OS keychain:
+#   MCP → service "agent-intercom"
+#   ACP → service "agent-intercom-acp"
+#
+# ── Per-workspace Slack channel (MCP mode) ───────────────────────────────────
+#
+# In MCP mode each VS Code workspace connects with ?workspace_id= in the MCP
+# URL.  The server resolves the workspace_id to a Slack channel_id via the
+# [[workspace]] entries below.  This decouples workspaces from raw channel IDs
+# so channels can be changed in config.toml without touching every mcp.json.
+#
+#   .vscode/mcp.json:
 #     {
 #       "servers": {
 #         "intercom": {
 #           "type": "http",
-#           "url": "http://127.0.0.1:3000/mcp?channel_id=C0123FRONTEND"
+#           "url": "http://127.0.0.1:3000/mcp?workspace_id=agent-intercom"
 #         }
 #       }
 #     }
+#
+# Note: bare ?channel_id= is deprecated and logs a warning.  Use workspace_id.
+#
+# ── Per-workspace routing (ACP mode) ─────────────────────────────────────────
+#
+# In ACP mode the operator runs /intercom session-start in a Slack channel.
+# The server looks up the [[workspace]] entry whose channel_id matches that
+# channel and uses the entry's `path` as the agent subprocess working dir.
+
+# ── Shared settings ──────────────────────────────────────────────────────────
 
 default_workspace_root = "D:/Source/GitHub/agent-intercom"
 http_port = 3000
 ipc_name = "agent-intercom"
 max_concurrent_sessions = 3
-host_cli = "D:/Tools/ghcpcli/copilot.exe"
-host_cli_args = ["--stdio"]
 retention_days = 30
 
+# Agent binary used to spawn sessions (both modes reference this for spawning).
+host_cli = "D:/Tools/ghcpcli/copilot.exe"
+host_cli_args = ["--acp", "--yolo"]
+
+# Slack message verbosity: minimal, standard, or verbose.
+slack_detail_level = "verbose"
+
 [database]
-path = "data/agent-rc.db"
+path = "data/agent-intercom.db"
 
 [slack]
-# No fields required here — credentials are loaded from environment variables
-# or the OS keychain; the channel is supplied per-workspace via mcp.json.
+# No fields required — credentials come from env vars or the OS keychain.
 
 [timeouts]
 approval_seconds = 3600
@@ -58,3 +83,34 @@ default_nudge_message = "Continue working on the current task. Pick up where you
 
 [commands]
 status = "git status"
+
+# ── Workspace-to-channel mappings ────────────────────────────────────────────
+#
+# MCP mode: agents connect with ?workspace_id=<id> in the MCP URL.
+# ACP mode: /session-start resolves the channel → workspace entry → agent cwd.
+#
+# Hot-reloaded: changes take effect for new sessions without server restart.
+
+[[workspace]]
+workspace_id = "agent-intercom"
+channel_id   = "C0AG6S5D87N"      # ← your #agent-intercom Slack channel
+label        = "Agent Intercom"
+path         = "D:/Source/GitHub/agent-intercom"
+
+# Add more workspace entries as needed:
+#
+# [[workspace]]
+# workspace_id = "other-repo"
+# channel_id   = "C_OTHER_CHANNEL"
+# label        = "Other Repository"
+# path         = "D:/Source/GitHub/other-repo"
+
+# ── ACP mode configuration ───────────────────────────────────────────────────
+#
+# These settings only apply when running with --mode acp.
+# MCP mode ignores this section.
+
+[acp]
+max_sessions = 5
+startup_timeout_seconds = 30
+http_port = 3001

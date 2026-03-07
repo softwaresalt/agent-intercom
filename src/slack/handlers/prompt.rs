@@ -13,10 +13,12 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::{AppState, PromptResponse};
+use crate::mcp::handler::AppState;
 use crate::models::prompt::PromptDecision;
 use crate::persistence::prompt_repo::PromptRepo;
+use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
+use crate::slack::handlers::check_session_ownership;
 
 /// Process a single prompt button action from Slack.
 ///
@@ -60,6 +62,27 @@ pub async fn handle_prompt_action(
             prompt_id, "unauthorised user attempted prompt action"
         );
         return Err("user not authorised for prompt actions".into());
+    }
+
+    // ── T068c / FR-031: Verify session ownership ─────────
+    // Look up the prompt record to find its session, then confirm the
+    // acting user is the session owner.
+    {
+        let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+        if let Ok(Some(record)) = prompt_repo.get_by_id(prompt_id).await {
+            let session_repo = SessionRepo::new(Arc::clone(&state.db));
+            if let Ok(Some(session)) = session_repo.get_by_id(&record.session_id).await {
+                if let Err(err) = check_session_ownership(&session, user_id) {
+                    warn!(
+                        user_id,
+                        prompt_id,
+                        owner = %session.owner_user_id,
+                        "prompt action rejected: non-owner attempt (FR-031)"
+                    );
+                    return Err(err.to_string());
+                }
+            }
+        }
     }
 
     // ── Determine decision from action_id ────────────────
@@ -113,26 +136,19 @@ pub async fn handle_prompt_action(
 
     info!(prompt_id, ?decision, user_id, "prompt decision recorded");
 
-    // ── Resolve oneshot channel ──────────────────────────
+    // ── Resolve oneshot channel via driver ───────────────
     {
-        let mut pending = state.pending_prompts.lock().await;
-        if let Some(tx) = pending.remove(prompt_id) {
-            let response = PromptResponse {
-                decision: match decision {
-                    PromptDecision::Continue => "continue".to_owned(),
-                    PromptDecision::Refine => "refine".to_owned(),
-                    PromptDecision::Stop => "stop".to_owned(),
-                },
-                instruction,
-            };
-            if tx.send(response).is_err() {
-                warn!(prompt_id, "oneshot receiver already dropped");
-            }
-        } else {
-            warn!(
-                prompt_id,
-                "no pending oneshot found (prompt may have timed out)"
-            );
+        let decision_str = match decision {
+            PromptDecision::Continue => "continue",
+            PromptDecision::Refine => "refine",
+            PromptDecision::Stop => "stop",
+        };
+        if let Err(err) = state
+            .driver
+            .resolve_prompt(prompt_id, decision_str, instruction)
+            .await
+        {
+            warn!(prompt_id, %err, "failed to resolve prompt oneshot");
         }
     }
 

@@ -104,6 +104,13 @@ pub async fn handle(
             .next()
             .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
 
+        // S037: capture session thread_ts so the standby notification goes
+        // to the session's dedicated Slack thread.
+        let session_thread_ts = session
+            .thread_ts
+            .as_deref()
+            .map(|ts| slack_morphism::prelude::SlackTs(ts.to_owned()));
+
         // ── Post waiting status to Slack ─────────────────────
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
@@ -126,7 +133,7 @@ pub async fn handle(
                     truncate_text(&input.message, 100),
                 )),
                 blocks: Some(message_blocks),
-                thread_ts: None,
+                thread_ts: session_thread_ts,
             };
             if let Err(err) = slack.enqueue(msg).await {
                 warn!(%err, "failed to enqueue wait status to slack");

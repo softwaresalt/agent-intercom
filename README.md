@@ -101,18 +101,20 @@ Pass `--config <path>` to use a config file in a different location. The default
 
 ### 5. Connect Your IDE
 
-Add to `.vscode/mcp.json`:
+Add to `.vscode/mcp.json`. Use `workspace_id` (recommended — maps to a channel in `config.toml`) or `channel_id` (direct, for single-workspace setups):
 
 ```jsonc
 {
   "servers": {
     "agent-intercom": {
       "type": "http",
-      "url": "http://127.0.0.1:3000/mcp?channel_id={your-slack-channel-id}"
+      "url": "http://127.0.0.1:3000/mcp?workspace_id=my-repo"
     }
   }
 }
 ```
+
+See [Configuration Reference](docs/configuration.md#workspace) for `[[workspace]]` mapping setup.
 
 ## Documentation
 
@@ -167,6 +169,38 @@ agent-intercom-ctl reject <id> --reason "..."     # Reject with reason
 agent-intercom-ctl resume ["instruction"]         # Resume a waiting agent
 agent-intercom-ctl mode remote|local|hybrid       # Switch mode
 ```
+
+## ACP Mode
+
+ACP (Agent Communication Protocol) mode is an alternative server mode where agent-intercom **spawns the AI agent CLI as a subprocess** and communicates with it via a newline-delimited JSON (NDJSON) stream on stdin/stdout, rather than acting as an MCP server that the agent connects to.
+
+Use ACP mode when:
+
+- The agent CLI supports an NDJSON stream interface (e.g., a custom agent built against the ACP protocol).
+- You want the server to own the agent process lifecycle (spawn, monitor, restart).
+- You are running without an IDE MCP integration.
+
+### Enabling ACP Mode
+
+```bash
+agent-intercom --mode acp
+```
+
+### Configuration
+
+```toml
+# host_cli is required for ACP mode — set it to the agent command.
+host_cli = "my-agent"
+host_cli_args = ["--stream"]
+
+[acp]
+max_sessions = 5              # concurrent ACP sessions (default: 5)
+startup_timeout_seconds = 30  # seconds to wait for agent ready signal (default: 30)
+```
+
+ACP mode uses separate credential sources: `SLACK_BOT_TOKEN_ACP`, `SLACK_APP_TOKEN_ACP`, `SLACK_MEMBER_IDS_ACP` (falls back to shared vars if not set). This lets one machine run an MCP server and an ACP server with different Slack identities.
+
+See [Configuration Reference](docs/configuration.md#acp) for full details.
 
 ## Technology
 

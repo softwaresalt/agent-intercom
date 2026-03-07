@@ -34,6 +34,28 @@ pub enum SessionMode {
     Hybrid,
 }
 
+/// Agent connectivity state — separate from session lifecycle status.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectivityStatus {
+    /// Agent is actively communicating (stream messages or tool calls arriving).
+    Online,
+    /// Agent process is alive but no recent activity.
+    Offline,
+    /// Stall detector has flagged this session for inactivity.
+    Stalled,
+}
+
+/// Protocol used by the agent for this session.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtocolMode {
+    /// Agent communicates via the Model Context Protocol (MCP).
+    Mcp,
+    /// Agent communicates via the Agent Client Protocol (ACP) over stdio.
+    Acp,
+}
+
 /// Session domain entity persisted in `SQLite`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -64,6 +86,31 @@ pub struct Session {
     pub terminated_at: Option<DateTime<Utc>>,
     /// Last-reported progress snapshot from the agent.
     pub progress_snapshot: Option<Vec<ProgressItem>>,
+    /// Agent communication protocol for this session. Immutable after creation.
+    pub protocol_mode: ProtocolMode,
+    /// Slack channel ID where this session's messages are posted.
+    pub channel_id: Option<String>,
+    /// Slack thread timestamp of the session's root message.
+    ///
+    /// `None` until the first message is posted. Immutable once set.
+    pub thread_ts: Option<String>,
+    /// Agent connectivity state — separate from lifecycle status.
+    pub connectivity_status: ConnectivityStatus,
+    /// Timestamp of last agent activity for stall detection and recovery.
+    pub last_activity_at: Option<DateTime<Utc>>,
+    /// Session ID of the predecessor session if this is a restart, otherwise `None`.
+    pub restart_of: Option<String>,
+    /// ACP-assigned session identifier returned by `session/new`.
+    ///
+    /// Only populated for ACP sessions after the handshake completes. Required
+    /// for sending `session/prompt` messages to the agent.
+    pub agent_session_id: Option<String>,
+    /// Short title derived from the initial prompt (at most 80 characters).
+    ///
+    /// Populated at session creation from the first prompt text and truncated
+    /// with `"..."` if the prompt exceeds 80 characters. `None` for sessions
+    /// created before this field was introduced.
+    pub title: Option<String>,
 }
 
 impl Session {
@@ -90,6 +137,14 @@ impl Session {
             stall_paused: false,
             terminated_at: None,
             progress_snapshot: None,
+            protocol_mode: ProtocolMode::Mcp,
+            channel_id: None,
+            thread_ts: None,
+            connectivity_status: ConnectivityStatus::Online,
+            last_activity_at: None,
+            restart_of: None,
+            agent_session_id: None,
+            title: None,
         }
     }
 
@@ -109,5 +164,27 @@ impl Session {
                 SessionStatus::Terminated | SessionStatus::Interrupted
             )
         )
+    }
+}
+
+/// Truncate a prompt string to produce a session title (at most 80 chars).
+///
+/// Returns the prompt unchanged when it is 80 characters or fewer. When
+/// longer, returns the first 80 characters followed by `"..."`.
+///
+/// # Examples
+///
+/// ```
+/// # use agent_intercom::models::session::truncate_session_title;
+/// assert_eq!(truncate_session_title("short"), "short");
+/// assert_eq!(truncate_session_title(&"a".repeat(81)), format!("{}...", "a".repeat(77)));
+/// ```
+#[must_use]
+pub fn truncate_session_title(prompt: &str) -> String {
+    if prompt.chars().count() <= 80 {
+        prompt.to_owned()
+    } else {
+        // Take 77 chars so that the appended "..." keeps the total at most 80.
+        format!("{}...", prompt.chars().take(77).collect::<String>())
     }
 }

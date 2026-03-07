@@ -1,4 +1,5 @@
 ---
+name: speckit.behavior
 description: Generates a comprehensive Behavioral Matrix (SCENARIOS.md) detailing permutations, edge cases, and expected outcomes based on the Spec and Plan.
 handoffs: 
   - label: Create Tasks

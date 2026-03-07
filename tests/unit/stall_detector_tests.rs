@@ -198,6 +198,77 @@ async fn cancellation_stops_detector() {
     assert!(result.is_err(), "no events after cancellation");
 }
 
+// ── T147 (S107, S108): Stall timer initialization from DB timestamps ──────────
+
+/// S107 — When a detector is initialised with `initial_elapsed` close to the
+/// threshold, it must fire significantly sooner than the full `inactivity_threshold`.
+///
+/// This simulates a server restart where `now - last_activity_at ≈ threshold`.
+#[tokio::test]
+async fn stall_timer_with_near_threshold_elapsed_fires_quickly() {
+    let ct = CancellationToken::new();
+    let (tx, mut rx) = mpsc::channel(32);
+    let detector = StallDetector::new(
+        "s-near-elapsed".to_owned(),
+        Duration::from_secs(5),
+        Duration::from_secs(60),
+        3,
+        tx,
+        ct.clone(),
+    )
+    .with_initial_elapsed(Duration::from_millis(4_800));
+
+    let _handle = detector.spawn();
+
+    // Should fire within ~500 ms (only ~200 ms remaining from 5 s threshold).
+    let event = tokio::time::timeout(Duration::from_millis(800), rx.recv())
+        .await
+        .expect("must fire quickly because most of the threshold already elapsed")
+        .expect("channel must be open");
+
+    assert!(
+        matches!(event, StallEvent::Stalled { ref session_id, .. } if session_id == "s-near-elapsed"),
+        "expected Stalled for 's-near-elapsed'; got {event:?}"
+    );
+
+    ct.cancel();
+}
+
+/// S108 — When `initial_elapsed >= inactivity_threshold` the detector must fire
+/// immediately (within a short grace period) rather than waiting the full interval.
+///
+/// This simulates a server restart where the agent was already overdue for a
+/// stall check before the server went down.
+#[tokio::test]
+async fn stall_timer_with_past_threshold_elapsed_fires_immediately() {
+    let ct = CancellationToken::new();
+    let (tx, mut rx) = mpsc::channel(32);
+    let detector = StallDetector::new(
+        "s-past-elapsed".to_owned(),
+        Duration::from_secs(5),
+        Duration::from_secs(60),
+        3,
+        tx,
+        ct.clone(),
+    )
+    .with_initial_elapsed(Duration::from_secs(10)); // 10 s > 5 s threshold
+
+    let _handle = detector.spawn();
+
+    // Should fire almost immediately (within 300 ms) because elapsed > threshold.
+    let event = tokio::time::timeout(Duration::from_millis(400), rx.recv())
+        .await
+        .expect("must fire immediately when initial_elapsed >= threshold")
+        .expect("channel must be open");
+
+    assert!(
+        matches!(event, StallEvent::Stalled { .. }),
+        "expected Stalled event; got {event:?}"
+    );
+
+    ct.cancel();
+}
+
 // ── Stall notification content (T056 — S058, S060, S061) ─────────────────────
 
 /// S058 — The stall alert blocks produced for a stalled session must include
@@ -252,6 +323,142 @@ async fn stall_event_emitted_without_slack_configured() {
     assert!(
         matches!(event, StallEvent::Stalled { ref session_id, .. } if session_id == "s-no-slack"),
         "expected Stalled event for 's-no-slack'; got: {event:?}"
+    );
+
+    ct.cancel();
+    drop(handle);
+}
+
+// ── Phase 11: ACP stall detection (T091–T093, S063–S066) ─────────────────────
+
+/// S063 — Stream activity (any successful ACP message parse) must reset the
+/// stall timer.  This test verifies the `StallDetectorHandle::reset()` mechanism
+/// directly — the same mechanism triggered by `AgentEvent::StreamActivity`.
+#[tokio::test]
+async fn acp_stream_activity_resets_stall_timer() {
+    // Very short threshold so the test completes quickly.
+    let (detector, mut rx, ct) = test_detector("acp-s1", 1, 60, 3);
+    let handle = detector.spawn();
+
+    // Simulate stream activity before the threshold expires.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    handle.reset(); // ← what run_reader does when StreamActivity fires
+
+    // Wait past the original threshold — stall should NOT have fired.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let result = rx.try_recv();
+    assert!(
+        result.is_err(),
+        "stream activity must prevent stall from firing before full threshold elapses"
+    );
+
+    // After the full threshold from the reset point, stall fires normally.
+    let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("stall must fire after full threshold from reset")
+        .expect("channel must be open");
+    assert!(
+        matches!(event, StallEvent::Stalled { .. }),
+        "expected Stalled event after inactivity; got {event:?}"
+    );
+
+    ct.cancel();
+    drop(handle);
+}
+
+/// S064 — When a stall fires for an ACP session, the nudge mechanism must
+/// deliver the nudge directly on the agent stream.
+///
+/// This test verifies the ACP driver `send_prompt` path: posting a nudge via
+/// the driver writes a `prompt/send` message to the registered writer channel,
+/// which is what the stall consumer does for ACP sessions in lieu of a Slack
+/// notification.
+#[tokio::test]
+async fn acp_nudge_delivered_via_stream() {
+    use agent_intercom::driver::acp_driver::AcpDriver;
+    use agent_intercom::driver::AgentDriver;
+    use tokio::sync::mpsc;
+
+    let session_id = "acp-nudge-sess";
+    let acp_driver = AcpDriver::new();
+    let (writer_tx, mut writer_rx) = mpsc::channel::<serde_json::Value>(8);
+    acp_driver.register_session(session_id, writer_tx).await;
+    acp_driver
+        .register_agent_session_id(session_id, "agent-nudge-sess")
+        .await;
+
+    // Simulate the stall consumer calling driver.send_prompt for ACP nudge.
+    acp_driver
+        .send_prompt(session_id, "You seem stalled. Please continue.")
+        .await
+        .expect("send_prompt must succeed");
+
+    // Verify the nudge arrived on the stream writer channel.
+    let msg = writer_rx
+        .try_recv()
+        .expect("writer channel must have received the nudge");
+    assert_eq!(
+        msg["method"].as_str(),
+        Some("session/prompt"),
+        "ACP nudge must be delivered as a session/prompt message on the stream"
+    );
+    assert!(
+        msg["params"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("stalled"),
+        "nudge text must reference the stall; got: {:?}",
+        msg["params"]["prompt"][0]["text"]
+    );
+}
+
+/// S066 — After all nudge retries are exhausted, the stall detector emits an
+/// `Escalated` event so the stall consumer can notify the operator.
+///
+/// This test verifies the detector's escalation path at the unit level.
+/// The stall consumer converts `Escalated` into a Slack notification (tested
+/// separately in integration tests where `SlackService` is available).
+#[tokio::test]
+async fn nudge_retry_exhaustion_notifies_operator() {
+    // 1-second inactivity threshold, 1-second escalation intervals, 2 retries.
+    let (detector, mut rx, ct) = test_detector("acp-escalate", 1, 1, 2);
+    let handle = detector.spawn();
+
+    // Collect: Stalled, AutoNudge x2, Escalated
+    let event1 = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .expect("stall event")
+        .expect("channel open");
+    assert!(
+        matches!(event1, StallEvent::Stalled { .. }),
+        "expected Stalled first; got {event1:?}"
+    );
+
+    let event2 = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .expect("nudge 1")
+        .expect("channel open");
+    assert!(
+        matches!(event2, StallEvent::AutoNudge { nudge_count: 1, .. }),
+        "expected AutoNudge count=1; got {event2:?}"
+    );
+
+    let event3 = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .expect("nudge 2")
+        .expect("channel open");
+    assert!(
+        matches!(event3, StallEvent::AutoNudge { nudge_count: 2, .. }),
+        "expected AutoNudge count=2; got {event3:?}"
+    );
+
+    let event4 = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .expect("escalated")
+        .expect("channel open");
+    assert!(
+        matches!(event4, StallEvent::Escalated { .. }),
+        "expected Escalated after max retries; got {event4:?}"
     );
 
     ct.cancel();

@@ -3,7 +3,7 @@ members = ["."]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 authors = ["Agent Intercom Team"]
@@ -78,10 +78,15 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-tokio-util = { version = "0.7.18", features = ["rt"] }
-reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 glob = "0.3"
 regex = "1.12.3"
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+tokio-util = { version = "0.7.18", features = ["rt", "codec"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal", "process"] }
 
 [dev-dependencies]
 serial_test = "3"

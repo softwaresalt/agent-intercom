@@ -1,14 +1,74 @@
 //! Global configuration parsing, validation, and credential loading.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
-use tracing::warn;
+use serde::{Deserialize, Serialize};
 
+use crate::mode::ServerMode;
 use crate::{AppError, Result};
+
+/// Strip the Windows `\\?\` extended-length path prefix from a [`PathBuf`].
+///
+/// `Path::canonicalize()` on Windows often prepends this prefix, which leaks
+/// into file URIs, Slack messages, and subprocess arguments where it causes
+/// parse failures.  This helper removes the prefix while preserving the
+/// underlying absolute path.
+///
+/// On non-Windows targets (or paths without the prefix) the input is returned
+/// unchanged.
+#[must_use]
+pub fn strip_unc_prefix(path: PathBuf) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path
+    }
+}
+
+/// A single workspace-to-channel mapping entry configured via `[[workspace]]`.
+///
+/// Each entry maps a short `workspace_id` string (e.g. `"my-repo"`) to a
+/// Slack `channel_id` so that agents connecting with
+/// `?workspace_id=my-repo` are automatically routed to the correct channel.
+///
+/// The optional `path` field records the physical filesystem path for the
+/// repository root. In ACP mode this becomes the working directory of the
+/// spawned agent process; without it the server falls back to
+/// `default_workspace_root`.
+///
+/// # Examples
+///
+/// ```toml
+/// [[workspace]]
+/// workspace_id = "my-repo"
+/// channel_id   = "C0123456789"
+/// label        = "My Repository"
+/// path         = "/home/user/projects/my-repo"
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct WorkspaceMapping {
+    /// Short identifier supplied by agents as `?workspace_id=<id>`.
+    ///
+    /// Must be non-empty and unique within the `[[workspace]]` list.
+    pub workspace_id: String,
+    /// Slack channel ID that messages for this workspace are routed to.
+    ///
+    /// Must be non-empty.
+    pub channel_id: String,
+    /// Optional human-readable label shown in logs and Slack messages.
+    pub label: Option<String>,
+    /// Optional filesystem path to the repository root for this workspace.
+    ///
+    /// Used in ACP mode as the `current_dir()` for the spawned agent process.
+    /// Falls back to `GlobalConfig::default_workspace_root` when absent.
+    pub path: Option<PathBuf>,
+}
 
 /// Nested Slack configuration for Socket Mode connectivity.
 ///
@@ -143,6 +203,66 @@ fn default_max_concurrent_sessions() -> u32 {
     3
 }
 
+fn default_acp_max_sessions() -> usize {
+    5
+}
+
+fn default_acp_startup_timeout_seconds() -> u64 {
+    30
+}
+
+fn default_acp_max_msg_rate() -> u32 {
+    10
+}
+
+fn default_acp_http_port() -> u16 {
+    3001
+}
+
+/// ACP-mode specific configuration.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct AcpConfig {
+    /// Maximum number of concurrent ACP sessions.
+    ///
+    /// Requests beyond this limit are rejected with a descriptive error.
+    /// Defaults to `5`.
+    #[serde(default = "default_acp_max_sessions")]
+    pub max_sessions: usize,
+    /// Seconds to wait for the agent to emit its ready signal on stdout.
+    ///
+    /// If no line is received within this window the spawner kills the
+    /// process and returns `AppError::Acp("startup timeout")`. Defaults
+    /// to `30`.
+    #[serde(default = "default_acp_startup_timeout_seconds")]
+    pub startup_timeout_seconds: u64,
+    /// Maximum inbound ACP messages per second (token-bucket rate limit, FR-044).
+    ///
+    /// Exceeding this rate triggers a warning log and the message is dropped.
+    /// Sustained flooding (> 50 consecutive drops) terminates the session.
+    /// Set to `0` to disable rate limiting. Defaults to `10`.
+    #[serde(default = "default_acp_max_msg_rate")]
+    pub max_msg_rate: u32,
+    /// HTTP port for the MCP tool endpoint when running in ACP mode.
+    ///
+    /// Defaults to `3001` so that an ACP server instance can run concurrently
+    /// with an MCP server instance (which defaults to port `3000`).  The CLI
+    /// `--port` flag takes precedence over this value.
+    #[serde(default = "default_acp_http_port")]
+    pub http_port: u16,
+}
+
+impl Default for AcpConfig {
+    fn default() -> Self {
+        Self {
+            max_sessions: default_acp_max_sessions(),
+            startup_timeout_seconds: default_acp_startup_timeout_seconds(),
+            max_msg_rate: default_acp_max_msg_rate(),
+            http_port: default_acp_http_port(),
+        }
+    }
+}
+
 fn default_http_port() -> u16 {
     3000
 }
@@ -242,6 +362,20 @@ pub struct GlobalConfig {
     /// Controls how much detail is posted to Slack during agent sessions.
     #[serde(default = "default_slack_detail_level")]
     pub slack_detail_level: SlackDetailLevel,
+    /// ACP-mode configuration (max sessions, startup timeout).
+    #[serde(default)]
+    pub acp: AcpConfig,
+    /// Workspace-to-channel routing table.
+    ///
+    /// Each `[[workspace]]` entry in `config.toml` maps a `workspace_id`
+    /// (the string passed by agents as `?workspace_id=…`) to a Slack
+    /// `channel_id`.  The list is validated for uniqueness and non-empty
+    /// identifiers during [`GlobalConfig::from_toml_str`].
+    ///
+    /// Hot-reload support: changes to `config.toml` take effect for new
+    /// sessions when a [`crate::config_watcher::ConfigWatcher`] is active.
+    #[serde(default, rename = "workspace")]
+    pub workspaces: Vec<WorkspaceMapping>,
 }
 
 impl GlobalConfig {
@@ -271,31 +405,39 @@ impl GlobalConfig {
     /// Load Slack credentials from OS keychain with env-var fallback, and load
     /// authorized user IDs from `SLACK_MEMBER_IDS`.
     ///
-    /// Tries the `agent-intercom` keyring service first for Slack tokens,
-    /// then falls back to `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` environment
-    /// variables. `SLACK_TEAM_ID` is optional (FR-041) and will not cause an
-    /// error if absent.
+    /// When `mode` is [`ServerMode::Acp`], mode-prefixed sources are tried
+    /// first (keychain service `agent-intercom-acp`, env vars with `_ACP`
+    /// suffix) before falling back to the shared names. This allows two
+    /// server instances (one MCP, one ACP) to run on the same machine with
+    /// independent Slack app credentials. See ADR-0015.
     ///
-    /// Authorized user IDs are always read from `SLACK_MEMBER_IDS`
-    /// (comma-separated Slack user IDs, e.g. `U0123456789,U9876543210`).
+    /// Resolution order per credential:
+    /// 1. Keychain `agent-intercom-{mode}` / `{key}`
+    /// 2. Env var `{ENV_VAR}_{MODE}`
+    /// 3. Keychain `agent-intercom` / `{key}` (shared fallback)
+    /// 4. Env var `{ENV_VAR}` (shared fallback)
     ///
     /// # Errors
     ///
     /// Returns `AppError::Config` if neither keychain nor env vars provide
     /// the required Slack tokens, or if `SLACK_MEMBER_IDS` is
     /// absent or empty.
-    pub async fn load_credentials(&mut self) -> Result<()> {
-        let _span = tracing::info_span!("load_credentials").entered();
-        self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN").await?;
-        self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN").await?;
+    pub async fn load_credentials(&mut self, mode: ServerMode) -> Result<()> {
+        let _span = tracing::info_span!("load_credentials", ?mode).entered();
+        self.slack.app_token = load_credential("slack_app_token", "SLACK_APP_TOKEN", mode).await?;
+        self.slack.bot_token = load_credential("slack_bot_token", "SLACK_BOT_TOKEN", mode).await?;
         // SLACK_TEAM_ID is optional per FR-041 — absence is not an error.
-        self.slack.team_id = load_optional_credential("slack_team_id", "SLACK_TEAM_ID").await;
-        self.load_authorized_users()?;
+        self.slack.team_id = load_optional_credential("slack_team_id", "SLACK_TEAM_ID", mode).await;
+        self.load_authorized_users(mode)?;
         Ok(())
     }
 
     /// Load authorized Slack user IDs from the `SLACK_MEMBER_IDS`
-    /// environment variable.
+    /// environment variable, with mode-prefixed fallback.
+    ///
+    /// Resolution order:
+    /// 1. `SLACK_MEMBER_IDS_{MODE}` (e.g. `SLACK_MEMBER_IDS_ACP`)
+    /// 2. `SLACK_MEMBER_IDS` (shared fallback)
     ///
     /// The variable must contain a comma-separated list of Slack user IDs
     /// (e.g., `U0123456789,U9876543210`). Whitespace around each entry is
@@ -303,8 +445,8 @@ impl GlobalConfig {
     ///
     /// # Errors
     ///
-    /// Returns `AppError::Config` if the variable is absent, empty, or
-    /// resolves to an empty list after trimming.
+    /// Returns `AppError::Config` if both variables are absent, empty, or
+    /// resolve to an empty list after trimming.
     ///
     /// # Note
     ///
@@ -312,19 +454,27 @@ impl GlobalConfig {
     /// test crate.  It is an internal implementation detail of
     /// [`load_credentials`] and is not part of the public API contract.
     #[doc(hidden)]
-    pub fn load_authorized_users(&mut self) -> Result<()> {
-        let raw = env::var("SLACK_MEMBER_IDS").unwrap_or_default();
+    pub fn load_authorized_users(&mut self, mode: ServerMode) -> Result<()> {
+        let mode_suffix = mode_env_suffix(mode);
+        let mode_env = format!("SLACK_MEMBER_IDS{mode_suffix}");
+
+        // Try mode-prefixed variable first, then shared fallback.
+        let raw = env::var(&mode_env)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .or_else(|| env::var("SLACK_MEMBER_IDS").ok().filter(|v| !v.is_empty()))
+            .unwrap_or_default();
+
         let ids: Vec<String> = raw
             .split(',')
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
             .collect();
         if ids.is_empty() {
-            return Err(AppError::Config(
-                "no authorized user IDs found: set SLACK_MEMBER_IDS to a \
+            return Err(AppError::Config(format!(
+                "no authorized user IDs found: set {mode_env} or SLACK_MEMBER_IDS to a \
                  comma-separated list of Slack user IDs (e.g. U0123456789,U9876543210)"
-                    .into(),
-            ));
+            )));
         }
         self.authorized_user_ids = ids;
         Ok(())
@@ -366,74 +516,393 @@ impl GlobalConfig {
             .default_workspace_root
             .canonicalize()
             .map_err(|err| AppError::Config(format!("default_workspace_root invalid: {err}")))?;
-        self.default_workspace_root = canonical_root;
+        self.default_workspace_root = strip_unc_prefix(canonical_root);
 
+        self.validate_workspace_mappings()?;
+
+        Ok(())
+    }
+
+    /// Validate workspace-to-channel mapping entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` when:
+    /// - any `workspace_id` or `channel_id` is empty
+    /// - `workspace_id` values are not unique within the list
+    pub fn validate_workspace_mappings(&self) -> Result<()> {
+        let mut seen: HashSet<&str> = HashSet::new();
+        for mapping in &self.workspaces {
+            if mapping.workspace_id.is_empty() {
+                return Err(AppError::Config(
+                    "workspace_id cannot be empty in [[workspace]] entry".into(),
+                ));
+            }
+            if mapping.channel_id.is_empty() {
+                return Err(AppError::Config(
+                    "channel_id cannot be empty in [[workspace]] entry".into(),
+                ));
+            }
+            if !seen.insert(mapping.workspace_id.as_str()) {
+                return Err(AppError::Config(format!(
+                    "duplicate workspace_id '{}' in [[workspace]] entries",
+                    mapping.workspace_id
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve the effective Slack channel ID from connection parameters.
+    ///
+    /// Implements FR-011, FR-012, and FR-013:
+    ///
+    /// 1. If `workspace_id` is `Some(_)`, look it up in the `[[workspace]]`
+    ///    entries.
+    ///    - **Found** → return the mapped `channel_id`.
+    ///    - **Not found** → return `None` (`workspace_id` takes precedence;
+    ///      the bare `channel_id` parameter is **not** used as a fallback).
+    /// 2. If `workspace_id` is `None`, return `channel_id` unchanged
+    ///    (backward compatibility with legacy `?channel_id=` clients).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let config = agent_intercom::config::GlobalConfig::from_toml_str("").unwrap();
+    /// // workspace_id resolves to mapped channel
+    /// let ch = config.resolve_channel_id(Some("my-repo"), None);
+    ///
+    /// // bare channel_id used as-is (legacy clients)
+    /// let ch = config.resolve_channel_id(None, Some("C0123456789"));
+    /// ```
+    #[must_use]
+    pub fn resolve_channel_id<'a>(
+        &'a self,
+        workspace_id: Option<&str>,
+        channel_id: Option<&'a str>,
+    ) -> Option<&'a str> {
+        if let Some(ws_id) = workspace_id {
+            // workspace_id present → look up in the mapping table.
+            // If not found, return None (no silent fallback).
+            self.workspaces
+                .iter()
+                .find(|m| m.workspace_id == ws_id)
+                .map(|m| m.channel_id.as_str())
+        } else {
+            // No workspace_id → pass channel_id through unchanged.
+            channel_id
+        }
+    }
+
+    /// Resolve the workspace mapping associated with a Slack channel ID.
+    ///
+    /// Returns the first `[[workspace]]` entry whose `channel_id` matches the
+    /// given value, or `None` if no match is found. Useful in ACP mode where
+    /// an incoming slash command arrives on a specific channel and the server
+    /// needs to determine which repository to spawn the agent in.
+    #[must_use]
+    pub fn resolve_workspace_by_channel_id(&self, channel_id: &str) -> Option<&WorkspaceMapping> {
+        self.workspaces.iter().find(|m| m.channel_id == channel_id)
+    }
+
+    /// Resolve the workspace root directory for a given Slack channel.
+    ///
+    /// Looks up the `[[workspace]]` entry for `channel_id` and returns its
+    /// `path` when set. Falls back to `default_workspace_root` when the
+    /// channel is unknown or the entry has no `path` configured.
+    #[must_use]
+    pub fn workspace_root_for_channel(&self, channel_id: &str) -> &Path {
+        self.workspaces
+            .iter()
+            .find(|m| m.channel_id == channel_id)
+            .and_then(|m| m.path.as_deref())
+            .unwrap_or(&self.default_workspace_root)
+    }
+
+    /// Validate configuration requirements for ACP mode.
+    ///
+    /// Verifies that `host_cli` is non-empty and, if it is an absolute path,
+    /// that the path exists on disk. Relative command names (resolved via
+    /// `PATH` at spawn time) are accepted as-is.
+    ///
+    /// Call this before starting the ACP transport to surface misconfiguration
+    /// early with a clear error message.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` when:
+    /// - `host_cli` is empty
+    /// - `host_cli` is an absolute path that does not exist
+    pub fn validate_for_acp_mode(&self) -> Result<()> {
+        if self.host_cli.is_empty() {
+            return Err(AppError::Config(
+                "host_cli must be set to use ACP mode".into(),
+            ));
+        }
+        let path = std::path::Path::new(&self.host_cli);
+        if path.is_absolute() && !path.exists() {
+            return Err(AppError::Config(format!(
+                "host_cli '{}' does not exist",
+                self.host_cli
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validate `host_cli` path security and log a warning if the binary is
+    /// outside the standard system locations or not found on `PATH` (FR-038,
+    /// FR-039).
+    ///
+    /// - For **absolute paths**: returns `AppError::Config` if the file does
+    ///   not exist; logs `WARN` if the path is outside known-good directories.
+    /// - For **relative names**: logs `WARN` if the name cannot be located on
+    ///   `PATH` (allows deferred PATH setup without hard-failing).
+    ///
+    /// This function is additive to [`validate_for_acp_mode`], which performs
+    /// the mandatory existence and non-empty checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Config` when `host_cli` is an absolute path that
+    /// does not exist on the filesystem.
+    pub fn validate_host_cli_path(&self) -> Result<()> {
+        let cli = &self.host_cli;
+        let path = std::path::Path::new(cli.as_str());
+
+        if path.is_absolute() {
+            if !path.exists() {
+                return Err(AppError::Config(format!("host_cli '{cli}' does not exist")));
+            }
+            if !is_standard_host_cli_location(path) {
+                tracing::warn!(
+                    host_cli = %cli,
+                    "host_cli is not in a standard system directory — verify this is the intended binary"
+                );
+            }
+        } else {
+            // Relative name — check whether it can be found on PATH.
+            if !is_host_cli_on_path(cli) {
+                tracing::warn!(
+                    host_cli = %cli,
+                    "host_cli '{}' was not found on PATH — agent spawn may fail at runtime",
+                    cli
+                );
+            }
+        }
         Ok(())
     }
 }
 
-/// Keychain service identifier used for credential storage.
+/// Return `true` if `name` (a relative binary name) can be located in one of
+/// the directories on `PATH`.
+///
+/// On Windows also checks `.exe`, `.cmd`, and `.bat` extensions.
+fn is_host_cli_on_path(name: &str) -> bool {
+    let binary = std::path::Path::new(name)
+        .file_name()
+        .map_or_else(|| name.to_owned(), |n| n.to_string_lossy().into_owned());
+
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path_var).any(|dir| {
+        if dir.join(&binary).exists() {
+            return true;
+        }
+        #[cfg(windows)]
+        for ext in &[".exe", ".cmd", ".bat"] {
+            if dir.join(format!("{binary}{ext}")).exists() {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+/// Return `true` if `path` resides inside one of the standard system
+/// installation directories for the current platform.
+///
+/// Paths outside these directories are not inherently unsafe, but warrant
+/// operator verification that the intended binary is being invoked.
+fn is_standard_host_cli_location(path: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        let lower = path.to_string_lossy().to_lowercase();
+        if lower.starts_with(r"c:\windows")
+            || lower.starts_with(r"c:\program files")
+            || lower.starts_with(r"c:\program files (x86)")
+        {
+            return true;
+        }
+        // User-profile install locations (AppData, USERPROFILE).
+        for var in &["APPDATA", "LOCALAPPDATA", "USERPROFILE"] {
+            if let Ok(p) = std::env::var(var) {
+                if lower.starts_with(&p.to_lowercase()) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    #[cfg(unix)]
+    {
+        const STANDARD: &[&str] = &[
+            "/usr/bin",
+            "/usr/local/bin",
+            "/bin",
+            "/sbin",
+            "/usr/sbin",
+            "/opt/homebrew/bin",
+            "/snap/bin",
+        ];
+        if STANDARD.iter().any(|dir| path.starts_with(dir)) {
+            return true;
+        }
+        // User-specific common install locations.
+        if let Ok(home) = std::env::var("HOME") {
+            for suffix in &[".local/bin", ".cargo/bin", ".nix-profile/bin"] {
+                if path.starts_with(format!("{home}/{suffix}")) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = path;
+        true // Unknown platform — assume standard.
+    }
+}
+
+/// Keychain service identifier used for credential storage (shared/default).
 const KEYCHAIN_SERVICE: &str = "agent-intercom";
 
-/// Load a single credential from OS keychain with env-var fallback.
+/// Return the uppercase env-var suffix for a given server mode.
 ///
-/// Resolution order:
-/// 1. OS keychain service `agent-intercom`, key `{keyring_key}`
-/// 2. Environment variable `{env_key}`
+/// MCP is the default protocol, so it uses no suffix (empty string) for
+/// backwards compatibility. ACP mode uses `_ACP`.
+fn mode_env_suffix(mode: ServerMode) -> &'static str {
+    match mode {
+        ServerMode::Mcp => "",
+        ServerMode::Acp => "_ACP",
+    }
+}
+
+/// Return the keychain service name scoped to a server mode.
 ///
-/// Empty values from either source are treated as absent.
+/// MCP uses the shared service (`agent-intercom`), ACP uses
+/// `agent-intercom-acp`.
+fn mode_keychain_service(mode: ServerMode) -> &'static str {
+    match mode {
+        ServerMode::Mcp => KEYCHAIN_SERVICE,
+        ServerMode::Acp => "agent-intercom-acp",
+    }
+}
+
+/// Try a single keychain lookup and return `Ok(value)` on success.
+async fn try_keyring(service: &str, key: &str) -> std::result::Result<String, ()> {
+    let service = service.to_owned();
+    let key = key.to_owned();
+    let result = tokio::task::spawn_blocking(move || {
+        keyring::Entry::new(&service, &key).and_then(|entry| entry.get_password())
+    })
+    .await
+    .map_err(|_| ())?;
+    match result {
+        Ok(value) if !value.is_empty() => Ok(value),
+        _ => Err(()),
+    }
+}
+
+/// Load a single credential using mode-prefixed resolution with fallback.
+///
+/// Resolution order (first non-empty wins):
+/// 1. Keychain `agent-intercom-{mode}` / `{keyring_key}`
+/// 2. Env var `{env_key}_{MODE}`
+/// 3. Keychain `agent-intercom` / `{keyring_key}` (shared)
+/// 4. Env var `{env_key}` (shared)
+///
+/// For MCP mode (the default), steps 1–2 are identical to 3–4 because the
+/// mode suffix is empty, so the function behaves exactly as before.
 ///
 /// # Errors
 ///
-/// Returns `AppError::Config` with a message naming both the keychain
-/// service and the environment variable so the operator knows exactly
-/// which sources were checked.
-async fn load_credential(keyring_key: &str, env_key: &str) -> Result<String> {
-    let key = keyring_key.to_owned();
-    let _span = tracing::info_span!("load_credential", key = keyring_key, env = env_key).entered();
+/// Returns `AppError::Config` with a message naming all checked sources.
+async fn load_credential(keyring_key: &str, env_key: &str, mode: ServerMode) -> Result<String> {
+    let _span =
+        tracing::info_span!("load_credential", key = keyring_key, env = env_key, ?mode,).entered();
 
-    // Try OS keychain first via spawn_blocking (keyring is synchronous I/O).
-    let keychain_result = tokio::task::spawn_blocking(move || {
-        keyring::Entry::new(KEYCHAIN_SERVICE, &key).and_then(|entry| entry.get_password())
-    })
-    .await
-    .map_err(|err| AppError::Config(format!("keychain task panicked: {err}")))?;
+    let mode_service = mode_keychain_service(mode);
+    let mode_suffix = mode_env_suffix(mode);
+    let mode_env = format!("{env_key}{mode_suffix}");
 
-    match keychain_result {
-        Ok(value) if !value.is_empty() => {
-            tracing::info!(key = keyring_key, source = "keychain", "credential loaded");
-            return Ok(value);
-        }
-        Ok(_) => {
-            warn!(key = keyring_key, "keychain entry is empty, trying env var");
-        }
-        Err(err) => {
-            warn!(
+    // 1. Mode-specific keychain.
+    if let Ok(value) = try_keyring(mode_service, keyring_key).await {
+        tracing::info!(
+            key = keyring_key,
+            source = "keychain",
+            service = mode_service,
+            "credential loaded"
+        );
+        return Ok(value);
+    }
+
+    // 2. Mode-specific env var.
+    if let Ok(value) = env::var(&mode_env) {
+        if !value.is_empty() {
+            tracing::info!(
                 key = keyring_key,
-                ?err,
-                "keychain lookup failed, trying env var"
+                source = "env",
+                var = mode_env.as_str(),
+                "credential loaded"
             );
+            return Ok(value);
         }
     }
 
-    // Fallback to environment variable (empty value treated as absent).
-    match env::var(env_key) {
-        Ok(value) if !value.is_empty() => {
-            tracing::info!(key = keyring_key, source = "env", "credential loaded");
-            Ok(value)
+    // 3–4: Only needed when mode ≠ Mcp (MCP has no suffix, so 1–2 already
+    //       checked the shared names).
+    if mode != ServerMode::Mcp {
+        if let Ok(value) = try_keyring(KEYCHAIN_SERVICE, keyring_key).await {
+            tracing::info!(
+                key = keyring_key,
+                source = "keychain",
+                service = KEYCHAIN_SERVICE,
+                "credential loaded (shared fallback)"
+            );
+            return Ok(value);
         }
-        _ => Err(AppError::Config(format!(
+        if let Ok(value) = env::var(env_key) {
+            if !value.is_empty() {
+                tracing::info!(
+                    key = keyring_key,
+                    source = "env",
+                    var = env_key,
+                    "credential loaded (shared fallback)"
+                );
+                return Ok(value);
+            }
+        }
+    }
+
+    if mode == ServerMode::Mcp {
+        Err(AppError::Config(format!(
             "credential `{keyring_key}` not found: checked keychain service \
              `{KEYCHAIN_SERVICE}` and environment variable `{env_key}`"
-        ))),
+        )))
+    } else {
+        Err(AppError::Config(format!(
+            "credential `{keyring_key}` not found: checked keychain services \
+             `{mode_service}` and `{KEYCHAIN_SERVICE}`, and environment \
+             variables `{mode_env}` and `{env_key}`"
+        )))
     }
 }
 
 /// Load an optional credential — returns an empty string if absent.
 ///
 /// Uses the same resolution order as [`load_credential`] but never fails.
-async fn load_optional_credential(keyring_key: &str, env_key: &str) -> String {
-    if let Ok(value) = load_credential(keyring_key, env_key).await {
+async fn load_optional_credential(keyring_key: &str, env_key: &str, mode: ServerMode) -> String {
+    if let Ok(value) = load_credential(keyring_key, env_key, mode).await {
         value
     } else {
         tracing::info!(

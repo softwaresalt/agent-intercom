@@ -29,6 +29,18 @@ pub enum AuditEventType {
     SessionTerminate,
     /// Agent session interrupted by crash or shutdown.
     SessionInterrupt,
+    /// ACP agent session started (FR-043).
+    AcpSessionStart,
+    /// ACP agent session stopped by operator (FR-043).
+    AcpSessionStop,
+    /// ACP agent session paused by operator (FR-043).
+    AcpSessionPause,
+    /// ACP agent session resumed by operator (FR-043).
+    AcpSessionResume,
+    /// Steering message delivered to ACP agent stream (FR-043).
+    AcpSteerDelivered,
+    /// Task queued for ACP agent execution (FR-043).
+    AcpTaskQueued,
 }
 
 /// A structured record of an agent interaction event.

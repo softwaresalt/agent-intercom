@@ -16,10 +16,15 @@ use tracing_subscriber::{fmt, EnvFilter};
 use agent_intercom::audit::writer::JsonlAuditWriter;
 use agent_intercom::audit::AuditLogger;
 use agent_intercom::config::GlobalConfig;
+use agent_intercom::config_watcher::ConfigWatcher;
+use agent_intercom::driver::acp_driver::AcpDriver;
+use agent_intercom::driver::mcp_driver::McpDriver;
+use agent_intercom::driver::AgentEvent;
 use agent_intercom::mcp::handler::{
     AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
 };
 use agent_intercom::mcp::{sse, transport};
+use agent_intercom::mode::ServerMode;
 use agent_intercom::orchestrator::{child_monitor, stall_consumer};
 use agent_intercom::persistence::{db, retention};
 use agent_intercom::policy::watcher::PolicyWatcher;
@@ -73,6 +78,14 @@ struct Cli {
     /// Defaults to `both`.
     #[arg(long, value_enum, default_value_t = Transport::Both)]
     transport: Transport,
+
+    /// Server protocol mode: `mcp` (default) or `acp`.
+    ///
+    /// `mcp` starts the standard Model Context Protocol transport.
+    /// `acp` starts the Agent Communication Protocol stream processor
+    /// and skips the MCP HTTP/SSE and stdio transports.
+    #[arg(long, value_enum, default_value_t = ServerMode::Mcp)]
+    mode: ServerMode,
 }
 
 fn main() -> Result<()> {
@@ -104,16 +117,46 @@ async fn run(args: Cli) -> Result<()> {
         let canonical = std::path::Path::new(&ws)
             .canonicalize()
             .map_err(|err| AppError::Config(format!("invalid workspace override: {err}")))?;
-        config.default_workspace_root = canonical;
+        config.default_workspace_root = agent_intercom::config::strip_unc_prefix(canonical);
     }
 
     // Override HTTP port from CLI if provided.
+    let cli_port_override = args.port.is_some();
     if let Some(port) = args.port {
         config.http_port = port;
     }
 
     // Load Slack credentials from keyring / env vars.
-    config.load_credentials().await?;
+    // Mode-prefixed sources are tried first for ACP (ADR-0015).
+    config.load_credentials(args.mode).await?;
+
+    // Validate ACP-specific configuration when running in ACP mode.
+    if args.mode == ServerMode::Acp {
+        config.validate_for_acp_mode()?;
+        // Additional path-security validation (FR-038, FR-039): logs WARN if
+        // host_cli is outside standard directories or not found on PATH.
+        config.validate_host_cli_path().ok();
+        // Auto-suffix the IPC pipe name so MCP and ACP instances don't
+        // collide on the same named pipe (ADR-0015). Only applied when
+        // the name is still the default; an explicit override is preserved.
+        if config.ipc_name == "agent-intercom" {
+            config.ipc_name = "agent-intercom-acp".into();
+            info!(ipc_name = %config.ipc_name, "ACP mode: IPC name auto-suffixed");
+        }
+        // Use the ACP-specific HTTP port so MCP and ACP instances can run
+        // concurrently without a port conflict.  The CLI --port flag takes
+        // precedence over the [acp] config value.
+        if !cli_port_override {
+            config.http_port = config.acp.http_port;
+            info!(
+                http_port = config.http_port,
+                "ACP mode: HTTP port set from [acp] config"
+            );
+        }
+        info!("ACP mode: host_cli validated");
+        // Check for orphan processes from prior runs (ES-004, FR-037).
+        agent_intercom::acp::spawner::check_for_orphan_processes(&config.host_cli).await;
+    }
 
     let config = Arc::new(config);
     info!("configuration loaded");
@@ -133,6 +176,32 @@ async fn run(args: Cli) -> Result<()> {
     let pending_approvals: PendingApprovals = PendingApprovals::default();
     let pending_prompts: PendingPrompts = PendingPrompts::default();
     let pending_waits: PendingWaits = PendingWaits::default();
+
+    // Build the protocol driver and ACP event channel.
+    // In MCP mode: McpDriver wraps the pending oneshot maps.
+    // In ACP mode: AcpDriver routes operator decisions to per-session streams;
+    //              a shared event channel carries inbound AgentEvents from all
+    //              reader tasks to a single consumer task started after AppState
+    //              is fully constructed so the consumer has access to the full
+    //              state (stall detectors, Slack service, DB).
+    let (driver, acp_driver_opt, acp_event_tx_opt, acp_event_recv) = if args.mode == ServerMode::Acp
+    {
+        let acp = Arc::new(AcpDriver::new());
+        let (tx, rx) = tokio::sync::mpsc::channel::<AgentEvent>(1024);
+        // Coerce Arc<AcpDriver> → Arc<dyn AgentDriver> via unsized coercion.
+        let driver_arc: Arc<dyn agent_intercom::driver::AgentDriver> = acp.clone();
+        (driver_arc, Some(acp), Some(tx), Some(rx))
+    } else {
+        // MCP mode: build McpDriver from clones of the pending maps so that
+        // Slack handlers and MCP tool handlers share the same in-memory channels.
+        let mcp = McpDriver::new(
+            Arc::clone(&pending_approvals),
+            Arc::clone(&pending_prompts),
+            Arc::clone(&pending_waits),
+        );
+        let driver_arc: Arc<dyn agent_intercom::driver::AgentDriver> = Arc::new(mcp);
+        (driver_arc, None, None, None)
+    };
 
     // Start Slack client if configured.
     // NOTE: Socket mode is wired in a second phase (below) after AppState
@@ -181,6 +250,21 @@ async fn run(args: Cli) -> Result<()> {
     }
     let policy_cache = policy_watcher.cache().clone();
 
+    // ── Initialize config watcher for workspace mapping hot-reload ───────
+    // Watches `config.toml` for changes and re-parses `[[workspace]]` entries
+    // so that new sessions always see the latest workspace→channel mappings
+    // without a server restart (FR-014).
+    let config_watcher = ConfigWatcher::new(&args.config)
+        .map_err(|err| {
+            warn!(%err, "config watcher failed to start — workspace mappings will not hot-reload");
+            err
+        })
+        .ok();
+    let workspace_mappings = config_watcher.as_ref().map_or_else(
+        || Arc::new(std::sync::RwLock::new(config.workspaces.clone())),
+        ConfigWatcher::mappings,
+    );
+
     // ── Create stall event channel ──────────────────────
     let (stall_tx, stall_rx) = tokio::sync::mpsc::channel(256);
 
@@ -199,11 +283,30 @@ async fn run(args: Cli) -> Result<()> {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: Some(stall_tx),
+        driver,
+        server_mode: args.mode,
+        workspace_mappings,
+        acp_event_tx: acp_event_tx_opt,
+        acp_driver: acp_driver_opt,
     });
 
-    // Keep the watcher alive for the server's lifetime — dropping it stops the
-    // notify watcher and the hot-reload stops working.
+    // Keep the watchers alive for the server's lifetime — dropping them stops
+    // the notify subscriptions and hot-reload stops working.
     let _policy_watcher = policy_watcher;
+    let _config_watcher = config_watcher;
+
+    // ── Spawn ACP event consumer (T099) ────────────────────
+    // Spawned after AppState is built so the consumer has access to the full
+    // state: stall detectors (for StreamActivity), Slack service (for crash
+    // notifications), and the database (for pending clearance resolution).
+    if let Some(rx) = acp_event_recv {
+        let consumer_ct = ct.clone();
+        let consumer_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            run_acp_event_consumer(rx, consumer_ct, consumer_state).await;
+        });
+        info!("acp event consumer started");
+    }
 
     // ── Check for interrupted sessions from prior crash (T082) ──
     check_interrupted_on_startup(&state).await;
@@ -211,10 +314,18 @@ async fn run(args: Cli) -> Result<()> {
     // ── Spawn stall event consumer ──────────────────────
     let _stall_consumer_handle = if let Some(ref slack) = state.slack {
         let default_channel = state.config.slack.channel_id.clone();
+        // T097: Pass the driver so the consumer can deliver ACP nudges on-stream.
+        let stall_driver: Option<Arc<dyn agent_intercom::driver::AgentDriver>> =
+            state.acp_driver.as_ref().map(|d| {
+                let drv: Arc<dyn agent_intercom::driver::AgentDriver> = d.clone();
+                drv
+            });
         Some(stall_consumer::spawn_stall_event_consumer(
             stall_rx,
             Arc::clone(slack),
             default_channel,
+            Arc::clone(&state.db),
+            stall_driver,
             ct.clone(),
         ))
     } else {
@@ -249,8 +360,20 @@ async fn run(args: Cli) -> Result<()> {
     }
 
     // ── Start transports ────────────────────────────────
-    let start_stdio = matches!(args.transport, Transport::Stdio | Transport::Both);
+    // The HTTP transport starts in BOTH MCP and ACP modes. In ACP mode,
+    // the endpoint lets agent subprocesses call MCP tools (check_clearance,
+    // transmit, auto_check, etc.) via HTTP. Without it, tools are unreachable
+    // from spawned ACP sessions (HITL-003 / FR-032).
+    let start_stdio = args.mode == ServerMode::Mcp
+        && matches!(args.transport, Transport::Stdio | Transport::Both);
     let start_sse = matches!(args.transport, Transport::Sse | Transport::Both);
+
+    if args.mode == ServerMode::Acp {
+        info!(
+            "ACP mode: stdio transport disabled; HTTP transport starting for MCP tool access \
+             by ACP subprocesses (HITL-003)"
+        );
+    }
 
     let stdio_handle = if start_stdio {
         let stdio_ct = ct.clone();
@@ -307,7 +430,7 @@ async fn run(args: Cli) -> Result<()> {
         None
     };
 
-    info!(transport = ?args.transport, "MCP server ready");
+    info!(transport = ?args.transport, mode = ?args.mode, "server ready");
 
     // ── Wait for first shutdown signal ──────────────────
     shutdown_signal().await;
@@ -497,7 +620,13 @@ async fn graceful_shutdown(state: &AppState) -> Result<()> {
 
 /// Check for interrupted sessions on startup and optionally re-post
 /// pending requests to Slack (T082).
+///
+/// On server restart, any sessions that were Active/Online are now orphaned
+/// (their agent processes are dead). This function first marks all such
+/// sessions as Interrupted, then counts pending requests and optionally
+/// posts a recovery summary to Slack.
 async fn check_interrupted_on_startup(state: &AppState) {
+    use agent_intercom::models::session::SessionStatus;
     use agent_intercom::persistence::approval_repo::ApprovalRepo;
     use agent_intercom::persistence::prompt_repo::PromptRepo;
     use agent_intercom::persistence::session_repo::SessionRepo;
@@ -507,6 +636,18 @@ async fn check_interrupted_on_startup(state: &AppState) {
     let session_repo = SessionRepo::new(Arc::clone(&state.db));
     let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
     let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
+
+    // Mark all Active sessions as Interrupted — their agent processes were
+    // lost when the server shut down.
+    let active = session_repo.list_active().await.unwrap_or_default();
+    for session in &active {
+        if let Err(err) = session_repo
+            .update_status(&session.id, SessionStatus::Interrupted)
+            .await
+        {
+            warn!(%err, session_id = %session.id, "failed to mark active session as interrupted");
+        }
+    }
 
     let interrupted = session_repo.list_interrupted().await.unwrap_or_default();
 
@@ -558,9 +699,239 @@ async fn check_interrupted_on_startup(state: &AppState) {
     }
 }
 
+/// ACP event consumer — dispatches [`AgentEvent`]s from all reader tasks.
+///
+/// Reads events from the shared channel and:
+/// - [`StreamActivity`]: resets the per-session stall detector timer (S063).
+/// - [`StatusUpdated`]: accumulates text fragments per session and posts
+///   aggregated messages to the session's Slack thread after a 2-second
+///   debounce (prevents flooding from word-by-word `agent_message_chunk`
+///   streaming).
+/// - [`SessionTerminated`]: resolves any pending clearance requests as
+///   `Interrupted` (S068) and optionally notifies the operator on Slack.
+/// - All other variants: logged at INFO for observability.
+///
+/// Exits when the channel closes or `cancel` fires.
+async fn run_acp_event_consumer(
+    mut rx: tokio::sync::mpsc::Receiver<AgentEvent>,
+    cancel: tokio_util::sync::CancellationToken,
+    state: Arc<AppState>,
+) {
+    use std::collections::HashMap;
+    use tokio::time::{Duration, Instant};
+
+    /// Per-session text accumulator for debounced Slack posting.
+    struct TextBuffer {
+        text: String,
+        last_update: Instant,
+    }
+
+    let mut text_buffers: HashMap<String, TextBuffer> = HashMap::new();
+    let debounce = Duration::from_secs(2);
+    let mut flush_interval = tokio::time::interval(Duration::from_millis(500));
+
+    loop {
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                info!("acp event consumer: cancellation received, stopping");
+                break;
+            }
+            _ = flush_interval.tick() => {
+                // Flush text buffers that have been idle for ≥ debounce duration.
+                let now = Instant::now();
+                let expired_keys: Vec<String> = text_buffers
+                    .iter()
+                    .filter(|(_, buf)| now.duration_since(buf.last_update) >= debounce)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for session_id in expired_keys {
+                    if let Some(buf) = text_buffers.remove(&session_id) {
+                        flush_text_to_slack(&state, &session_id, &buf.text).await;
+                    }
+                }
+            }
+            event = rx.recv() => {
+                match event {
+                    None => {
+                        info!("acp event consumer: channel closed, stopping");
+                        break;
+                    }
+                    Some(AgentEvent::StreamActivity { ref session_id }) => {
+                        // Reset stall detector timer on any stream activity (S063).
+                        if let Some(ref detectors) = state.stall_detectors {
+                            let map = detectors.lock().await;
+                            if let Some(handle) = map.get(session_id) {
+                                handle.reset();
+                            }
+                        }
+                    }
+                    Some(AgentEvent::ClearanceRequested { ref session_id, ref request_id, ref title, .. }) => {
+                        info!(
+                            session_id,
+                            request_id,
+                            title,
+                            "acp event: clearance requested"
+                        );
+                    }
+                    Some(AgentEvent::StatusUpdated { ref session_id, ref message }) => {
+                        // Accumulate text; debounce flush posts to Slack thread.
+                        let entry = text_buffers
+                            .entry(session_id.clone())
+                            .or_insert_with(|| TextBuffer {
+                                text: String::new(),
+                                last_update: Instant::now(),
+                            });
+                        entry.text.push_str(message);
+                        entry.last_update = Instant::now();
+                    }
+                    Some(AgentEvent::PromptForwarded { ref session_id, ref prompt_id, ref prompt_text, .. }) => {
+                        info!(
+                            session_id,
+                            prompt_id,
+                            prompt_text,
+                            "acp event: prompt forwarded"
+                        );
+                    }
+                    Some(AgentEvent::HeartbeatReceived { ref session_id, .. }) => {
+                        info!(session_id, "acp event: heartbeat received");
+                    }
+                    Some(AgentEvent::SessionTerminated { ref session_id, exit_code, ref reason }) => {
+                        info!(
+                            session_id,
+                            exit_code,
+                            reason,
+                            "acp event: session terminated — resolving pending clearances"
+                        );
+
+                        // Flush any buffered text before posting the termination notice.
+                        if let Some(buf) = text_buffers.remove(session_id) {
+                            flush_text_to_slack(&state, session_id, &buf.text).await;
+                        }
+
+                        handle_session_terminated(&state, session_id, reason).await;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Handle the `SessionTerminated` event: update DB status, resolve pending
+/// clearances, deregister driver state, and notify the operator on Slack.
+async fn handle_session_terminated(state: &Arc<AppState>, session_id: &str, reason: &str) {
+    use agent_intercom::models::approval::ApprovalStatus;
+    use agent_intercom::models::session::SessionStatus;
+    use agent_intercom::persistence::approval_repo::ApprovalRepo;
+    use agent_intercom::persistence::session_repo::SessionRepo;
+    use agent_intercom::slack::client::SlackMessage;
+    use slack_morphism::prelude::{SlackChannelId, SlackTs};
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // F-03: Mark the session as Interrupted in the database so it no longer
+    // appears in list_active(). Without this, sessions whose agent process
+    // exits naturally (EOF, crash) remain Active forever.
+    if let Err(err) = session_repo
+        .set_terminated(session_id, SessionStatus::Interrupted)
+        .await
+    {
+        warn!(%err, session_id, "failed to mark session as interrupted on termination");
+    }
+
+    // S068: Resolve any pending clearance requests as Interrupted
+    // so the operator is not left waiting for buttons that will never be clicked.
+    let approval_repo = ApprovalRepo::new(Arc::clone(&state.db));
+    if let Err(err) = approval_repo
+        .resolve_pending_for_session(session_id, ApprovalStatus::Interrupted)
+        .await
+    {
+        warn!(%err, session_id, "failed to resolve pending clearances on termination");
+    }
+
+    // Deregister the ACP driver's in-memory state for this session.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(session_id).await;
+    }
+
+    // Notify the operator via Slack (when available).
+    let Some(ref slack) = state.slack else { return };
+    let (ch, ts) = match session_repo.get_by_id(session_id).await {
+        Ok(Some(sess)) => (
+            sess.channel_id.unwrap_or_default(),
+            sess.thread_ts.map(SlackTs),
+        ),
+        _ => (state.config.slack.channel_id.clone(), None),
+    };
+    if !ch.is_empty() {
+        let text = format!(
+            "\u{1f534} ACP session `{session_id}` terminated \
+             (reason: {reason}). Any pending clearances have been cancelled."
+        );
+        let msg = SlackMessage {
+            channel: SlackChannelId(ch),
+            text: Some(text),
+            blocks: None,
+            thread_ts: ts,
+        };
+        if let Err(err) = slack.enqueue(msg).await {
+            warn!(%err, session_id, "failed to post termination notification");
+        }
+    }
+}
+
+/// Post accumulated text to the session's Slack thread.
+///
+/// Looks up the session's `channel_id` and `thread_ts` from the database,
+/// then enqueues a single aggregated message. Silently logs failures
+/// without propagating errors.
+async fn flush_text_to_slack(state: &Arc<AppState>, session_id: &str, text: &str) {
+    use agent_intercom::persistence::session_repo::SessionRepo;
+    use agent_intercom::slack::client::SlackMessage;
+    use slack_morphism::prelude::{SlackChannelId, SlackTs};
+
+    if text.trim().is_empty() {
+        return;
+    }
+
+    let Some(ref slack) = state.slack else {
+        info!(session_id, "acp text flush: no slack service, logging only");
+        info!(session_id, text, "acp agent response");
+        return;
+    };
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+    let (channel_id, thread_ts) = match session_repo.get_by_id(session_id).await {
+        Ok(Some(sess)) => (sess.channel_id, sess.thread_ts),
+        Ok(None) => {
+            warn!(session_id, "acp text flush: session not found in db");
+            return;
+        }
+        Err(err) => {
+            warn!(%err, session_id, "acp text flush: db lookup failed");
+            return;
+        }
+    };
+
+    let Some(ch) = channel_id else {
+        info!(session_id, text, "acp agent response (no channel)");
+        return;
+    };
+
+    let msg = SlackMessage {
+        channel: SlackChannelId(ch),
+        text: Some(text.to_owned()),
+        blocks: None,
+        thread_ts: thread_ts.map(SlackTs),
+    };
+
+    if let Err(err) = slack.enqueue(msg).await {
+        warn!(%err, session_id, "acp text flush: failed to post to Slack");
+    }
+}
+
 async fn shutdown_signal() {
     let ctrl_c = tokio::signal::ctrl_c();
-
     #[cfg(unix)]
     {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {

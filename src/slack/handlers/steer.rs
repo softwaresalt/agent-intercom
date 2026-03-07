@@ -9,7 +9,10 @@ use std::sync::Arc;
 
 use tracing::{info, warn};
 
+use crate::audit::{AuditEntry, AuditEventType};
+use crate::driver::AgentDriver;
 use crate::mcp::handler::AppState;
+use crate::models::session::{ConnectivityStatus, ProtocolMode};
 use crate::models::steering::{SteeringMessage, SteeringSource};
 use crate::persistence::session_repo::SessionRepo;
 use crate::persistence::steering_repo::SteeringRepo;
@@ -20,12 +23,20 @@ use crate::persistence::steering_repo::SteeringRepo;
 /// message with `source = Slack`. Returns an operator-visible string
 /// confirming storage or describing the failure.
 ///
+/// When `channel_id` is `Some`, only sessions associated with that channel
+/// are considered (S043 / RI-04 fix). When `thread_ts` is also provided,
+/// thread-based disambiguation is used first (F-05 / FR-017). If no
+/// session is active in the channel the caller receives a descriptive
+/// "no active session in this channel" error (S045).
+///
 /// # Errors
 ///
 /// Returns an `AppError` if session lookup or message insertion fails.
+#[allow(clippy::too_many_lines)]
 pub async fn store_from_slack(
     text: &str,
     channel_id: Option<&str>,
+    thread_ts: Option<&str>,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     if text.trim().is_empty() {
@@ -35,19 +46,94 @@ pub async fn store_from_slack(
     }
 
     let session_repo = SessionRepo::new(Arc::clone(&state.db));
-    let sessions = session_repo
-        .list_active()
-        .await
-        .map_err(|err| crate::AppError::Db(format!("failed to list sessions: {err}")))?;
 
-    // When channel is known, prefer the session whose workspace matches
-    // the channel context. For now, if only one active session exists use it;
-    // if multiple exist, use any — routing by channel_id is handled at the
-    // `fetch_unconsumed` level via session_id scoping.
-    // TODO(005): Filter sessions by channel_id when multi-session channel routing is available.
-    let session = sessions.into_iter().next().ok_or_else(|| {
-        crate::AppError::Config("no active session to steer — start a session first".into())
-    })?;
+    let session = if let Some(ch) = channel_id {
+        // F-05 / FR-017: When thread_ts is available, use it for precise
+        // session disambiguation (each session owns a unique Slack thread).
+        if let Some(ts) = thread_ts {
+            if let Ok(Some(sess)) = session_repo.find_by_channel_and_thread(ch, ts).await {
+                sess
+            } else {
+                // Thread didn't match — fall back to channel-scoped lookup.
+                let sessions = session_repo
+                    .find_active_by_channel(ch)
+                    .await
+                    .map_err(|err| {
+                        crate::AppError::Db(format!("failed to find sessions in channel: {err}"))
+                    })?;
+                sessions.into_iter().next().ok_or_else(|| {
+                    crate::AppError::Config(
+                        "no active session in this channel — start a session first".into(),
+                    )
+                })?
+            }
+        } else {
+            // T065 / S043: scope session lookup to the originating channel.
+            let sessions = session_repo
+                .find_active_by_channel(ch)
+                .await
+                .map_err(|err| {
+                    crate::AppError::Db(format!("failed to find sessions in channel: {err}"))
+                })?;
+            sessions.into_iter().next().ok_or_else(|| {
+                crate::AppError::Config(
+                    "no active session in this channel — start a session first".into(),
+                )
+            })?
+        }
+    } else {
+        // No channel context: fall back to any active session (IPC / tests).
+        let sessions = session_repo
+            .list_active()
+            .await
+            .map_err(|err| crate::AppError::Db(format!("failed to list sessions: {err}")))?;
+        sessions.into_iter().next().ok_or_else(|| {
+            crate::AppError::Config("no active session to steer — start a session first".into())
+        })?
+    };
+
+    // T088 / S060: For ACP sessions that are currently Online, deliver the
+    // steering message directly via the driver stream instead of queuing it.
+    if session.protocol_mode == ProtocolMode::Acp
+        && session.connectivity_status == ConnectivityStatus::Online
+    {
+        if let Some(ref acp_driver) = state.acp_driver {
+            // Ensure agent_session_id is registered in the driver's in-memory
+            // map (may be absent after a server restart while the session's
+            // agent process is still alive).
+            if let Some(ref asid) = session.agent_session_id {
+                acp_driver
+                    .register_agent_session_id(&session.id, asid)
+                    .await;
+            }
+            match acp_driver.send_prompt(&session.id, text).await {
+                Ok(()) => {
+                    info!(
+                        session_id = %session.id,
+                        channel_id = ?channel_id,
+                        "steering message delivered directly via ACP driver (session online)"
+                    );
+
+                    // HITL-007: audit-log direct steering delivery.
+                    emit_steer_audit(state.audit_logger.as_ref(), &session.id);
+
+                    return Ok(format!(
+                        "Steering message delivered directly to agent in session `{}`.",
+                        session.id
+                    ));
+                }
+                Err(err) => {
+                    // Writer may be gone (server restart, agent process exited).
+                    // Fall through to offline queue rather than returning an error.
+                    warn!(
+                        session_id = %session.id,
+                        %err,
+                        "ACP direct delivery failed — falling back to queue"
+                    );
+                }
+            }
+        }
+    }
 
     let msg = SteeringMessage::new(
         session.id.clone(),
@@ -59,11 +145,39 @@ pub async fn store_from_slack(
     let steering_repo = SteeringRepo::new(Arc::clone(&state.db));
     steering_repo.insert(&msg).await?;
 
+    // HITL-007: audit-log queued steering message.
+    emit_steer_audit(state.audit_logger.as_ref(), &session.id);
+
     info!(
         session_id = %session.id,
         channel_id = ?channel_id,
         "steering message stored from Slack"
     );
+
+    // T088 / S059: For ACP sessions that are Offline or Stalled, report the
+    // queue depth so the operator knows their message was preserved.
+    if session.protocol_mode == ProtocolMode::Acp {
+        match steering_repo.fetch_unconsumed(&session.id).await {
+            Ok(queued) => {
+                let count = queued.len();
+                return Ok(format!(
+                    "Agent offline — message queued ({count} in queue) for session `{}`.",
+                    session.id
+                ));
+            }
+            Err(err) => {
+                warn!(
+                    session_id = %session.id,
+                    error = ?err,
+                    "failed to fetch steering queue depth after enqueue"
+                );
+                return Ok(format!(
+                    "Agent offline — message queued for session `{}` (queue depth unavailable).",
+                    session.id
+                ));
+            }
+        }
+    }
 
     Ok(format!(
         "Steering message queued for session `{}`. It will be delivered on the next `ping`.",
@@ -132,7 +246,7 @@ pub async fn ingest_app_mention(text: &str, channel_id: &str, state: &Arc<AppSta
         return;
     }
 
-    match store_from_slack(&stripped, Some(channel_id), state).await {
+    match store_from_slack(&stripped, Some(channel_id), None, state).await {
         Ok(msg) => info!(channel_id, %msg, "app mention → steering message stored"),
         Err(err) => warn!(channel_id, %err, "failed to store app mention as steering message"),
     }
@@ -150,6 +264,17 @@ fn strip_mention(text: &str) -> &str {
             .map_or(trimmed, |(_, rest)| rest.trim_start())
     } else {
         trimmed
+    }
+}
+
+/// Emit an `AcpSteerDelivered` audit entry (HITL-007).
+fn emit_steer_audit(logger: Option<&Arc<dyn crate::audit::AuditLogger>>, session_id: &str) {
+    if let Some(logger) = logger {
+        let entry =
+            AuditEntry::new(AuditEventType::AcpSteerDelivered).with_session(session_id.to_owned());
+        if let Err(err) = logger.log_entry(entry) {
+            warn!(%err, "audit log write failed (steer delivered)");
+        }
     }
 }
 

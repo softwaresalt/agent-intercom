@@ -23,6 +23,8 @@ use tracing::{info, info_span, warn};
 
 use crate::audit::{AuditEntry, AuditEventType, AuditLogger};
 use crate::config::GlobalConfig;
+use crate::driver::AgentDriver;
+use crate::mode::ServerMode;
 use crate::models::session::{Session, SessionMode, SessionStatus};
 use crate::orchestrator::stall_detector::{StallDetector, StallDetectorHandle, StallEvent};
 use crate::persistence::session_repo::SessionRepo;
@@ -86,7 +88,7 @@ pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 /// line (FR-022).
 pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
 
-/// Live child processes spawned by the `/intercom session-start` slash command,
+/// Live child processes spawned by the `session-start` slash command,
 /// keyed by `session_id`. Keeping them here prevents `kill_on_drop` from
 /// terminating the process the moment `spawn_session` returns.
 pub type ActiveChildren = Arc<Mutex<HashMap<String, Child>>>;
@@ -125,6 +127,38 @@ pub struct AppState {
     /// Shared sender for stall events. Each per-session stall detector
     /// clones from this to emit events into the single consumer task.
     pub stall_event_tx: Option<tokio::sync::mpsc::Sender<StallEvent>>,
+    /// Protocol-agnostic agent driver for resolving pending clearances,
+    /// prompts, and waits via Slack handlers.
+    pub driver: Arc<dyn AgentDriver>,
+    /// Server protocol mode chosen at startup (`mcp` or `acp`).
+    ///
+    /// Determines which session-start path the Slack command handler
+    /// takes: MCP spawns an HTTP/SSE-connecting process; ACP spawns a
+    /// headless stdio-connected process.
+    pub server_mode: ServerMode,
+    /// Hot-reloadable workspace-to-channel mapping table.
+    ///
+    /// Populated from `[[workspace]]` entries in `config.toml` at startup.
+    /// When a [`crate::config_watcher::ConfigWatcher`] is active it updates
+    /// this `Arc` in-place, so new sessions always see the latest mappings
+    /// without requiring a server restart (FR-014).
+    ///
+    /// The SSE transport reads this at session-creation time to resolve a
+    /// `?workspace_id=` query parameter to the configured `channel_id`.
+    pub workspace_mappings: Arc<std::sync::RwLock<Vec<crate::config::WorkspaceMapping>>>,
+    /// Shared sender for ACP agent events (absent in MCP mode).
+    ///
+    /// Each ACP session's reader task emits [`crate::driver::AgentEvent`]s through
+    /// this channel. A single consumer task started in `main.rs` dispatches events
+    /// (status updates, clearance requests, heartbeats, terminations) to the
+    /// appropriate Slack handler as the ACP feature grows across phases.
+    pub acp_event_tx: Option<tokio::sync::mpsc::Sender<crate::driver::AgentEvent>>,
+    /// ACP-specific driver for per-session stream registration (absent in MCP mode).
+    ///
+    /// Holds the per-session outbound writer channels used by `handle_acp_session_start`
+    /// to wire the reader/writer tasks. Slack handlers resolve operator decisions
+    /// through the `driver` field (which points to the same underlying `AcpDriver`).
+    pub acp_driver: Option<Arc<crate::driver::acp_driver::AcpDriver>>,
 }
 
 /// Owner ID assigned to sessions created by direct (non-spawned) agent connections.
@@ -220,6 +254,20 @@ impl IntercomServer {
                 Some(ch.as_str())
             }
         })
+    }
+
+    /// Return the pre-existing DB session ID override for this connection (T112 / HITL-003).
+    ///
+    /// In ACP mode, spawned agent subprocesses connect to the HTTP MCP endpoint
+    /// with `?session_id=<id>` to associate their tool calls with a specific
+    /// ACP session.  This accessor exposes that override so MCP tool handlers
+    /// can route requests to the correct session without relying on
+    /// `list_active()`, which is ambiguous when multiple ACP sessions are running.
+    ///
+    /// Returns `None` in MCP mode or when the query parameter was not supplied.
+    #[must_use]
+    pub fn session_id_override(&self) -> Option<&str> {
+        self.session_id_override.as_deref()
     }
 
     /// Access the shared application state.
@@ -576,6 +624,7 @@ impl ServerHandler for IntercomServer {
     ) -> impl Future<Output = ()> + Send + '_ {
         let state = Arc::clone(&self.state);
         let session_id_override = self.session_id_override.clone();
+        let channel_id_override = self.channel_id_override.clone();
         let is_remote = self.channel_id_override.is_some();
         let session_db_id = Arc::clone(&self.session_db_id);
 
@@ -687,6 +736,55 @@ impl ServerHandler for IntercomServer {
                             }
                             // Spawn a per-session stall detector for direct connections (FR-028).
                             spawn_stall_detector_for_session(&state, &created.id).await;
+
+                            // T058 / S036: For remote direct connections that have a
+                            // channel_id, post the session-started message and record
+                            // the returned Slack ts as the session's thread_ts.
+                            if let (Some(ref ch), Some(slack)) =
+                                (&channel_id_override, state.slack.as_ref())
+                            {
+                                if let Ok(Some(ref session)) =
+                                    session_repo.get_by_id(&created.id).await
+                                {
+                                    let started_blocks =
+                                        crate::slack::blocks::session_started_blocks(session);
+                                    let msg = crate::slack::client::SlackMessage {
+                                        channel: slack_morphism::prelude::SlackChannelId(
+                                            ch.clone(),
+                                        ),
+                                        text: Some(format!(
+                                            "\u{1f680} Session `{}` connected",
+                                            session.id.chars().take(8).collect::<String>()
+                                        )),
+                                        blocks: Some(started_blocks),
+                                        thread_ts: None,
+                                    };
+                                    match slack.post_message_direct(msg).await {
+                                        Ok(ts) => {
+                                            if let Err(err) =
+                                                session_repo.set_thread_ts(&session.id, &ts.0).await
+                                            {
+                                                warn!(%err,
+                                                    session_id = %session.id,
+                                                    "failed to record thread_ts"
+                                                );
+                                            } else {
+                                                info!(
+                                                    session_id = %session.id,
+                                                    thread_ts = %ts.0,
+                                                    "thread_ts recorded for direct connection"
+                                                );
+                                            }
+                                        }
+                                        Err(err) => {
+                                            warn!(%err,
+                                                session_id = %session.id,
+                                                "failed to post session-started message"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Err(err) => {
                             warn!(
@@ -866,6 +964,7 @@ impl Drop for IntercomServer {
         if let Some(id) = self.session_db_id.get().cloned() {
             let db = Arc::clone(&self.state.db);
             let audit_logger = self.state.audit_logger.clone();
+            let slack = self.state.slack.clone();
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
                     let session_repo = SessionRepo::new(db);
@@ -873,8 +972,17 @@ impl Drop for IntercomServer {
                         .set_terminated(&id, SessionStatus::Terminated)
                         .await
                     {
-                        Ok(_) => {
+                        Ok(terminated_session) => {
                             info!(session_id = %id, "session terminated on transport disconnect");
+                            // T060: Post session-ended summary as thread reply.
+                            if let Some(ref s) = slack {
+                                crate::orchestrator::session_manager::notify_session_ended(
+                                    &terminated_session,
+                                    "transport disconnected",
+                                    s,
+                                )
+                                .await;
+                            }
                         }
                         Err(err) => {
                             warn!(

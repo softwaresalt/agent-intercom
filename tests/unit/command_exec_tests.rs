@@ -1,45 +1,10 @@
-//! Unit tests for command execution safety (T121).
+//! Unit tests for slash command utilities (T121).
 //!
 //! Validates that:
-//! - Allowed commands pass execution pre-checks (FR-014).
-//! - Disallowed commands are rejected.
 //! - Path validation for `list-files` / `show-file` stays within
 //!   the workspace root boundary (FR-006).
 
-use std::collections::HashMap;
-
-use agent_intercom::slack::commands::{
-    file_extension_language, validate_command_alias, validate_listing_path,
-};
-
-// ─── Command alias validation (FR-014) ─────────────────────────────────
-
-#[test]
-fn allowed_command_passes_validation() {
-    let mut allowlist = HashMap::new();
-    allowlist.insert("test".to_owned(), "cargo test".to_owned());
-    allowlist.insert("status".to_owned(), "git status".to_owned());
-
-    let result = validate_command_alias("test", &allowlist);
-    assert!(result.is_ok());
-    assert_eq!(result.ok(), Some("cargo test".to_owned()));
-}
-
-#[test]
-fn disallowed_command_is_rejected() {
-    let allowlist = HashMap::new(); // Empty — nothing allowed.
-    let result = validate_command_alias("rm-all", &allowlist);
-    assert!(result.is_err());
-}
-
-#[test]
-fn command_not_in_registry_is_rejected() {
-    let mut allowlist = HashMap::new();
-    allowlist.insert("test".to_owned(), "cargo test".to_owned());
-
-    let result = validate_command_alias("deploy", &allowlist);
-    assert!(result.is_err());
-}
+use agent_intercom::slack::commands::{file_extension_language, validate_listing_path};
 
 // ─── list-files / show-file path validation (FR-006) ───────────────────
 
@@ -120,22 +85,4 @@ fn known_extensions_map_correctly() {
 fn unknown_extension_defaults_to_text() {
     assert_eq!(file_extension_language("file.xyz"), "text");
     assert_eq!(file_extension_language("noext"), "text");
-}
-
-// ── US1: Slash command root is /intercom (T022) ─────────────────────
-
-/// T022: Verify that the help text uses `/intercom` not `/monocoque`.
-#[test]
-fn slash_command_help_uses_intercom_root() {
-    // The FULL_HELP constant and error text reference `/intercom`.
-    // We validate indirectly via dispatch_unknown_returns_help which
-    // includes the `/intercom help` suggestion.
-    let allowlist = HashMap::new();
-    let result = validate_command_alias("unknown_cmd", &allowlist);
-    assert!(result.is_err(), "unknown command should be rejected");
-
-    // The dispatch_command function in commands.rs returns:
-    // "Unknown command: `{other}`. Use `/intercom help` for available commands."
-    // This is tested via the unit test infrastructure. The constant string
-    // "/intercom" in the source code was verified during Phase 2 rename.
 }

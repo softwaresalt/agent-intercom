@@ -1,12 +1,16 @@
 ---
-description: "Structured HITL test scenarios for the agent-intercom approval workflow and advanced features."
+description: "HITL test scenarios for MCP mode — the default agent-intercom approval workflow and advanced features."
+mode: mcp
 ---
 
-# HITL Test Scenarios
+# HITL Test Scenarios — MCP Mode
 
 Each scenario tests a specific aspect of the Slack-mediated approval workflow
-and the advanced features introduced in the 004-intercom-advanced-features branch.
-The operator's expected action is stated in **bold**.
+and the advanced features when the server is running in **MCP mode** (`--mode mcp`,
+slash prefix `/acom`). The operator's expected action is stated in **bold**.
+
+> **Pre-flight:** Confirm the server was started with `--mode mcp` (or no
+> `--mode` flag, since MCP is the default). The slash command prefix is `/acom`.
 
 ---
 
@@ -249,8 +253,8 @@ The operator's expected action is stated in **bold**.
 **Purpose:** Validate the full steering queue round-trip (US1, FR-001 through FR-006). An operator sends a steering message via Slack, then the agent picks it up on the next `ping`.
 
 **Steps:**
-1. Call `broadcast` with `message: "[TEST] About to test steering queue. Operator: please run '/intercom steer HITL-STEER-TEST-MSG' in Slack within 30 seconds."`, `level: "info"`
-2. **Operator action: In Slack, type `/intercom steer HITL-STEER-TEST-MSG` and send**
+1. Call `broadcast` with `message: "[TEST] About to test steering queue. Operator: please run '/acom steer HITL-STEER-TEST-MSG' in Slack within 30 seconds."`, `level: "info"`
+2. **Operator action: In Slack, type `/acom steer HITL-STEER-TEST-MSG` and send**
 3. Wait approximately 5 seconds for the message to be stored
 4. Call `ping` with `status_message: "HITL test: checking steering queue"`
 5. Verify the response contains `pending_steering` as a non-empty array
@@ -261,7 +265,7 @@ The operator's expected action is stated in **bold**.
 **Expected:** Steering message delivered via ping, marked consumed after delivery.
 
 **Operator validates:**
-- [ ] `/intercom steer` command was accepted without error
+- [ ] `/acom steer` command was accepted without error
 - [ ] Steering confirmation appeared in Slack
 
 ---
@@ -271,8 +275,8 @@ The operator's expected action is stated in **bold**.
 **Purpose:** Validate the task inbox queuing and delivery workflow (US3, FR-010 through FR-014). An operator queues a task via Slack, and it is delivered to the agent at the next `reboot` call.
 
 **Steps:**
-1. Call `broadcast` with `message: "[TEST] About to test task inbox. Operator: please run '/intercom task HITL-TASK-TEST-ITEM' in Slack within 30 seconds."`, `level: "info"`
-2. **Operator action: In Slack, type `/intercom task HITL-TASK-TEST-ITEM` and send**
+1. Call `broadcast` with `message: "[TEST] About to test task inbox. Operator: please run '/acom task HITL-TASK-TEST-ITEM' in Slack within 30 seconds."`, `level: "info"`
+2. **Operator action: In Slack, type `/acom task HITL-TASK-TEST-ITEM` and send**
 3. Wait approximately 5 seconds for the item to be stored
 4. Call `reboot` with no arguments
 5. Verify the response contains a `pending_tasks` field with a non-empty array
@@ -281,7 +285,7 @@ The operator's expected action is stated in **bold**.
 **Expected:** Task inbox item queued via Slack and delivered in `reboot` response.
 
 **Operator validates:**
-- [ ] `/intercom task` command was accepted without error
+- [ ] `/acom task` command was accepted without error
 - [ ] Task confirmation appeared in Slack
 
 ---
@@ -447,7 +451,7 @@ The operator's expected action is stated in **bold**.
    - `context`: `{ "risk_level": "low" }`
 2. Wait for the Slack message to appear (the call blocks until the operator responds)
 3. **Operator action: Observe the Slack message. Confirm:**
-   - It shows 🔐 "Terminal command approval requested"
+   - It shows "Terminal command approval requested"
    - The command `DEL /F /Q tests\fixtures\hitl-scratch.txt` is displayed in a code fence
    - There are Approve / Reject buttons
 4. **Operator action: Press APPROVE**

@@ -106,6 +106,12 @@ pub async fn handle(
             .next()
             .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
 
+        // S037: capture thread_ts so all outgoing messages go to the session thread.
+        let session_thread_ts = session
+            .thread_ts
+            .as_deref()
+            .map(|ts| slack_morphism::prelude::SlackTs(ts.to_owned()));
+
         // ── Create ContinuationPrompt record ─────────────────
         let prompt = ContinuationPrompt::new(
             session.id.clone(),
@@ -145,7 +151,8 @@ pub async fn handle(
                         truncate_text(&input.prompt_text, 100),
                     )),
                     blocks: Some(message_blocks),
-                    thread_ts: None,
+                    // S037: post inside the session's Slack thread.
+                    thread_ts: session_thread_ts.clone(),
                 };
                 if let Err(err) = slack.enqueue(msg).await {
                     warn!(%err, "failed to enqueue prompt message");
@@ -202,7 +209,7 @@ pub async fn handle(
                             "warning",
                             &format!("Prompt timed out after {timeout_seconds}s — auto-continuing"),
                         )]),
-                        thread_ts: None,
+                        thread_ts: session_thread_ts.clone(),
                     };
                     let _ = slack.enqueue(msg).await;
                 }

@@ -58,6 +58,9 @@ pub struct StallDetector {
     max_retries: u32,
     event_tx: mpsc::Sender<StallEvent>,
     cancel: CancellationToken,
+    /// Time already elapsed since the last activity, used to seed the first
+    /// wait interval on startup (T149, FR-045).
+    initial_elapsed: Duration,
 }
 
 impl StallDetector {
@@ -78,7 +81,20 @@ impl StallDetector {
             max_retries,
             event_tx,
             cancel,
+            initial_elapsed: Duration::ZERO,
         }
+    }
+
+    /// Set the time already elapsed since the last activity.
+    ///
+    /// When provided, the first wait interval is shortened by `elapsed`
+    /// so the detector accounts for time that passed before the server
+    /// restarted (FR-045).  If `elapsed >= inactivity_threshold`, the
+    /// stall fires on the first tick.
+    #[must_use]
+    pub fn with_initial_elapsed(mut self, elapsed: Duration) -> Self {
+        self.initial_elapsed = elapsed;
+        self
     }
 
     /// Spawn the background timer task and return a handle for controlling it.
@@ -102,6 +118,7 @@ impl StallDetector {
                 Arc::clone(&reset_notify),
                 Arc::clone(&paused),
                 Arc::clone(&stalled),
+                self.initial_elapsed,
             )
             .instrument(info_span!("stall_detector")),
         );
@@ -128,8 +145,14 @@ impl StallDetector {
         reset_notify: Arc<Notify>,
         paused: Arc<AtomicBool>,
         stalled: Arc<AtomicBool>,
+        initial_elapsed: Duration,
     ) {
         let mut nudge_count: u32 = 0;
+
+        // T149 (FR-045): shorten the first wait interval by `initial_elapsed`
+        // so the detector accounts for time that passed before the server restarted.
+        // After the first iteration, subsequent waits always use the full threshold.
+        let mut next_threshold = inactivity_threshold.saturating_sub(initial_elapsed);
 
         loop {
             // ── Wait for inactivity threshold or reset ───────
@@ -139,13 +162,16 @@ impl StallDetector {
                     return;
                 }
                 () = Self::wait_unless_paused(
-                    inactivity_threshold,
+                    next_threshold,
                     &paused,
                     &reset_notify,
                     &cancel,
                 ) => true,
                 () = reset_notify.notified() => false,
             };
+
+            // All subsequent waits use the full threshold.
+            next_threshold = inactivity_threshold;
 
             if !fired {
                 // Reset received before threshold — check self-recovery.

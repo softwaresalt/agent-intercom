@@ -68,6 +68,12 @@ async fn stall_detector_reset_works() {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
+        server_mode: agent_intercom::mode::ServerMode::Mcp,
+
+        workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     let session = create_active_session(&state.db, root).await;
@@ -345,6 +351,12 @@ async fn ipc_auth_some_means_enabled() {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
+        server_mode: agent_intercom::mode::ServerMode::Mcp,
+
+        workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     assert_eq!(state.ipc_auth_token.as_deref(), Some("test-secret-token"));

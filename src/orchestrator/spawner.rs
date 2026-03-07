@@ -41,12 +41,16 @@ pub async fn spawn_session(
     );
     let _guard = span.enter();
 
-    // Canonicalize workspace root to a resolved absolute path.
-    let workspace_path = std::path::Path::new(workspace_root)
-        .canonicalize()
-        .map_err(|err| {
-            AppError::Config(format!("invalid workspace root {workspace_root}: {err}"))
-        })?;
+    // Canonicalize workspace root to a resolved absolute path, then strip
+    // the Windows `\\?\` extended-length prefix so downstream consumers
+    // (Slack messages, DB records, subprocess args) get a clean path.
+    let workspace_path = crate::config::strip_unc_prefix(
+        std::path::Path::new(workspace_root)
+            .canonicalize()
+            .map_err(|err| {
+                AppError::Config(format!("invalid workspace root {workspace_root}: {err}"))
+            })?,
+    );
 
     // Enforce max concurrent sessions (FR-023).
     let active_count = session_repo.count_active().await?;

@@ -125,14 +125,38 @@ pub async fn handle(
         }
 
         // ── Resolve session ──────────────────────────────────
+        // In ACP mode the agent subprocess supplies `?session_id=<id>` so we
+        // can pin the tool call to the exact session (T112 / HITL-003).
+        // Fall back to the first active session for backwards-compatible MCP
+        // mode where there is always exactly one session.
         let session_repo = SessionRepo::new(Arc::clone(&state.db));
-        let sessions = session_repo.list_active().await.map_err(|err| {
-            rmcp::ErrorData::internal_error(format!("failed to query active sessions: {err}"), None)
-        })?;
-        let session = sessions
-            .into_iter()
-            .next()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
+        let session = if let Some(sid) = context.service.session_id_override() {
+            session_repo
+                .get_by_id(sid)
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(format!("failed to query session: {err}"), None)
+                })?
+                .ok_or_else(|| rmcp::ErrorData::internal_error("session not found", None))?
+        } else {
+            let sessions = session_repo.list_active().await.map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to query active sessions: {err}"),
+                    None,
+                )
+            })?;
+            sessions
+                .into_iter()
+                .next()
+                .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?
+        };
+
+        // Capture thread_ts early so it can be passed to all outgoing messages
+        // for this session (S037 — subsequent messages use the thread).
+        let session_thread_ts = session
+            .thread_ts
+            .as_deref()
+            .map(|ts| slack_morphism::prelude::SlackTs(ts.to_owned()));
 
         let workspace_root = std::path::PathBuf::from(&session.workspace_root);
 
@@ -182,6 +206,13 @@ pub async fn handle(
             )
         })?;
 
+        // S037: effective_thread_ts tracks which Slack thread to use for all
+        // subsequent messages in this tool call. Starts as the session's
+        // existing thread_ts; updated to the approval post ts if this is the
+        // session's first message (so timeout/follow-up notifications land in
+        // the thread, not at the channel root).
+        let mut effective_thread_ts = session_thread_ts.clone();
+
         // ── Post to Slack ────────────────────────────────────
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
@@ -223,10 +254,22 @@ pub async fn handle(
                     channel: channel.clone(),
                     text: Some(format!("\u{1f4cb} Approval Request: {}", input.title)),
                     blocks: Some(message_blocks),
-                    thread_ts: None,
+                    // S037: post inside session thread when thread_ts is set;
+                    // otherwise post at channel root (and this ts becomes the root).
+                    thread_ts: session_thread_ts.clone(),
                 };
                 match slack.post_message_direct(msg).await {
-                    Ok(ts) => Some(ts),
+                    Ok(ts) => {
+                        // S036: if the session had no thread_ts, record this
+                        // approval message as the session's thread root.
+                        if session_thread_ts.is_none() {
+                            if let Err(err) = session_repo.set_thread_ts(&session.id, &ts.0).await {
+                                warn!(%err, session_id = %session.id,
+                                    "failed to record thread_ts from approval message");
+                            }
+                        }
+                        Some(ts)
+                    }
                     Err(err) => {
                         warn!(%err, "failed to post approval message");
                         None
@@ -235,6 +278,12 @@ pub async fn handle(
             }
             .instrument(post_span)
             .await;
+
+            // S037: if this was the session's first Slack message, the approval
+            // post ts becomes the thread root for all subsequent messages.
+            if session_thread_ts.is_none() {
+                effective_thread_ts = approval_ts.clone();
+            }
 
             // ── Snippet thread (preferred) or file upload (fallback) ──────
             //
@@ -336,7 +385,7 @@ pub async fn handle(
                                 input.title, timeout_seconds
                             ),
                         )]),
-                        thread_ts: None,
+                        thread_ts: effective_thread_ts.clone(),
                     };
                     let _ = slack.enqueue(msg).await;
                 }

@@ -1,32 +1,44 @@
-//! Slack slash command router for `/intercom` commands.
+//! Slack slash command router for `/acom` (MCP) and `/arc` (ACP) commands.
 //!
-//! Parses `/intercom <command> [args]` from Slack slash command events,
+//! Parses `/<prefix> <command> [args]` from Slack slash command events,
 //! dispatches to handlers by command name, and verifies user authorization
 //! (FR-013). Session-scoped commands also verify session ownership.
 //!
-//! Also provides remote file browsing (`list-files`, `show-file`) and
-//! pre-approved command execution (FR-014) for User Story 8.
+//! ACP-only commands (`session-start`, `session-stop`, `session-restart`)
+//! are gated behind `ServerMode::Acp` and rejected in MCP mode.
+//!
+//! Also provides remote file browsing (`list-files`, `show-file`).
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use slack_morphism::prelude::{
     SlackChannelId, SlackClient, SlackClientEventsUserState, SlackClientHyperHttpsConnector,
     SlackCommandEvent, SlackCommandEventResponse, SlackMessageContent, SlackMessageResponseType,
+    SlackTs,
 };
-use tracing::{info, info_span, warn};
+use tracing::{debug, info, info_span, warn};
 
+use crate::acp::handshake;
+use crate::acp::spawner::SpawnConfig;
+use crate::audit::{AuditEntry, AuditEventType};
 use crate::diff::path_safety::validate_path;
+use crate::driver::AgentDriver;
 use crate::mcp::handler::AppState;
+use crate::mode::ServerMode;
+use crate::models::session::truncate_session_title;
+use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
 use crate::orchestrator::{checkpoint_manager, session_manager, spawner};
 use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::db::Database;
 use crate::persistence::session_repo::SessionRepo;
+use crate::slack::blocks;
+use crate::slack::client::SlackMessage;
 use crate::slack::handlers::steer as steer_handler;
 use crate::slack::handlers::task as task_handler;
 
-/// Handle incoming `/intercom` slash commands routed via Socket Mode.
+/// Handle incoming `/acom` or `/arc` slash commands routed via Socket Mode.
 ///
 /// # Errors
 ///
@@ -36,6 +48,14 @@ pub async fn handle_command(
     _client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     state: SlackClientEventsUserState,
 ) -> slack_morphism::AnyStdResult<SlackCommandEventResponse> {
+    let started = std::time::Instant::now();
+    debug!(
+        command = ?event.command,
+        user = %event.user_id,
+        channel = %event.channel_id,
+        "handle_command entry"
+    );
+
     let user_id = event.user_id.to_string();
     let raw_text = event.text.clone().unwrap_or_default();
     let parts: Vec<&str> = raw_text.split_whitespace().collect();
@@ -56,6 +76,10 @@ pub async fn handle_command(
         let guard = state.read().await;
         guard.get_user_state::<Arc<AppState>>().cloned()
     };
+    debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "state lock acquired"
+    );
 
     let response_text = if let Some(ref app) = app_state {
         // Verify authorized user.
@@ -72,6 +96,12 @@ pub async fn handle_command(
         "Server state not available.".to_owned()
     };
 
+    debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        response_len = response_text.len(),
+        "handle_command exit"
+    );
+
     Ok(ephemeral_response(&response_text))
 }
 
@@ -84,13 +114,15 @@ async fn dispatch_command(
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let db = &state.db;
+    let prefix = slash_prefix(state.server_mode);
 
     match command {
-        "help" => Ok(handle_help(args.first().copied())),
+        "help" => Ok(handle_help(args.first().copied(), state.server_mode)),
 
-        "sessions" => handle_sessions(db).await,
+        "sessions" => handle_sessions(args, channel_id, db).await,
 
-        "session-start" => {
+        // ACP-only session lifecycle commands.
+        "session-start" if state.server_mode == ServerMode::Acp => {
             let prompt = if args.is_empty() {
                 return Err(crate::AppError::Config(
                     "usage: session-start <prompt>".into(),
@@ -98,27 +130,49 @@ async fn dispatch_command(
             } else {
                 args.join(" ")
             };
-            handle_session_start(&prompt, user_id, state).await
+            handle_session_start(&prompt, user_id, channel_id, state).await
         }
+
+        "session-stop" if state.server_mode == ServerMode::Acp => {
+            let session_id = args.first().copied();
+            handle_session_stop(session_id, user_id, channel_id, state).await
+        }
+
+        "session-restart" if state.server_mode == ServerMode::Acp => {
+            let session_id = args.first().copied();
+            handle_session_restart(session_id, user_id, channel_id, state).await
+        }
+
+        "session-start" | "session-stop" | "session-restart" => Ok(format!(
+            "`{command}` is only available in ACP mode. Use `/{prefix} help` for commands."
+        )),
+
+        "session-cleanup" if state.server_mode == ServerMode::Acp => {
+            handle_session_cleanup(user_id, channel_id, state).await
+        }
+
+        "session-cleanup" => Ok(format!(
+            "`session-cleanup` is only available in ACP mode. Use `/{prefix} help` for commands."
+        )),
 
         "session-pause" => {
             let session_id = args.first().copied();
-            handle_session_pause(session_id, user_id, db).await
+            handle_session_pause(session_id, user_id, channel_id, state).await
         }
 
         "session-resume" => {
             let session_id = args.first().copied();
-            handle_session_resume(session_id, user_id, db).await
+            handle_session_resume(session_id, user_id, channel_id, state).await
         }
 
         "session-clear" => {
             let session_id = args.first().copied();
-            handle_session_clear(session_id, user_id, state).await
+            handle_session_clear(session_id, user_id, channel_id, state).await
         }
 
         "session-checkpoint" => {
             let (session_id, label) = parse_checkpoint_args(args);
-            handle_session_checkpoint(session_id, label, user_id, db).await
+            handle_session_checkpoint(session_id, label, user_id, channel_id, db).await
         }
 
         "session-restore" => {
@@ -130,12 +184,12 @@ async fn dispatch_command(
 
         "session-checkpoints" => {
             let session_id = args.first().copied();
-            handle_session_checkpoints(session_id, user_id, db).await
+            handle_session_checkpoints(session_id, user_id, channel_id, db).await
         }
 
-        "list-files" => handle_list_files(args, user_id, state).await,
+        "list-files" => handle_list_files(args, user_id, channel_id, state).await,
 
-        "show-file" => handle_show_file(args, user_id, state).await,
+        "show-file" => handle_show_file(args, user_id, channel_id, state).await,
 
         "steer" => {
             let text = if args.is_empty() {
@@ -145,7 +199,7 @@ async fn dispatch_command(
             } else {
                 args.join(" ")
             };
-            steer_handler::store_from_slack(&text, Some(channel_id), state).await
+            steer_handler::store_from_slack(&text, Some(channel_id), None, state).await
         }
 
         "task" => {
@@ -157,107 +211,241 @@ async fn dispatch_command(
             task_handler::store_from_slack(&text, Some(channel_id), state).await
         }
 
-        other => {
-            let result = validate_command_alias(other, &state.config.commands);
-            match result {
-                Ok(shell_command) => {
-                    handle_run_command(other, &shell_command, user_id, state).await
-                }
-                Err(_) => Ok(format!(
-                    "Unknown command: `{other}`. Use `/intercom help` for available commands."
-                )),
-            }
-        }
+        other => Ok(format!(
+            "Unknown command: `{other}`. Use `/{prefix} help` for available commands."
+        )),
+    }
+}
+
+// ── Slash prefix helper ──────────────────────────────────────────────
+
+/// Return the slash command prefix for the current server mode.
+fn slash_prefix(mode: ServerMode) -> &'static str {
+    match mode {
+        ServerMode::Mcp => "acom",
+        ServerMode::Acp => "arc",
     }
 }
 
 // ── Help command (T073) ──────────────────────────────────────────────
 
-/// Generate help text grouped by category.
-fn handle_help(category: Option<&str>) -> String {
+/// Generate help text grouped by category, scoped to the active server mode.
+fn handle_help(category: Option<&str>, mode: ServerMode) -> String {
+    let prefix = slash_prefix(mode);
     match category {
-        Some("session" | "sessions") => SESSION_HELP.to_owned(),
-        Some("checkpoint" | "checkpoints") => CHECKPOINT_HELP.to_owned(),
-        Some("file" | "files") => FILES_HELP.to_owned(),
-        Some("steering" | "steer" | "task" | "tasks") => STEERING_HELP.to_owned(),
-        _ => FULL_HELP.to_owned(),
+        Some("session" | "sessions") => format_session_help(prefix, mode),
+        Some("checkpoint" | "checkpoints") => format_checkpoint_help(prefix),
+        Some("file" | "files") => format_files_help(prefix),
+        Some("steering" | "steer" | "task" | "tasks") => format_steering_help(prefix),
+        _ => format_full_help(prefix, mode),
     }
 }
 
-const FULL_HELP: &str = "\
-*Available `/intercom` commands:*
+fn format_full_help(prefix: &str, mode: ServerMode) -> String {
+    let mut text = format!("*Available `/{prefix}` commands:*\n\n");
 
-*Agent Steering*
-• `steer <message>` — Send a steering message to the agent (delivered on next ping)
-• `task <message>` — Queue a task for the agent (delivered on next session recovery)
+    text.push_str(
+        "*Agent Steering*\n\
+         • `steer <message>` — Send a steering message to the agent (delivered on next ping)\n\
+         • `task <message>` — Queue a task for the agent (delivered on next session recovery)\n\n",
+    );
 
-*Session Management*
-• `session-start <prompt>` — Start a new agent session
-• `session-pause [session_id]` — Pause a running session
-• `session-resume [session_id]` — Resume a paused session
-• `session-clear [session_id]` — Terminate and clean up a session
-• `sessions` — List all tracked sessions
+    text.push_str("*Session Management*\n");
+    if mode == ServerMode::Acp {
+        text.push_str(
+            "• `session-start <prompt>` — Start a new agent session\n\
+             • `session-stop [session_id]` — Gracefully stop a running session\n\
+             • `session-restart [session_id]` — Restart a session with its original prompt\n",
+        );
+    }
+    text.push_str(
+        "• `session-pause [session_id]` — Pause a running session\n\
+         • `session-resume [session_id]` — Resume a paused session\n\
+         • `session-clear [session_id]` — Force-terminate and clean up a session\n\
+         • `sessions` — List all tracked sessions\n\n",
+    );
 
-*Checkpoints*
-• `session-checkpoint [session_id] [label]` — Create a checkpoint
-• `session-restore <checkpoint_id>` — Restore a checkpoint
-• `session-checkpoints [session_id]` — List checkpoints
+    text.push_str(
+        "*Checkpoints*\n\
+         • `session-checkpoint [session_id] [label]` — Create a checkpoint\n\
+         • `session-restore <checkpoint_id>` — Restore a checkpoint\n\
+         • `session-checkpoints [session_id]` — List checkpoints\n\n",
+    );
 
-*File Browsing*
-• `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)
-• `show-file <path> [--lines START:END]` — Display file contents with syntax highlighting
+    text.push_str(
+        "*File Browsing*\n\
+         • `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)\n\
+         • `show-file <path> [--lines START:END]` — Display file contents with syntax \
+         highlighting\n\n",
+    );
 
-*Custom Commands*
-• Any registered command alias — Run a pre-approved command from config
+    text.push_str(
+        "*General*\n\
+         • `help [category]` — Show this help (categories: session, checkpoint, files, steering)",
+    );
 
-*General*
-• `help [category]` — Show this help (categories: session, checkpoint, files, steering)";
+    text
+}
 
-const SESSION_HELP: &str = "\
-*Session commands:*
-• `session-start <prompt>` — Start a new agent session with the given prompt
-• `session-pause [session_id]` — Pause a running session (defaults to active session)
-• `session-resume [session_id]` — Resume a paused session
-• `session-clear [session_id]` — Terminate and clean up a session
-• `sessions` — List all tracked sessions with state and timestamps";
+fn format_session_help(prefix: &str, mode: ServerMode) -> String {
+    let mut text = String::from("*Session commands:*\n");
+    if mode == ServerMode::Acp {
+        text.push_str(
+            "• `session-start <prompt>` — Start a new agent session with the given prompt\n\
+             • `session-stop [session_id]` — Gracefully stop a running session (sends interrupt \
+             first)\n\
+             • `session-restart [session_id]` — Restart a session with its original prompt\n",
+        );
+    }
+    text.push_str(
+        "• `session-pause [session_id]` — Pause a running session (defaults to active session)\n\
+         • `session-resume [session_id]` — Resume a paused session\n\
+         • `session-clear [session_id]` — Force-terminate and clean up a session\n\
+         • `sessions` — List all tracked sessions with state and timestamps",
+    );
+    let _ = prefix; // used by callers for consistency; format kept static
+    text
+}
 
-const CHECKPOINT_HELP: &str = "\
-*Checkpoint commands:*
-• `session-checkpoint [session_id] [label]` — Snapshot session state and file hashes
-• `session-restore <checkpoint_id>` — Restore a checkpoint (warns of diverged files)
-• `session-checkpoints [session_id]` — List all checkpoints for a session";
+/// Return the checkpoint-specific help text.
+///
+/// Describes `session-checkpoint` as optional-session_id `[session_id]`
+/// so operators understand the command falls back to the most-recent active
+/// session when the argument is omitted (HITL-004 / FR-050).
+#[must_use]
+pub fn format_checkpoint_help(prefix: &str) -> String {
+    let _ = prefix;
+    "*Checkpoint commands:*\n\
+     • `session-checkpoint [session_id] [label]` — Snapshot current session state and file \
+     hashes. When `session_id` is omitted, the most-recent active session in this channel is \
+     used. If no session is active, the command fails with a descriptive error.\n\
+     • `session-restore <checkpoint_id>` — Restore a checkpoint (warns of diverged files)\n\
+     • `session-checkpoints [session_id]` — List all checkpoints for a session"
+        .to_owned()
+}
 
-const FILES_HELP: &str = "\
-*File browsing and command commands:*
-• `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)
-• `show-file <path> [--lines START:END]` — Display file contents with syntax highlighting
-• Any registered command alias — Run a pre-approved command from config";
+fn format_files_help(prefix: &str) -> String {
+    let _ = prefix;
+    "*File browsing commands:*\n\
+     • `list-files [path] [--depth N]` — List workspace directory tree (default depth: 3)\n\
+     • `show-file <path> [--lines START:END]` — Display file contents with syntax highlighting"
+        .to_owned()
+}
 
-const STEERING_HELP: &str = "\
-*Agent steering commands:*
-• `steer <message>` — Send a steering message to the active agent session. The message is \
-queued and delivered on the agent's next `ping` call. Use this to redirect focus or provide \
-guidance without interrupting the current operation.
-• `task <message>` — Queue a task item for the agent. Tasks are delivered in bulk on the \
-agent's next session recovery (`reboot` call), making them ideal for asynchronous to-do \
-items that the agent should pick up at the start of its next session.";
+fn format_steering_help(prefix: &str) -> String {
+    let _ = prefix;
+    "*Agent steering commands:*\n\
+     • `steer <message>` — Send a steering message to the active agent session. The message is \
+     queued and delivered on the agent's next `ping` call. Use this to redirect focus or provide \
+     guidance without interrupting the current operation.\n\
+     • `task <message>` — Queue a task item for the agent. Tasks are delivered in bulk on the \
+     agent's next session recovery (`reboot` call), making them ideal for asynchronous to-do \
+     items that the agent should pick up at the start of its next session."
+        .to_owned()
+}
 
 // ── Session commands (T067, T072) ────────────────────────────────────
 
-async fn handle_sessions(db: &Arc<Database>) -> crate::Result<String> {
-    let repo = SessionRepo::new(Arc::clone(db));
-    let active = repo.list_active().await?;
-
-    if active.is_empty() {
-        return Ok("No active sessions.".to_owned());
+/// Resolve the session a slash command should operate on.
+///
+/// When `session_id` is explicitly provided it is returned directly (without
+/// ownership verification — callers do that via [`spawner::verify_session_owner`]).
+/// When absent, the most-recently-updated session owned by `user_id` in
+/// `channel_id` is returned. If no session is found in the channel the
+/// caller receives a descriptive `NotFound` error (T068 / S045).
+async fn resolve_command_session(
+    session_id: Option<&str>,
+    user_id: &str,
+    channel_id: &str,
+    repo: &SessionRepo,
+) -> crate::Result<crate::models::session::Session> {
+    if let Some(id) = session_id {
+        // Explicit ID: accept any status including Interrupted (HITL-006 / S083).
+        if let Some(session) = repo.get_by_id(id).await? {
+            return Ok(session);
+        }
+        return repo
+            .get_by_prefix(id)
+            .await?
+            .ok_or_else(|| crate::AppError::NotFound(format!("session {id} not found")));
     }
 
-    let mut lines = vec!["*Active Sessions:*".to_owned()];
-    for session in &active {
-        let last_tool = session.last_tool.as_deref().unwrap_or("none");
+    // T067: Prefer the active session in the originating channel (S043).
+    let channel_sessions = repo.find_active_by_channel(channel_id).await?;
+    if let Some(session) = channel_sessions
+        .into_iter()
+        .find(|s| s.owner_user_id == user_id)
+    {
+        return Ok(session);
+    }
+
+    // HITL-006: Fall back to interrupted sessions when no active session exists
+    // so operators can manage sessions after a server restart (S083, S084).
+    let interrupted = repo.find_interrupted_by_channel(channel_id).await?;
+    if let Some(session) = interrupted.into_iter().find(|s| s.owner_user_id == user_id) {
+        return Ok(session);
+    }
+
+    // T068: No session in this channel — return a channel-specific error (S045).
+    Err(crate::AppError::NotFound(
+        "no active session in this channel — use `sessions` to see all sessions".into(),
+    ))
+}
+
+async fn handle_sessions(
+    args: &[&str],
+    channel_id: &str,
+    db: &Arc<Database>,
+) -> crate::Result<String> {
+    let repo = SessionRepo::new(Arc::clone(db));
+    let all_flag = args.contains(&"--all");
+
+    let sessions = if all_flag {
+        // HITL-002 / FR-048: --all shows every session in this channel.
+        repo.list_all_by_channel(channel_id).await?
+    } else {
+        // HITL-008 / FR-051: default listing shows active and paused sessions.
+        repo.list_active_or_paused().await?
+    };
+
+    if sessions.is_empty() {
+        return Ok(if all_flag {
+            "No sessions found in this channel.".to_owned()
+        } else {
+            "No active sessions.".to_owned()
+        });
+    }
+
+    let header = if all_flag {
+        "*All Sessions (this channel):*"
+    } else {
+        "*Active Sessions:*"
+    };
+    let mut lines = vec![header.to_owned()];
+
+    for session in &sessions {
+        let short_id: String = session.id.chars().take(8).collect();
+        let protocol = match session.protocol_mode {
+            ProtocolMode::Acp => "ACP",
+            ProtocolMode::Mcp => "MCP",
+        };
+        // T165: status icons — 🟢 Active, ⏸ Paused, 🔴 Terminated, 💀 Interrupted.
+        let icon = match session.status {
+            crate::models::session::SessionStatus::Active => "\u{1f7e2}",
+            crate::models::session::SessionStatus::Paused => "\u{23f8}",
+            crate::models::session::SessionStatus::Terminated => "\u{1f534}",
+            crate::models::session::SessionStatus::Interrupted => "\u{1f480}",
+            crate::models::session::SessionStatus::Created => "\u{23f3}",
+        };
+        // T159/FR-049: show title when available.
+        let title_suffix = session
+            .title
+            .as_deref()
+            .map(|t| format!(" | _{t}_"))
+            .unwrap_or_default();
         lines.push(format!(
-            "• `{}` — owner: `{}`, status: `{:?}`, last tool: `{}`",
-            session.id, session.owner_user_id, session.status, last_tool
+            "{icon} `{short_id}…` — {protocol} | owner: `{}`{title_suffix}",
+            session.owner_user_id
         ));
     }
 
@@ -265,6 +453,338 @@ async fn handle_sessions(db: &Arc<Database>) -> crate::Result<String> {
 }
 
 async fn handle_session_start(
+    prompt: &str,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    match state.server_mode {
+        ServerMode::Acp => handle_acp_session_start(prompt, user_id, channel_id, state).await,
+        ServerMode::Mcp => handle_mcp_session_start(prompt, user_id, state).await,
+    }
+}
+
+// This startup sequence is inherently sequential — each step depends on the
+// previous (validate → count sessions → create DB record → spawn process →
+// handshake → register driver → post Slack message). The heavy work runs
+// in a background task so the slash command can respond immediately.
+#[allow(clippy::too_many_lines)]
+async fn handle_acp_session_start(
+    prompt: &str,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    // Validate ACP configuration before attempting to spawn.
+    state.config.validate_for_acp_mode()?;
+
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // S024: enforce max concurrent ACP sessions.
+    let active_count = repo.count_active().await?;
+    let max = i64::try_from(state.config.acp.max_sessions).unwrap_or(i64::MAX);
+    if active_count >= max {
+        return Err(crate::AppError::Acp(format!(
+            "max concurrent ACP sessions reached ({active_count}/{})",
+            state.config.acp.max_sessions
+        )));
+    }
+
+    // Resolve the workspace root and name from the incoming Slack channel.
+    // Falls back to `default_workspace_root` when the channel has no mapping.
+    // T154: hold a read-lock on the hot-reload workspace_mappings for the
+    // duration of channel resolution so a concurrent config reload cannot
+    // produce an inconsistent (channel, workspace_root) pair.
+    let (workspace_root, workspace_name) = {
+        let mappings = state
+            .workspace_mappings
+            .read()
+            .map_err(|_| crate::AppError::Config("workspace_mappings lock poisoned".to_owned()))?;
+        let mapping = mappings.iter().find(|m| m.channel_id == channel_id);
+        let root = mapping
+            .and_then(|m| m.path.clone())
+            .unwrap_or_else(|| state.config.default_workspace_root.clone());
+        let name = mapping
+            .and_then(|m| m.label.as_deref())
+            .or_else(|| root.file_name().and_then(|n| n.to_str()))
+            .unwrap_or("workspace")
+            .to_owned();
+        (root, name)
+    };
+
+    // Build the session record with ACP-specific fields.
+    let mut session = Session::new(
+        user_id.to_owned(),
+        workspace_root.to_string_lossy().to_string(),
+        Some(prompt.to_owned()),
+        SessionMode::Remote,
+    );
+    session.protocol_mode = ProtocolMode::Acp;
+    session.channel_id = Some(channel_id.to_owned());
+    // T159 / FR-049: store truncated prompt as session title (max 80 chars).
+    session.title = Some(truncate_session_title(prompt));
+
+    let created = repo.create(&session).await?;
+    let session_id = created.id.clone();
+
+    // Spawn the heavy work (process launch, handshake, Slack posting) in a
+    // background task so the slash command can return immediately. Slack
+    // Socket Mode requires an acknowledgement within ~3 seconds; spawning
+    // and waiting for the agent's ready signal can take 30+ seconds.
+    let bg_state = Arc::clone(state);
+    let bg_prompt = prompt.to_owned();
+    let bg_channel = channel_id.to_owned();
+    let bg_workspace_root = workspace_root;
+    let bg_workspace_name = workspace_name.clone();
+    let bg_session_id = session_id.clone();
+
+    tokio::spawn(async move {
+        if let Err(err) = finish_acp_session_start(
+            &bg_session_id,
+            &bg_prompt,
+            &bg_channel,
+            &bg_workspace_root,
+            &bg_workspace_name,
+            &bg_state,
+        )
+        .await
+        {
+            warn!(
+                session_id = %bg_session_id,
+                %err,
+                "ACP session start failed in background"
+            );
+            // Mark the session as interrupted so it doesn't linger as pending.
+            let repo = SessionRepo::new(Arc::clone(&bg_state.db));
+            repo.set_terminated(&bg_session_id, SessionStatus::Interrupted)
+                .await
+                .inspect_err(|e| {
+                    warn!(
+                        session_id = %bg_session_id,
+                        %e,
+                        "failed to mark session interrupted after startup failure"
+                    );
+                })
+                .ok();
+
+            // Notify the operator of the failure via Slack.
+            if let Some(ref slack) = bg_state.slack {
+                let msg = SlackMessage {
+                    channel: SlackChannelId(bg_channel.clone()),
+                    text: Some(format!(
+                        "\u{274c} ACP session `{}` failed to start: {err}",
+                        bg_session_id.chars().take(8).collect::<String>()
+                    )),
+                    blocks: None,
+                    thread_ts: None,
+                };
+                slack.post_message_direct(msg).await.ok();
+            }
+        }
+    });
+
+    Ok(format!(
+        "\u{23f3} Starting ACP session `{}` in `{workspace_name}`…",
+        session_id.chars().take(8).collect::<String>()
+    ))
+}
+
+/// Background continuation of ACP session start: spawn process, handshake,
+/// wire I/O tasks, post Slack notification.
+#[allow(clippy::too_many_lines)]
+async fn finish_acp_session_start(
+    session_id: &str,
+    prompt: &str,
+    channel_id: &str,
+    workspace_root: &Path,
+    workspace_name: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<()> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // Spawn the agent process (no prompt CLI arg — FR-030).
+    let spawn_cfg = SpawnConfig {
+        host_cli: state.config.host_cli.clone(),
+        host_cli_args: state.config.host_cli_args.clone(),
+        workspace_root: workspace_root.to_path_buf(),
+    };
+
+    let mut conn = crate::acp::spawner::spawn_agent(&spawn_cfg, session_id)?;
+
+    // Perform the ACP handshake: initialize → result → initialized → session/new → prompt.
+    let handshake_timeout = Duration::from_secs(state.config.acp.startup_timeout_seconds);
+    let handshake_result = async {
+        handshake::send_initialize(&mut conn.stdin, session_id, workspace_root, workspace_name)
+            .await?;
+        handshake::wait_for_initialize_result(&mut conn.stdout, session_id, handshake_timeout)
+            .await?;
+        handshake::send_initialized(&mut conn.stdin, session_id).await?;
+        let agent_session_id = handshake::send_session_new(
+            &mut conn.stdin,
+            &mut conn.stdout,
+            session_id,
+            workspace_root,
+            handshake_timeout,
+        )
+        .await?;
+        // Persist the agent-assigned session ID for subsequent prompts.
+        repo.set_agent_session_id(session_id, &agent_session_id)
+            .await?;
+        handshake::send_prompt(&mut conn.stdin, session_id, &agent_session_id, prompt).await
+    }
+    .await;
+
+    if let Err(err) = handshake_result {
+        repo.set_terminated(session_id, SessionStatus::Interrupted)
+            .await
+            .inspect_err(|e| {
+                warn!(
+                    %session_id,
+                    %e,
+                    "failed to mark session interrupted after handshake failure"
+                );
+            })
+            .ok();
+        return Err(err);
+    }
+
+    // Wire ACP I/O tasks for this session (T084).
+    // Each session gets its own outbound message channel; inbound events are
+    // routed through the shared acp_event_tx stored in AppState.
+    if let (Some(ref acp_driver), Some(ref event_tx)) = (&state.acp_driver, &state.acp_event_tx) {
+        use tokio_util::sync::CancellationToken;
+
+        let (msg_tx, msg_rx) = tokio::sync::mpsc::channel(256);
+        // T132: register_session now returns the per-session sequence counter
+        // shared with run_writer.
+        let seq_counter = acp_driver.register_session(session_id, msg_tx).await;
+
+        // Register the agent-assigned session ID so `send_prompt` can include
+        // it in `session/prompt` messages.
+        if let Ok(Some(sess)) = repo.get_by_id(session_id).await {
+            if let Some(ref asid) = sess.agent_session_id {
+                acp_driver.register_agent_session_id(session_id, asid).await;
+            }
+        }
+
+        let session_ct = CancellationToken::new();
+        let reader_event_tx = event_tx.clone();
+        let reader_session_id = session_id.to_owned();
+        let reader_ct = session_ct.clone();
+        let reader_db = Arc::clone(&state.db);
+        let reader_driver: Arc<dyn crate::driver::AgentDriver> = acp_driver.clone();
+        let reader_channel_id = channel_id.to_owned();
+        let reader_slack = state.slack.clone();
+        let flush_ctx = crate::acp::reader::ReconnectFlushContext {
+            db: reader_db,
+            driver: reader_driver,
+            slack: reader_slack,
+            channel_id: Some(reader_channel_id),
+            thread_ts: None, // thread_ts not yet recorded at spawn
+        };
+
+        // T151 (FR-046): Activate the session BEFORE starting the reader task
+        // so that any inbound events that arrive immediately after the reader
+        // starts can find the session in the Active state.
+        let _active = repo
+            .update_status(session_id, SessionStatus::Active)
+            .await?;
+
+        tokio::spawn(crate::acp::reader::run_reader(
+            reader_session_id,
+            conn.stdout,
+            reader_event_tx,
+            reader_ct,
+            Some(flush_ctx),
+            state.config.acp.max_msg_rate,
+        ));
+
+        let writer_session_id = session_id.to_owned();
+        let writer_ct = session_ct.clone();
+        let writer_db = Arc::clone(&state.db);
+        // T133/T134: pass seq_counter and db so the writer can stamp sequence
+        // numbers and mark sessions Interrupted on broken-pipe failures.
+        tokio::spawn(crate::acp::writer::run_writer(
+            writer_session_id,
+            conn.stdin,
+            msg_rx,
+            writer_ct,
+            seq_counter,
+            writer_db,
+        ));
+
+        state
+            .active_children
+            .lock()
+            .await
+            .insert(session_id.to_owned(), conn.child);
+    } else {
+        // ACP driver not configured — store child handle only.
+        state
+            .active_children
+            .lock()
+            .await
+            .insert(session_id.to_owned(), conn.child);
+
+        // Activate the session here since the `if` branch already activated it above.
+        let _ = repo
+            .update_status(session_id, SessionStatus::Active)
+            .await?;
+    }
+
+    // Retrieve the active session record for Slack posting.
+    // (The `if` branch already holds `active`; fetch again for the `else` path.)
+    let Some(active) = repo.get_by_id(session_id).await? else {
+        return Err(crate::AppError::NotFound(format!(
+            "session not found after activation: {session_id}"
+        )));
+    };
+
+    // T058 / S036: Post "session started" as the thread root and record ts.
+    // All subsequent messages for this session will be posted as thread replies.
+    if let Some(ref slack) = state.slack {
+        let started_blocks = blocks::session_started_blocks(&active);
+        let msg = SlackMessage {
+            channel: SlackChannelId(channel_id.to_owned()),
+            text: Some(format!(
+                "\u{1f916} ACP session `{}` started in `{workspace_name}`",
+                active.id.chars().take(8).collect::<String>()
+            )),
+            blocks: Some(started_blocks),
+            thread_ts: None,
+        };
+        match slack.post_message_direct(msg).await {
+            Ok(ts) => {
+                if let Err(err) = repo.set_thread_ts(&active.id, &ts.0).await {
+                    warn!(%err, session_id = %active.id, "failed to record thread_ts");
+                } else {
+                    info!(session_id = %active.id, thread_ts = %ts.0, "thread_ts recorded");
+                }
+            }
+            Err(err) => {
+                warn!(%err, session_id = %active.id, "failed to post session-started message");
+            }
+        }
+    }
+
+    info!(
+        session_id = active.id,
+        channel_id, workspace = %workspace_name, "ACP session started"
+    );
+
+    // HITL-007: audit-log the ACP session start event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionStart,
+        &active.id,
+        None,
+    );
+
+    Ok(())
+}
+
+/// Start a new MCP session (existing behaviour, now refactored into its own fn).
+async fn handle_mcp_session_start(
     prompt: &str,
     user_id: &str,
     state: &Arc<AppState>,
@@ -303,63 +823,344 @@ async fn handle_session_start(
 async fn handle_session_pause(
     session_id: Option<&str>,
     user_id: &str,
-    db: &Arc<Database>,
+    channel_id: &str,
+    state: &Arc<AppState>,
 ) -> crate::Result<String> {
-    let repo = SessionRepo::new(Arc::clone(db));
+    let repo = SessionRepo::new(Arc::clone(&state.db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let paused = session_manager::pause_session(&session.id, &repo).await?;
+
+    // HITL-007: audit-log the ACP session pause event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionPause,
+        &paused.id,
+        Some(user_id),
+    );
+
     Ok(format!("Session `{}` paused.", paused.id))
 }
 
 async fn handle_session_resume(
     session_id: Option<&str>,
     user_id: &str,
-    db: &Arc<Database>,
+    channel_id: &str,
+    state: &Arc<AppState>,
 ) -> crate::Result<String> {
-    let repo = SessionRepo::new(Arc::clone(db));
+    let repo = SessionRepo::new(Arc::clone(&state.db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let resumed = session_manager::resume_session(&session.id, &repo).await?;
+
+    // HITL-007: audit-log the ACP session resume event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionResume,
+        &resumed.id,
+        Some(user_id),
+    );
+
     Ok(format!("Session `{}` resumed.", resumed.id))
+}
+
+/// Gracefully stop an ACP session.
+///
+/// Sends `session/interrupt` to the agent process first, giving it a chance to
+/// clean up, then terminates the process and marks the session as `Terminated`.
+/// Posts a "session stopped" notification to the session's Slack thread.
+///
+/// Unlike `session-clear`, which force-terminates immediately, `session-stop`
+/// is the preferred way to close an ACP session when the agent should be given
+/// the opportunity to save state or wrap up current work.
+async fn handle_session_stop(
+    session_id: Option<&str>,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
+    spawner::verify_session_owner(&session, user_id)?;
+
+    if session.protocol_mode != ProtocolMode::Acp {
+        return Err(crate::AppError::Config(
+            "session-stop is only supported for ACP sessions; use session-clear for MCP sessions"
+                .into(),
+        ));
+    }
+
+    // Send session/interrupt to give the agent a chance to wrap up.
+    if let Some(ref acp_driver) = state.acp_driver {
+        if let Err(err) = acp_driver.interrupt(&session.id).await {
+            warn!(%err, session_id = %session.id, "session-stop: interrupt delivery failed — continuing with termination");
+        }
+    }
+
+    let mut child = state.active_children.lock().await.remove(&session.id);
+
+    // Kill the entire process tree before terminate_session sends kill_on_drop
+    // to the direct child.  This ensures grandchild processes (e.g. model
+    // runners forked by the agent) are also terminated (ES-004, FR-037).
+    if let Some(ref c) = child {
+        if let Some(pid) = c.id() {
+            #[cfg(windows)]
+            crate::acp::spawner::kill_process_tree(pid).await;
+            #[cfg(unix)]
+            crate::acp::spawner::kill_process_group(pid).await;
+        }
+    }
+
+    let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
+
+    // Deregister the ACP driver's in-memory state for this session so
+    // stale writers / agent_session_ids don't linger.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(&session.id).await;
+    }
+
+    if let Some(ref slack) = state.slack {
+        session_manager::notify_session_ended(&terminated, "stopped by operator", slack).await;
+    }
+
+    info!(session_id = %terminated.id, user_id, "ACP session stopped by operator");
+
+    // HITL-007: audit-log the ACP session stop event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionStop,
+        &terminated.id,
+        Some(user_id),
+    );
+
+    Ok(format!("ACP session `{}` stopped.", terminated.id))
+}
+
+/// Terminate all interrupted sessions in the channel (HITL-006 / S085, S086).
+///
+/// Queries all sessions with status `Interrupted` in the channel that are
+/// owned by the requesting user, marks each as `Terminated`, and deregisters
+/// them from the ACP driver.  Posts a confirmation listing the terminated
+/// session IDs.
+async fn handle_session_cleanup(
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    let interrupted = repo.find_interrupted_by_channel(channel_id).await?;
+    let user_sessions: Vec<_> = interrupted
+        .into_iter()
+        .filter(|s| s.owner_user_id == user_id)
+        .collect();
+
+    if user_sessions.is_empty() {
+        return Ok("No interrupted sessions to clean up.".to_owned());
+    }
+
+    let count = user_sessions.len();
+    let mut cleaned: Vec<String> = Vec::with_capacity(count);
+
+    for session in &user_sessions {
+        repo.set_terminated(&session.id, SessionStatus::Terminated)
+            .await?;
+        if let Some(ref acp_driver) = state.acp_driver {
+            acp_driver.deregister_session(&session.id).await;
+        }
+        let short_id: String = session.id.chars().take(8).collect();
+        cleaned.push(format!("`{short_id}…`"));
+        info!(session_id = %session.id, user_id, "interrupted session cleaned up");
+
+        // HITL-007: audit-log each cleaned-up session.
+        emit_audit(
+            state.audit_logger.as_ref(),
+            AuditEventType::AcpSessionStop,
+            &session.id,
+            Some(user_id),
+        );
+    }
+
+    Ok(format!(
+        "Cleaned up {count} interrupted session(s): {}",
+        cleaned.join(", ")
+    ))
 }
 
 async fn handle_session_clear(
     session_id: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let repo = SessionRepo::new(Arc::clone(&state.db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     // Remove the child from the registry before awaiting terminate_session
     // to avoid holding the lock guard across an await point.
     let mut child = state.active_children.lock().await.remove(&session.id);
     let terminated = session_manager::terminate_session(&session.id, &repo, child.as_mut()).await?;
+
+    // Deregister the ACP driver's in-memory state for this session.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(&session.id).await;
+    }
+
+    // T060 / S094: Post session-ended summary as a threaded reply.
+    if let Some(ref slack) = state.slack {
+        session_manager::notify_session_ended(&terminated, "terminated by operator", slack).await;
+    }
+
+    // HITL-007: audit-log the session clear/terminate event.
+    emit_audit(
+        state.audit_logger.as_ref(),
+        AuditEventType::AcpSessionStop,
+        &terminated.id,
+        Some(user_id),
+    );
+
     Ok(format!("Session `{}` terminated.", terminated.id))
+}
+
+/// Restart an ACP session (T098 / S067).
+///
+/// Terminates the currently running session (marking it `Interrupted`),
+/// removes the child process from the registry, and spawns a fresh ACP session
+/// with the same original prompt, channel, and owner.  The new session posts
+/// its "started" message to the channel so the operator can track it.
+///
+/// Works only in ACP mode.  Attempting to restart an MCP session returns a
+/// descriptive error.
+async fn handle_session_restart(
+    session_id: Option<&str>,
+    user_id: &str,
+    channel_id: &str,
+    state: &Arc<AppState>,
+) -> crate::Result<String> {
+    let repo = SessionRepo::new(Arc::clone(&state.db));
+
+    let session = resolve_command_session(session_id, user_id, channel_id, &repo).await?;
+    spawner::verify_session_owner(&session, user_id)?;
+
+    if session.protocol_mode != ProtocolMode::Acp {
+        return Err(crate::AppError::Config(
+            "session-restart is only supported for ACP sessions".into(),
+        ));
+    }
+
+    let original_prompt = session.prompt.clone().unwrap_or_default();
+    let old_session_id = session.id.clone();
+
+    // Interrupt the old session via the driver (best-effort).
+    if let Some(ref acp_driver) = state.acp_driver {
+        if let Err(err) = acp_driver.interrupt(&old_session_id).await {
+            warn!(%err, session_id = %old_session_id, "acp interrupt failed during restart — continuing");
+        }
+    }
+
+    // Remove the child from the registry so the old process is dropped.
+    let mut child = state.active_children.lock().await.remove(&old_session_id);
+
+    // Kill the entire process tree before terminate_session sends
+    // kill_on_drop to the direct child — matches the session-stop
+    // pattern to ensure grandchild processes are cleaned up (ES-004).
+    if let Some(ref c) = child {
+        if let Some(pid) = c.id() {
+            #[cfg(windows)]
+            crate::acp::spawner::kill_process_tree(pid).await;
+            #[cfg(unix)]
+            crate::acp::spawner::kill_process_group(pid).await;
+        }
+    }
+
+    // Mark old session as Terminated (waits for process exit).
+    if let Err(err) =
+        session_manager::terminate_session(&old_session_id, &repo, child.as_mut()).await
+    {
+        warn!(%err, session_id = %old_session_id, "failed to terminate old session during restart");
+    }
+
+    // Deregister the old session's ACP driver state.
+    if let Some(ref acp_driver) = state.acp_driver {
+        acp_driver.deregister_session(&old_session_id).await;
+    }
+
+    // Notify the Slack thread that the session was restarted.
+    if let Some(ref slack) = state.slack {
+        let msg = SlackMessage {
+            channel: SlackChannelId(channel_id.to_owned()),
+            text: Some(format!(
+                "\u{1f504} Session `{old_session_id}` is being restarted with original prompt."
+            )),
+            blocks: None,
+            thread_ts: session.thread_ts.as_deref().map(|s| SlackTs(s.to_owned())),
+        };
+        if let Err(err) = slack.enqueue(msg).await {
+            warn!(%err, "failed to post restart notification");
+        }
+    }
+
+    // Spawn the new ACP session with the original prompt.
+    handle_acp_session_start(&original_prompt, user_id, channel_id, state).await
+}
+
+// ── Audit helpers (HITL-007) ─────────────────────────────────────────
+
+/// Emit an audit log entry for an ACP session lifecycle event.
+///
+/// A no-op when the audit logger is not configured. Logs a warning
+/// if the underlying write fails so the handler's happy path is not
+/// interrupted by audit I/O errors.
+fn emit_audit(
+    logger: Option<&Arc<dyn crate::audit::AuditLogger>>,
+    event_type: AuditEventType,
+    session_id: &str,
+    operator_id: Option<&str>,
+) {
+    if let Some(logger) = logger {
+        let mut entry = AuditEntry::new(event_type).with_session(session_id.to_owned());
+        if let Some(op) = operator_id {
+            entry = entry.with_operator(op.to_owned());
+        }
+        if let Err(err) = logger.log_entry(entry) {
+            warn!(%err, "audit log write failed (acp lifecycle event)");
+        }
+    }
 }
 
 // ── Checkpoint commands (T070-T071 integration, T072) ────────────────
 
-/// Parse checkpoint args: `[session_id] [label]` — if first arg looks like a
-/// UUID it's a `session_id`, otherwise it's used as the label.
-fn parse_checkpoint_args<'a>(args: &[&'a str]) -> (Option<&'a str>, Option<&'a str>) {
+/// Parse `session-checkpoint [session_id] [label]` arguments.
+///
+/// The first positional argument is always the session ID (or a prefix of it).
+/// The second positional argument, if present, is the checkpoint label.
+/// Any additional arguments are silently ignored.
+///
+/// | Call                         | `session_id`      | `label`           |
+/// |------------------------------|-------------------|-------------------|
+/// | `session-checkpoint`         | `None`            | `None`            |
+/// | `session-checkpoint abc123`  | `Some("abc123")`  | `None`            |
+/// | `session-checkpoint abc lbl` | `Some("abc")`     | `Some("lbl")`     |
+///
+/// When `session_id` is `None`, the caller should fall back to the
+/// most-recently-active session in the channel (S082).
+/// Parse `args` from a `session-checkpoint` slash command into `(session_id, label)`.
+///
+/// Rule: the first positional argument is always `session_id`, the second is `label`.
+/// There is no content-based heuristic — a single argument is always a `session_id`
+/// regardless of whether it contains dashes (HITL-005 fix).
+#[must_use]
+pub fn parse_checkpoint_args<'a>(args: &[&'a str]) -> (Option<&'a str>, Option<&'a str>) {
     match args.len() {
         0 => (None, None),
-        1 => {
-            // If it contains a dash and is longish, treat as session_id.
-            if args[0].contains('-') && args[0].len() > 10 {
-                (Some(args[0]), None)
-            } else {
-                (None, Some(args[0]))
-            }
-        }
+        1 => (Some(args[0]), None),
         _ => (Some(args[0]), Some(args[1])),
     }
 }
@@ -368,12 +1169,13 @@ async fn handle_session_checkpoint(
     session_id: Option<&str>,
     label: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     db: &Arc<Database>,
 ) -> crate::Result<String> {
     let session_repo = SessionRepo::new(Arc::clone(db));
     let checkpoint_repo = CheckpointRepo::new(Arc::clone(db));
 
-    let session = session_manager::resolve_session(session_id, user_id, &session_repo).await?;
+    let session = resolve_command_session(session_id, user_id, channel_id, &session_repo).await?;
     spawner::verify_session_owner(&session, user_id)?;
 
     let checkpoint =
@@ -424,6 +1226,7 @@ async fn handle_session_restore(checkpoint_id: &str, db: &Arc<Database>) -> crat
 async fn handle_session_checkpoints(
     session_id: Option<&str>,
     user_id: &str,
+    channel_id: &str,
     db: &Arc<Database>,
 ) -> crate::Result<String> {
     let session_repo = SessionRepo::new(Arc::clone(db));
@@ -432,7 +1235,7 @@ async fn handle_session_checkpoints(
     let resolved_session_id = if let Some(id) = session_id {
         id.to_owned()
     } else {
-        let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
+        let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
         session.id
     };
 
@@ -471,6 +1274,7 @@ async fn handle_session_checkpoints(
 async fn handle_list_files(
     args: &[&str],
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let span = info_span!("list_files", user = %user_id);
@@ -478,7 +1282,7 @@ async fn handle_list_files(
 
     let db = &state.db;
     let session_repo = SessionRepo::new(Arc::clone(db));
-    let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
+    let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
 
     let workspace_root = PathBuf::from(&session.workspace_root);
 
@@ -502,6 +1306,7 @@ async fn handle_list_files(
 async fn handle_show_file(
     args: &[&str],
     user_id: &str,
+    channel_id: &str,
     state: &Arc<AppState>,
 ) -> crate::Result<String> {
     let span = info_span!("show_file", user = %user_id);
@@ -509,7 +1314,7 @@ async fn handle_show_file(
 
     let db = &state.db;
     let session_repo = SessionRepo::new(Arc::clone(db));
-    let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
+    let session = resolve_command_session(None, user_id, channel_id, &session_repo).await?;
 
     let workspace_root = PathBuf::from(&session.workspace_root);
 
@@ -572,82 +1377,7 @@ async fn handle_show_file(
     }
 }
 
-// ── Custom command execution (T078) ──────────────────────────────────
-
-/// Handle execution of a registered command alias (T078).
-///
-/// Looks up the alias in `config.commands`, executes the shell command
-/// in the session's workspace root, and posts output to Slack.
-async fn handle_run_command(
-    alias: &str,
-    shell_command: &str,
-    user_id: &str,
-    state: &Arc<AppState>,
-) -> crate::Result<String> {
-    let span = info_span!("run_command", alias, user = %user_id);
-    let _guard = span.enter();
-
-    let db = &state.db;
-    let session_repo = SessionRepo::new(Arc::clone(db));
-    let session = session_manager::resolve_session(None, user_id, &session_repo).await?;
-
-    let workspace_root = PathBuf::from(&session.workspace_root);
-
-    info!(alias, shell_command, workspace_root = %workspace_root.display(), "executing registered command");
-
-    // Pause stall timer during execution (FR-025).
-    if let Some(ref detectors) = state.stall_detectors {
-        let lock = detectors.lock().await;
-        if let Some(handle) = lock.get(&session.id) {
-            handle.pause();
-        }
-    }
-
-    let output = execute_shell_command(shell_command, &workspace_root).await;
-
-    // Resume stall timer after execution.
-    if let Some(ref detectors) = state.stall_detectors {
-        let lock = detectors.lock().await;
-        if let Some(handle) = lock.get(&session.id) {
-            handle.resume();
-        }
-    }
-
-    match output {
-        Ok((stdout, stderr, exit_code)) => {
-            let mut result_lines = vec![format!("*`{alias}`* exited with code `{exit_code}`")];
-            if !stdout.is_empty() {
-                let display_out = truncate_output(&stdout, 3000);
-                result_lines.push(format!("```\n{display_out}\n```"));
-            }
-            if !stderr.is_empty() {
-                let display_err = truncate_output(&stderr, 1000);
-                result_lines.push(format!("*stderr:*\n```\n{display_err}\n```"));
-            }
-            Ok(result_lines.join("\n"))
-        }
-        Err(err) => Ok(format!("Failed to execute `{alias}`: {err}")),
-    }
-}
-
 // ── Public helpers (testable) ────────────────────────────────────────
-
-/// Validate that a command alias exists in the global allowlist (FR-014).
-///
-/// Returns the resolved shell command string if found.
-///
-/// # Errors
-///
-/// Returns `AppError::NotFound` if the alias is not in the registry.
-pub fn validate_command_alias<S: ::std::hash::BuildHasher>(
-    alias: &str,
-    commands: &HashMap<String, String, S>,
-) -> crate::Result<String> {
-    commands
-        .get(alias)
-        .cloned()
-        .ok_or_else(|| crate::AppError::NotFound(format!("command not found: {alias}")))
-}
 
 /// Validate a listing path against the workspace root (FR-006).
 ///
@@ -852,63 +1582,6 @@ fn build_directory_tree(
     }
 
     Ok(result)
-}
-
-/// Execute a shell command and capture output.
-async fn execute_shell_command(
-    command: &str,
-    working_dir: &Path,
-) -> crate::Result<(String, String, i32)> {
-    let parts: Vec<&str> = command.split_whitespace().collect();
-    if parts.is_empty() {
-        return Err(crate::AppError::Config("empty command".into()));
-    }
-
-    let program = parts[0];
-    let args = &parts[1..];
-
-    let output = tokio::process::Command::new(program)
-        .args(args)
-        .current_dir(working_dir)
-        .kill_on_drop(true)
-        .output()
-        .await
-        .map_err(|err| crate::AppError::Config(format!("failed to execute command: {err}")))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit_code = output.status.code().unwrap_or(-1);
-
-    info!(
-        command,
-        exit_code,
-        stdout_len = stdout.len(),
-        stderr_len = stderr.len(),
-        "command execution complete"
-    );
-
-    Ok((stdout, stderr, exit_code))
-}
-
-/// Truncate output to a maximum length, appending an indicator if truncated.
-fn truncate_output(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_owned()
-    } else {
-        // Find the largest char boundary ≤ max_len to avoid splitting
-        // multi-byte UTF-8 sequences.
-        let boundary = s
-            .char_indices()
-            .map(|(i, _)| i)
-            .take_while(|&i| i <= max_len)
-            .last()
-            .unwrap_or(0);
-        let truncated = &s[..boundary];
-        format!(
-            "{truncated}\n... (truncated, {total} bytes total)",
-            total = s.len()
-        )
-    }
 }
 
 /// Build an ephemeral Slack command response.

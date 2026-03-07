@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use agent_intercom::orchestrator::stall_consumer::spawn_stall_event_consumer;
 use agent_intercom::orchestrator::stall_detector::StallEvent;
+use agent_intercom::persistence::db::Database;
 use agent_intercom::slack::client::SlackService;
 
 /// The consumer task exits cleanly when the cancellation token fires
@@ -114,10 +115,17 @@ async fn spawn_returns_join_handle() {
     // This test verifies the function signature returns JoinHandle<()>.
     // We cannot call it without a SlackService, but we can verify the
     // type at compile time.
-    let _: fn(
+    //
+    // T097: The signature now includes `driver: Option<Arc<dyn AgentDriver>>`
+    // for ACP stream nudge delivery.
+    use agent_intercom::driver::AgentDriver;
+    type ConsumerFn = fn(
         mpsc::Receiver<StallEvent>,
         Arc<SlackService>,
         String,
+        Arc<Database>,
+        Option<Arc<dyn AgentDriver>>,
         CancellationToken,
-    ) -> tokio::task::JoinHandle<()> = spawn_stall_event_consumer;
+    ) -> tokio::task::JoinHandle<()>;
+    let _: ConsumerFn = spawn_stall_event_consumer;
 }

@@ -83,7 +83,7 @@ Each VS Code workspace specifies its Slack channel by appending `?channel_id=` t
 }
 ```
 
-There is no global channel fallback. Every workspace must supply its own `channel_id`.
+There is no global channel fallback. Every workspace must supply either `channel_id` (direct) or `workspace_id` (mapped). See [`[[workspace]]`](#workspace) below for the recommended approach.
 
 ---
 
@@ -126,7 +126,93 @@ These aliases are for operator convenience only. They do not affect MCP auto-app
 
 ---
 
-## Workspace Auto-Approve Policy
+## `[[workspace]]`
+
+Workspace-to-channel mapping entries route agent connections to the correct Slack channel by a short, human-readable identifier instead of a raw Slack channel ID. Each `[[workspace]]` block adds one mapping.
+
+| Key | Type | Required | Description |
+|---|---|---|---|
+| `workspace_id` | string | Yes | Short identifier used in the `?workspace_id=` query parameter. Must be unique and non-empty. |
+| `channel_id` | string | Yes | Slack channel ID that messages for this workspace are routed to. |
+| `label` | string | No | Human-readable label shown in logs and Slack messages. |
+| `path` | string | No | Absolute filesystem path to the workspace root. **Required for ACP mode** — used as the agent subprocess's working directory (`cwd`). In MCP mode this field is optional and informational. |
+
+```toml
+[[workspace]]
+workspace_id = "my-repo"
+channel_id   = "C0123456789"
+label        = "My Repository"
+path         = "/home/dev/projects/my-repo"   # ACP agent cwd
+
+[[workspace]]
+workspace_id = "api-service"
+channel_id   = "C9876543210"
+label        = "API Service"
+```
+
+Agent `.vscode/mcp.json` using a workspace mapping:
+
+```jsonc
+{
+  "servers": {
+    "agent-intercom": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp?workspace_id=my-repo"
+    }
+  }
+}
+```
+
+### Resolution Order
+
+When an agent connects, the server resolves the target channel as follows:
+
+1. If `workspace_id` is present, look up the matching `[[workspace]]` entry and use its `channel_id`.
+2. If no match is found (or `workspace_id` was not provided), fall back to the `channel_id` query parameter.
+3. If neither yields a channel, the connection is rejected.
+
+`[[workspace]]` entries are hot-reloaded — changes take effect for new sessions without restarting the server.
+
+### ACP Workspace Routing
+
+In ACP mode, the `/arc session-start <workspace> <prompt>` command resolves the target workspace by matching the first argument against `workspace_id` values. The matched entry's `path` field becomes the agent subprocess's working directory. If no `path` is set, the server falls back to `default_workspace_root`.
+
+When only one `[[workspace]]` entry exists, the workspace argument can be omitted — the server uses the sole entry automatically.
+
+> **Migration note:** The `?channel_id=` query parameter is the original approach and remains supported for backwards compatibility. The `?workspace_id=` approach is preferred for new installations because channel reassignments only require updating `config.toml`, not every workspace's `mcp.json`. See [Migration Guide](migration-guide.md#channel_id-to-workspace_id-migration) for transition steps.
+
+---
+
+## `[acp]`
+
+ACP (Agent Communication Protocol) mode spawns the AI agent CLI as a subprocess and communicates via a newline-delimited JSON (NDJSON) stream. This mode is an alternative to the MCP HTTP/SSE and stdio transports.
+
+Start the server in ACP mode:
+
+```bash
+agent-intercom --mode acp
+```
+
+In ACP mode, credentials are loaded from mode-prefixed environment variables (`SLACK_BOT_TOKEN_ACP`, `SLACK_APP_TOKEN_ACP`, `SLACK_MEMBER_IDS_ACP`) before falling back to the shared variables. The OS keychain service name is `agent-intercom-acp`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `max_sessions` | integer | `5` | Maximum concurrent ACP sessions. Requests beyond this limit are rejected with a descriptive error. |
+| `startup_timeout_seconds` | integer | `30` | Seconds to wait for the agent subprocess to complete the ACP handshake. If no response arrives the spawner kills the process and returns an error. |
+| `http_port` | integer | `3001` | HTTP port for the ACP transport. Separate from the MCP port (default 3000) so both modes can run simultaneously. |
+| `max_msg_rate` | integer | `10` | Maximum inbound messages per second from an agent subprocess before rate limiting engages. |
+
+```toml
+[acp]
+max_sessions = 5
+startup_timeout_seconds = 30
+```
+
+The `[acp]` section may be omitted entirely; all fields default to the values in the table above.
+
+> **Note:** `host_cli` (top-level) must be set when using ACP mode. The server validates this at startup and returns a descriptive error if it is missing.
+
+---
 
 Per-workspace auto-approve rules live in `.intercom/settings.json` inside each workspace root (not in `config.toml`). The policy file is hot-reloaded — changes take effect immediately without restarting the server.
 
@@ -180,4 +266,20 @@ default_nudge_message = "Continue working on the current task. Pick up where you
 
 [commands]
 status = "git status -s"
+
+# Workspace-to-channel mappings (preferred over ?channel_id= query parameter).
+[[workspace]]
+workspace_id = "my-repo"
+channel_id   = "C0123456789"
+label        = "My Repository"
+
+[[workspace]]
+workspace_id = "api-service"
+channel_id   = "C9876543210"
+label        = "API Service"
+
+# ACP mode settings (omit this section to accept all defaults).
+[acp]
+max_sessions = 5
+startup_timeout_seconds = 30
 ```

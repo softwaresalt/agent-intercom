@@ -34,6 +34,8 @@ pub enum AppError {
     AlreadyConsumed(String),
     /// File-system or I/O operation failure.
     Io(String),
+    /// Agent Client Protocol stream or session failure.
+    Acp(String),
 }
 
 impl Display for AppError {
@@ -52,6 +54,7 @@ impl Display for AppError {
             Self::Unauthorized(msg) => write!(f, "unauthorized: {msg}"),
             Self::AlreadyConsumed(msg) => write!(f, "already consumed: {msg}"),
             Self::Io(msg) => write!(f, "io: {msg}"),
+            Self::Acp(msg) => write!(f, "acp: {msg}"),
         }
     }
 }
@@ -67,5 +70,11 @@ impl From<toml::de::Error> for AppError {
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
         Self::Db(err.to_string())
+    }
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err.to_string())
     }
 }

@@ -56,6 +56,11 @@ async fn drop_marks_direct_session_terminated() {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
+        server_mode: agent_intercom::mode::ServerMode::Mcp,
+        workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     // Create and activate a local session.
@@ -123,6 +128,11 @@ async fn drop_spawned_server_does_not_terminate_session() {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
+        server_mode: agent_intercom::mode::ServerMode::Mcp,
+        workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     // Create and activate a remote (spawned) session.
@@ -186,6 +196,11 @@ async fn drop_fresh_server_with_no_session_is_noop() {
         active_children: Arc::default(),
         pending_command_approvals: Arc::default(),
         stall_event_tx: None,
+        driver: agent_intercom::driver::mcp_driver::McpDriver::new_empty(),
+        server_mode: agent_intercom::mode::ServerMode::Mcp,
+        workspace_mappings: Arc::default(),
+        acp_event_tx: None,
+        acp_driver: None,
     });
 
     // Drop an uninitialized server — no session ID set.

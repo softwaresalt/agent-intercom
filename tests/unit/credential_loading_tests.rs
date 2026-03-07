@@ -2,9 +2,10 @@
 //!
 //! Validates the env-var-only credential path, keychain precedence,
 //! missing credential error message quality, optional `SLACK_TEAM_ID`,
-//! and empty env-var handling.
+//! empty env-var handling, and mode-prefixed credential resolution (ADR-0015).
 
 use agent_intercom::config::GlobalConfig;
+use agent_intercom::mode::ServerMode;
 
 fn sample_toml(workspace: &str) -> String {
     format!(
@@ -64,7 +65,7 @@ async fn env_var_only_credential_loading() {
         std::env::set_var("SLACK_MEMBER_IDS", "U_TEST");
     }
 
-    let result = config.load_credentials().await;
+    let result = config.load_credentials(ServerMode::Mcp).await;
     assert!(
         result.is_ok(),
         "load_credentials should succeed with env vars"
@@ -100,7 +101,7 @@ async fn missing_required_credential_error_names_both_sources() {
         std::env::remove_var("SLACK_MEMBER_IDS");
     }
 
-    let result = config.load_credentials().await;
+    let result = config.load_credentials(ServerMode::Mcp).await;
     assert!(
         result.is_err(),
         "should fail when no credential source exists"
@@ -136,7 +137,7 @@ async fn optional_team_id_absent_is_not_error() {
         std::env::set_var("SLACK_MEMBER_IDS", "U_TEST");
     }
 
-    let result = config.load_credentials().await;
+    let result = config.load_credentials(ServerMode::Mcp).await;
     assert!(
         result.is_ok(),
         "should succeed without SLACK_TEAM_ID: {result:?}"
@@ -168,7 +169,7 @@ async fn empty_env_var_treated_as_absent() {
         std::env::remove_var("SLACK_TEAM_ID");
     }
 
-    let result = config.load_credentials().await;
+    let result = config.load_credentials(ServerMode::Mcp).await;
     assert!(
         result.is_err(),
         "should fail when env vars are empty strings"
@@ -179,4 +180,153 @@ async fn empty_env_var_treated_as_absent() {
         std::env::remove_var("SLACK_APP_TOKEN");
         std::env::remove_var("SLACK_BOT_TOKEN");
     }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Mode-prefixed credential resolution (ADR-0015)
+// ═══════════════════════════════════════════════════════════════
+
+/// ACP-mode-prefixed env vars take priority over shared env vars.
+#[tokio::test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+async fn acp_mode_prefixed_env_vars_take_priority() {
+    let (_temp, mut config) = make_config();
+
+    unsafe {
+        // Shared (fallback) credentials.
+        std::env::set_var("SLACK_APP_TOKEN", "xapp-shared");
+        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-shared");
+        std::env::set_var("SLACK_MEMBER_IDS", "U_SHARED");
+        // ACP-mode-specific credentials.
+        std::env::set_var("SLACK_APP_TOKEN_ACP", "xapp-acp-specific");
+        std::env::set_var("SLACK_BOT_TOKEN_ACP", "xoxb-acp-specific");
+        std::env::set_var("SLACK_MEMBER_IDS_ACP", "U_ACP_SPECIFIC");
+    }
+
+    let result = config.load_credentials(ServerMode::Acp).await;
+    assert!(result.is_ok(), "should succeed with ACP-prefixed env vars");
+
+    assert_eq!(config.slack.app_token, "xapp-acp-specific");
+    assert_eq!(config.slack.bot_token, "xoxb-acp-specific");
+    assert_eq!(config.authorized_user_ids, vec!["U_ACP_SPECIFIC"]);
+
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+        std::env::remove_var("SLACK_MEMBER_IDS");
+        std::env::remove_var("SLACK_APP_TOKEN_ACP");
+        std::env::remove_var("SLACK_BOT_TOKEN_ACP");
+        std::env::remove_var("SLACK_MEMBER_IDS_ACP");
+    }
+}
+
+/// ACP mode falls back to shared env vars when no ACP-prefixed vars exist.
+#[tokio::test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+async fn acp_mode_falls_back_to_shared_env_vars() {
+    let (_temp, mut config) = make_config();
+
+    unsafe {
+        // Only shared credentials — no ACP-prefixed vars.
+        std::env::set_var("SLACK_APP_TOKEN", "xapp-shared");
+        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-shared");
+        std::env::set_var("SLACK_MEMBER_IDS", "U_SHARED");
+        std::env::remove_var("SLACK_APP_TOKEN_ACP");
+        std::env::remove_var("SLACK_BOT_TOKEN_ACP");
+        std::env::remove_var("SLACK_MEMBER_IDS_ACP");
+    }
+
+    let result = config.load_credentials(ServerMode::Acp).await;
+    assert!(
+        result.is_ok(),
+        "should succeed with shared fallback env vars"
+    );
+
+    assert_eq!(config.slack.app_token, "xapp-shared");
+    assert_eq!(config.slack.bot_token, "xoxb-shared");
+    assert_eq!(config.authorized_user_ids, vec!["U_SHARED"]);
+
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+        std::env::remove_var("SLACK_MEMBER_IDS");
+    }
+}
+
+/// MCP mode ignores ACP-prefixed env vars and uses shared ones.
+#[tokio::test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+async fn mcp_mode_ignores_acp_prefixed_env_vars() {
+    let (_temp, mut config) = make_config();
+
+    unsafe {
+        std::env::set_var("SLACK_APP_TOKEN", "xapp-shared");
+        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-shared");
+        std::env::set_var("SLACK_MEMBER_IDS", "U_SHARED");
+        // These should be ignored when mode is MCP.
+        std::env::set_var("SLACK_APP_TOKEN_ACP", "xapp-acp-specific");
+        std::env::set_var("SLACK_BOT_TOKEN_ACP", "xoxb-acp-specific");
+        std::env::set_var("SLACK_MEMBER_IDS_ACP", "U_ACP_SPECIFIC");
+    }
+
+    let result = config.load_credentials(ServerMode::Mcp).await;
+    assert!(result.is_ok(), "should succeed with shared env vars");
+
+    assert_eq!(config.slack.app_token, "xapp-shared");
+    assert_eq!(config.slack.bot_token, "xoxb-shared");
+    assert_eq!(config.authorized_user_ids, vec!["U_SHARED"]);
+
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+        std::env::remove_var("SLACK_MEMBER_IDS");
+        std::env::remove_var("SLACK_APP_TOKEN_ACP");
+        std::env::remove_var("SLACK_BOT_TOKEN_ACP");
+        std::env::remove_var("SLACK_MEMBER_IDS_ACP");
+    }
+}
+
+/// ACP mode error message names both prefixed and shared sources.
+#[tokio::test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+async fn acp_mode_error_names_both_prefixed_and_shared_sources() {
+    let (_temp, mut config) = make_config();
+
+    unsafe {
+        std::env::remove_var("SLACK_APP_TOKEN");
+        std::env::remove_var("SLACK_BOT_TOKEN");
+        std::env::remove_var("SLACK_MEMBER_IDS");
+        std::env::remove_var("SLACK_APP_TOKEN_ACP");
+        std::env::remove_var("SLACK_BOT_TOKEN_ACP");
+        std::env::remove_var("SLACK_MEMBER_IDS_ACP");
+    }
+
+    let result = config.load_credentials(ServerMode::Acp).await;
+    assert!(result.is_err(), "should fail when no credentials");
+
+    let err_msg = format!("{}", result.unwrap_err());
+    // Should mention the ACP-specific keychain service.
+    assert!(
+        err_msg.contains("agent-intercom-acp"),
+        "error should mention ACP keychain service, got: {err_msg}"
+    );
+    // Should also mention the shared keychain service.
+    assert!(
+        err_msg.contains("agent-intercom"),
+        "error should mention shared keychain service, got: {err_msg}"
+    );
+    // Should mention the ACP-prefixed env var.
+    assert!(
+        err_msg.contains("SLACK_APP_TOKEN_ACP") || err_msg.contains("SLACK_BOT_TOKEN_ACP"),
+        "error should mention ACP-prefixed env var, got: {err_msg}"
+    );
+    // Should mention the shared env var.
+    assert!(
+        err_msg.contains("SLACK_APP_TOKEN") || err_msg.contains("SLACK_BOT_TOKEN"),
+        "error should mention shared env var, got: {err_msg}"
+    );
 }

@@ -3,6 +3,8 @@
 mod integration {
     mod test_helpers;
 
+    mod acp_lifecycle_tests;
+    mod acp_mcp_bridge_tests;
     mod approval_flow_tests;
     mod call_tool_dispatch_tests;
     mod channel_override_tests;
@@ -32,9 +34,12 @@ mod integration {
     mod ipc_server_tests;
     mod mcp_dispatch_tests;
     mod policy_watcher_tests;
+    mod push_events_tests;
     mod shutdown_tests;
     mod startup_tests;
     mod stdio_transport_tests;
     mod steering_flow_tests;
     mod streamable_http_tests;
+    mod thread_routing_tests;
+    mod workspace_routing_tests;
 }

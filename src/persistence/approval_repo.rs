@@ -237,6 +237,34 @@ impl ApprovalRepo {
         Ok(())
     }
 
+    /// Resolve all pending approval requests for a session to a new status.
+    ///
+    /// Used when an agent crashes (session terminated) to mark any outstanding
+    /// clearance requests as `Interrupted` so operators are not left waiting for
+    /// a decision that can no longer be delivered.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn resolve_pending_for_session(
+        &self,
+        session_id: &str,
+        status: ApprovalStatus,
+    ) -> Result<()> {
+        let status_s = approval_status_str(status);
+
+        sqlx::query(
+            "UPDATE approval_request SET status = ?1
+             WHERE session_id = ?2 AND status = 'pending'",
+        )
+        .bind(status_s)
+        .bind(session_id)
+        .execute(self.db.as_ref())
+        .await?;
+
+        Ok(())
+    }
+
     /// List all pending approval requests across sessions.
     ///
     /// # Errors
