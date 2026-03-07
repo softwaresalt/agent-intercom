@@ -81,8 +81,9 @@ fn truncate_session_title_over_80_chars_appends_ellipsis() {
         title.ends_with("..."),
         "truncated title must end with '...'"
     );
-    // First 80 chars preserved, then "..." appended.
-    assert_eq!(&title[..80], &"a".repeat(80));
+    // Total length is at most 80 chars: 77 content chars + "...".
+    assert_eq!(title.len(), 80, "truncated title must be exactly 80 chars");
+    assert_eq!(&title[..77], &"a".repeat(77));
 }
 
 /// An empty prompt produces an empty title.

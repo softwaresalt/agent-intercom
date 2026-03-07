@@ -206,6 +206,13 @@ pub async fn handle(
             )
         })?;
 
+        // S037: effective_thread_ts tracks which Slack thread to use for all
+        // subsequent messages in this tool call. Starts as the session's
+        // existing thread_ts; updated to the approval post ts if this is the
+        // session's first message (so timeout/follow-up notifications land in
+        // the thread, not at the channel root).
+        let mut effective_thread_ts = session_thread_ts.clone();
+
         // ── Post to Slack ────────────────────────────────────
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
@@ -271,6 +278,12 @@ pub async fn handle(
             }
             .instrument(post_span)
             .await;
+
+            // S037: if this was the session's first Slack message, the approval
+            // post ts becomes the thread root for all subsequent messages.
+            if session_thread_ts.is_none() {
+                effective_thread_ts = approval_ts.clone();
+            }
 
             // ── Snippet thread (preferred) or file upload (fallback) ──────
             //
@@ -372,7 +385,7 @@ pub async fn handle(
                                 input.title, timeout_seconds
                             ),
                         )]),
-                        thread_ts: session_thread_ts.clone(),
+                        thread_ts: effective_thread_ts.clone(),
                     };
                     let _ = slack.enqueue(msg).await;
                 }

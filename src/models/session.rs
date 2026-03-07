@@ -177,13 +177,14 @@ impl Session {
 /// ```
 /// # use agent_intercom::models::session::truncate_session_title;
 /// assert_eq!(truncate_session_title("short"), "short");
-/// assert_eq!(truncate_session_title(&"a".repeat(81)), format!("{}...", "a".repeat(80)));
+/// assert_eq!(truncate_session_title(&"a".repeat(81)), format!("{}...", "a".repeat(77)));
 /// ```
 #[must_use]
 pub fn truncate_session_title(prompt: &str) -> String {
-    if prompt.len() <= 80 {
+    if prompt.chars().count() <= 80 {
         prompt.to_owned()
     } else {
-        format!("{}...", &prompt[..80])
+        // Take 77 chars so that the appended "..." keeps the total at most 80.
+        format!("{}...", prompt.chars().take(77).collect::<String>())
     }
 }

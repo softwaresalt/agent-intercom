@@ -152,7 +152,7 @@ async fn post_ack(state: &AppState, channel_id: &str, thread_ts: Option<&SlackTs
 }
 
 /// Check if the user is in the authorized list.
-fn is_authorized(user_id: &str, state: &AppState) -> bool {
+pub fn is_authorized(user_id: &str, state: &AppState) -> bool {
     if state
         .config
         .authorized_user_ids

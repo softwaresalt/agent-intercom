@@ -157,15 +157,26 @@ pub async fn store_from_slack(
     // T088 / S059: For ACP sessions that are Offline or Stalled, report the
     // queue depth so the operator knows their message was preserved.
     if session.protocol_mode == ProtocolMode::Acp {
-        let queued = steering_repo
-            .fetch_unconsumed(&session.id)
-            .await
-            .unwrap_or_default();
-        let count = queued.len();
-        return Ok(format!(
-            "Agent offline — message queued ({count} in queue) for session `{}`.",
-            session.id
-        ));
+        match steering_repo.fetch_unconsumed(&session.id).await {
+            Ok(queued) => {
+                let count = queued.len();
+                return Ok(format!(
+                    "Agent offline — message queued ({count} in queue) for session `{}`.",
+                    session.id
+                ));
+            }
+            Err(err) => {
+                warn!(
+                    session_id = %session.id,
+                    error = ?err,
+                    "failed to fetch steering queue depth after enqueue"
+                );
+                return Ok(format!(
+                    "Agent offline — message queued for session `{}` (queue depth unavailable).",
+                    session.id
+                ));
+            }
+        }
     }
 
     Ok(format!(

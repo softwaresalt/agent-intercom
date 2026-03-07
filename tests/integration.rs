@@ -41,4 +41,5 @@ mod integration {
     mod streamable_http_tests;
     mod thread_routing_tests;
     mod workspace_routing_tests;
+    mod push_events_tests;
 }

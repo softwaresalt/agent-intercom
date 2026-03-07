@@ -109,13 +109,21 @@ where
                             );
                             // Mark session Interrupted so the orchestrator and
                             // Slack handlers can surface the disconnection.
-                            SessionRepo::new(Arc::clone(&db))
+                            if let Err(db_err) = SessionRepo::new(Arc::clone(&db))
                                 .set_terminated(
                                     &session_id,
                                     SessionStatus::Interrupted,
                                 )
                                 .await
-                                .ok();
+                            {
+                                warn!(
+                                    session_id,
+                                    method,
+                                    seq,
+                                    error = %db_err,
+                                    "acp writer: failed to mark session interrupted after write failure"
+                                );
+                            }
                             return Err(AppError::Acp(format!("write failed: {e}")));
                         }
                     }

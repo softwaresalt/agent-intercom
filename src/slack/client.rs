@@ -635,10 +635,16 @@ pub async fn collect_active_session_channels(
 ) -> Result<Vec<SlackChannelId>> {
     let repo = SessionRepo::new(Arc::clone(db));
     let sessions = repo.list_active().await?;
-    Ok(sessions
+    // De-duplicate: multiple sessions may share a channel (S054 multi-session
+    // support), but WS notifications should fire once per channel.
+    let mut seen = std::collections::HashSet::new();
+    let channels = sessions
         .into_iter()
-        .filter_map(|s| s.channel_id.map(SlackChannelId))
-        .collect())
+        .filter_map(|s| s.channel_id)
+        .filter(|ch| seen.insert(ch.clone()))
+        .map(SlackChannelId)
+        .collect();
+    Ok(channels)
 }
 
 /// Post a WebSocket-dropped notification to all active session channels.

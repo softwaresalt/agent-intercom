@@ -20,14 +20,19 @@ use crate::{AppError, Result};
 /// Implements FR-031: all session-modifying actions MUST verify that the
 /// acting user matches `session.owner_user_id`. When `owner_user_id` is
 /// empty (e.g., an MCP session created without a designated operator), the
-/// check is skipped.
+/// check is skipped intentionally: MCP sessions initiated via stdio or the
+/// HTTP transport do not have a Slack user context at creation time, so any
+/// authorized Slack user may interact with them. If your deployment requires
+/// strict ownership for all sessions, ensure `owner_user_id` is set at
+/// session creation time.
 ///
 /// # Errors
 ///
 /// Returns [`AppError::Unauthorized`] when the acting user is not the owner.
 pub fn check_session_ownership(session: &Session, acting_user_id: &str) -> Result<()> {
     // Empty owner means the session was created without a designated operator
-    // (common for MCP sessions). Skip the check to stay backward-compatible.
+    // (common for MCP sessions). Skip the check intentionally to allow any
+    // authorized Slack user to interact with operator-less sessions.
     if session.owner_user_id.is_empty() {
         return Ok(());
     }
