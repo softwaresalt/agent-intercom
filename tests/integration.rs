@@ -29,6 +29,7 @@ mod integration {
     mod shutdown_recovery_tests;
     mod stall_escalation_tests;
 
+    mod acp_event_integration;
     mod disconnect_tests;
     mod inbox_flow_tests;
     mod ipc_server_tests;
