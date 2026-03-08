@@ -92,3 +92,18 @@ impl ApprovalRequest {
         }
     }
 }
+
+/// Parse a raw `risk_level` string from an ACP event into a [`RiskLevel`].
+///
+/// Matching is case-sensitive: only the exact lowercase values `"low"`,
+/// `"high"`, and `"critical"` are recognized. All other values (including
+/// mixed-case variants such as `"High"`) default to [`RiskLevel::Low`]
+/// per FR-011.
+#[must_use]
+pub fn parse_risk_level(s: &str) -> RiskLevel {
+    match s {
+        "high" => RiskLevel::High,
+        "critical" => RiskLevel::Critical,
+        _ => RiskLevel::Low,
+    }
+}

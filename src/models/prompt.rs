@@ -56,6 +56,23 @@ pub struct ContinuationPrompt {
     pub created_at: DateTime<Utc>,
 }
 
+/// Parse a prompt type string from an ACP event.
+///
+/// Performs case-sensitive matching against the four recognised values.
+/// Any unrecognised or empty string defaults to [`PromptType::Continuation`].
+///
+/// This is the lenient ACP-event variant (defaults on unknown). The strict
+/// DB-deserialisation variant lives in `persistence::prompt_repo`.
+#[must_use]
+pub fn parse_prompt_type(s: &str) -> PromptType {
+    match s {
+        "clarification" => PromptType::Clarification,
+        "error_recovery" => PromptType::ErrorRecovery,
+        "resource_warning" => PromptType::ResourceWarning,
+        _ => PromptType::Continuation,
+    }
+}
+
 impl ContinuationPrompt {
     /// Construct a new pending continuation prompt.
     #[must_use]

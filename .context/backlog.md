@@ -16,22 +16,55 @@ Wire the ACP event consumer's `ClearanceRequested` and `PromptForwarded` handler
 
 ---
 
-## 007 — ACP Correctness Fixes
+## 007 — ACP Correctness Fixes + Mobile Input Accessibility
 
-**Priority:** High — data integrity and protocol compliance
-**Size:** Small (1–2 days)
+**Priority:** High — data integrity, protocol compliance, and core mobile operator workflow
+**Size:** Medium (2–3 days)
 
-Batch of targeted correctness fixes found during adversarial review.
+Batch of targeted correctness fixes found during adversarial review, plus a mobile accessibility track: Slack block-kit modals (used for operator input prompts such as "Refine") do not render or function correctly in Slack for iOS, blocking the primary remote management scenario. Both ACP and MCP modes are affected because the server currently depends on modal dialogs as the sole mechanism for operator text input in response to agent prompts.
+
+**ACP Correctness Fixes**
 
 - **F-06**: `src/acp/reader.rs:346–355` — Queued steering messages marked consumed even when `send_prompt` fails. Only mark consumed after successful send; keep failed deliveries for retry.
 - **F-07**: `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes `created`-state sessions and counts all protocols against `acp.max_sessions`. Fix: count `created` sessions, add `count_active_by_protocol`.
 - **F-08**: `src/slack/commands.rs:415–425` — ACP session start resolves workspace from static `state.config` instead of hot-reloaded `state.workspace_mappings`. Violates FR-014.
 - **F-09**: `src/driver/acp_driver.rs:130–134` — `deregister_session` doesn't clean up `pending_clearances` or `pending_prompts_acp`. Orphaned entries accumulate as memory leaks once F-01/F-02 are fixed.
+- **F-10**: `src/mcp/sse.rs:421–446` — No deprecation warning when both `workspace_id` and `channel_id` query params are provided (FR-013 violation).
 - **F-13**: `src/acp/handshake.rs:40–47` — Static handshake correlation ID `"intercom-prompt-1"` collides with `AcpDriver::PROMPT_COUNTER` starting at 1. Start counter at 1000 or use UUIDs.
+
+**Mobile Input Accessibility**
+
+- **F-15** *(Research)*: Investigate Slack modal / `actions` block behavior on iOS. Determine whether `modal` view pushes (triggered via `block_actions` button callbacks) are supported in the Slack iOS app, and whether `plain_text_input` elements inside modals render and accept input. Document findings: (a) modals fully work, (b) modals open but input is broken, or (c) modals are silently swallowed on mobile. Consult Slack API changelog, Block Kit documentation, and community reports.
+- **F-16** *(Conditional — if modals are unavailable or broken on iOS)*: Design and implement a thread-reply-based input fallback. When the server sends a prompt requiring operator text input (MCP `transmit`/`standby`, ACP `PromptForwarded`/`ClearanceRequested`), post a Slack message in the session thread that instructs the operator to reply in-thread with their response. Detect the reply via the `message` event handler (scoped to the correct thread `ts`), capture the text, and route it back to the waiting tool call. The modal pathway remains the default for desktop; the reply pathway activates when the client surface is detected as mobile or when the modal callback times out without a submission.
+- **F-17** *(Conditional — if modals are unavailable or broken on iOS)*: Audit all existing block-kit interactive components (approve/reject buttons, "Refine" prompt buttons, steer inputs) and add a plain-text thread-reply equivalent for each so that every operator interaction that currently requires a modal is reachable from the Slack mobile app.
 
 ---
 
-## 008 — Session Command UX (Fuzzy ID + Picker)
+## 008 — Slack UI Automated Testing
+
+**Priority:** High — enables reliable validation of new and improved Slack UI functionality
+**Size:** Medium (2–3 days)
+
+Add Playwright or equivalent framework for automated testing of Slack channel interactions. Covers session management commands, approval workflows, and message formatting. Simulates operator interactions and verifies correct message posting and command behavior across scenarios (multiple sessions, different agent states).
+
+---
+
+## 009 — Documentation Update
+
+**Priority:** Medium-High — foundational onboarding before new feature surface area grows further
+**Size:** Small (1–2 days)
+
+Update README, Setup Guide, and all user-facing documentation to accurately reflect the current state of the project, with emphasis on ACP features introduced in 006/007 and configuration options added since initial release. Stale docs compound the onboarding problem with every new feature that lands.
+
+- Update README to cover ACP mode, dual-binary layout (`agent-intercom` + `agent-intercom-ctl`), and the new `config.toml` options.
+- Revise Setup Guide to include ACP-specific Slack app configuration (Socket Mode, required scopes, slash commands).
+- Update User Guide to document the full set of slash commands, session lifecycle states, approval workflows, and operator interaction patterns for both MCP and ACP modes.
+- Review and update `docs/configuration.md` for all new config keys.
+- Flag any sections that describe in-flight behavior (mobile input fallback, automated testing) as "coming soon" rather than omitting them.
+
+---
+
+## 010 — Session Command UX (Fuzzy ID + Picker)
 
 **Priority:** High — operator usability
 **Size:** Small (1–2 days)
@@ -45,7 +78,7 @@ Improve session management commands (`session-stop`, `session-restart`, `session
 
 ---
 
-## 009 — MCP/ACP Session Linking Fixes
+## 011 — MCP/ACP Session Linking Fixes
 
 **Priority:** Medium — correctness for restart and MCP session visibility
 **Size:** Small (1 day)
@@ -57,18 +90,16 @@ Fix two session linking issues that break operator expectations.
 
 ---
 
-## 010 — Workspace Query Command
+## 012 — Workspace Query Command
 
 **Priority:** Medium — debugging and operator awareness
 **Size:** Tiny (< 1 day)
 
 Add `/intercom get-workspace` command that returns the workspace associated with the active channel. Queries `channel_id → workspace_id` mapping from the DB/config. Useful for debugging, confirming context before session-start, and future commands that need workspace association.
 
-Also fix **F-10**: `src/mcp/sse.rs:421–446` — No deprecation warning when both `workspace_id` and `channel_id` query params are provided (FR-013 violation).
-
 ---
 
-## 011 — Slack Message Detail Level
+## 013 — Slack Message Detail Level
 
 **Priority:** Medium — avoids Slack API errors on large messages
 **Size:** Small (1 day)
@@ -77,7 +108,7 @@ Add configurable detail level for Slack messages (T011). Simple enum (`None`, `L
 
 ---
 
-## 012 — File and Image Attachments (ACP)
+## 014 — File and Image Attachments (ACP)
 
 **Priority:** Medium — enables rich HITL workflows
 **Size:** Medium (2–3 days)
@@ -91,7 +122,7 @@ Enable operators to attach files, screenshots, or long-form requirements to ACP 
 
 ---
 
-## 013 — Workspace File References (#path)
+## 015 — Workspace File References (#path)
 
 **Priority:** Medium — operator convenience
 **Size:** Small (1–2 days)
@@ -104,7 +135,7 @@ Parse `#path/filename` references in Slack messages (similar to GitHub Copilot C
 
 ---
 
-## 014 — Auto-Approve Subcommand Merging
+## 016 — Auto-Approve Subcommand Merging
 
 **Priority:** Low — quality of life
 **Size:** Tiny (< 1 day)
@@ -113,50 +144,55 @@ When an operator approves a terminal command in Slack (e.g., `cargo test`), and 
 
 ---
 
-## 015 — ARC Discovery Commands
+## 017 — ARC Slash Commands
 
-**Priority:** Low — operator awareness
-**Size:** Small (1 day)
+**Priority:** Low — operator awareness and convenience
+**Size:** Small (2 days)
 
-Add `/arc` subcommands to query project workspace capabilities:
+Add `/arc` subcommands for workspace discovery and workflow triggers. Discovery commands query the project workspace for available agent capabilities; workflow commands inject prompts into the active ACP session.
 
+**Discovery:**
 - `/arc agents` — List available `.github/agents/*.agent.md` files.
 - `/arc skills` — List available `.github/skills/*/SKILL.md` files.
 - `/arc instructions` — List available `.github/instructions/*.instructions.md` files.
 
----
-
-## 016 — ARC Workflow Commands
-
-**Priority:** Low — operator convenience
-**Size:** Small (1–2 days)
-
-Add `/arc` subcommands that trigger common agent workflows:
-
+**Workflows:**
 - `/arc research <topic>` — Start a research session.
 - `/arc review [session_id]` — Trigger a code review.
 - `/arc tasks` — List tasks from the current spec.
 - `/arc plan` — Generate an implementation plan.
 
+Design the dispatch layer so that 018 (GHCP CLI Command Bridge) can reuse the same workflow routing for its `/research`, `/review`, `/tasks`, `/plan` commands via the ACP bridge.
+
 ---
 
-## 017 — GHCP CLI Command Bridge
+## 018 — GHCP CLI Command Bridge
 
 **Priority:** Low — ACP completeness
 **Size:** Small (1–2 days)
 
-Expose a subset of GitHub Copilot CLI slash commands through the ACP bridge server:
+Expose a subset of GitHub Copilot CLI slash commands through the ACP bridge server. Workflow commands (`/review`, `/research`, `/plan`, `/tasks`, `/agents`, `/skills`, `/instructions`) should reuse the dispatch layer built in 017 (ARC Slash Commands).
 
+**Session management:**
 - `/clear` — Clear agent context.
 - `/compact` — Compact conversation history.
 - `/context` — Show current context.
 - `/quit` — Terminate the agent session.
 - `/init` — Initialize a new workspace.
 - `/list-dirs` — List workspace directories.
+- `/models` — List available models and switch model in use from selection.
+- `/agents` — List available agents and switch agent in use from selection.
+- `/diff` — Show a diff of the last agent action.
+- `/logs` — Show recent agent logs.
+- `/status` — Show current session status and stats.
+- `/allow-all` — Enable all permissions (tools, paths, and URLs).
+
+**Workflows (shared dispatch with 015):**
+- `/review`, `/research`, `/plan`, `/tasks`, `/instructions`, `/skills`
 
 ---
 
-## 018 — Service Installation
+## 019 — Service Installation
 
 **Priority:** Low — deployment convenience
 **Size:** Medium (2–3 days)
@@ -171,21 +207,12 @@ Add `agent-intercom service install/uninstall` commands (similar to VS Code's `c
 
 ---
 
-## 019 — Pre-Tool Terminal Filter Hook
+## 020 — Pre-Tool Terminal Filter Hook
 
 **Priority:** Low — architectural exploration
 **Size:** Small (1 day)
 
 Evaluate whether a hook mechanism (e.g., `.github/hooks/pre-tool-terminal-filter.ps1`) would be more deterministic for enforcing terminal command auto-approval rules than the current `resolve_clearance` approach. The hook would intercept commands before execution, check against auto-approve patterns, and enforce policy without relying on the agent to call agent-intercom. More deterministic because the agent must observe the hook, whereas it may forget to check auto-approval.
-
----
-
-## 020 — Slack UI Automated Testing
-
-**Priority:** Low — test infrastructure
-**Size:** Medium (2–3 days)
-
-Add Playwright or equivalent framework for automated testing of Slack channel interactions. Covers session management commands, approval workflows, and message formatting. Simulates operator interactions and verifies correct message posting and command behavior across scenarios (multiple sessions, different agent states).
 
 ---
 
@@ -196,4 +223,6 @@ Non-blocking items to address opportunistically:
 - **F-14**: `src/acp/writer.rs:67–70` — Writer task exits silently on write error without emitting `SessionTerminated`. Reader will eventually detect EOF, but there's a window where queued messages are silently dropped.
 
 ## Unassigned
-- Ability to change the model or agents being used with a subcommand like `/acom session-update --model gpt-4 --agent my-agent`. Requires dynamic reloading of agent drivers and careful handling of in-flight sessions. Potentially large scope, so deprioritized for now.
+- ~~Readme, Setup Guide, and other documentation needs to be updated to reflect the current state of the project, especially around the new ACP features and configuration options.~~ → Promoted to feature **009**.
+- Consider making the Slack channel mechanism an abstraction layer that could support other platforms (e.g., Microsoft Teams, Discord, Telegram, Whatsapp) in the future. Not a priority now but could be designed with extensibility in mind.
+- ~~Need to address problem that Slack block messages with Refine, for example, don't appear to work in the mobile app.~~ → Promoted to **F-15 / F-16 / F-17** in feature 007.

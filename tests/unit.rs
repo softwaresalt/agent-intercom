@@ -2,6 +2,7 @@
 
 mod unit {
     mod acp_codec_tests;
+    mod acp_event_wiring;
     mod acp_handshake_tests;
     mod acp_session_tests;
     mod approval_repo_tests;
