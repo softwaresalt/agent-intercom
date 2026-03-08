@@ -2,6 +2,9 @@
 //!
 //! Provides helpers for constructing interactive Slack messages with
 //! severity-formatted text, action buttons, and diff rendering.
+//!
+//! This module is the single source of truth for all Slack Block Kit message
+//! construction, shared between MCP tool handlers and ACP event handlers.
 
 use slack_morphism::prelude::{
     SlackActionBlockElement, SlackActionId, SlackActionsBlock, SlackBlock, SlackBlockButtonElement,
@@ -10,6 +13,8 @@ use slack_morphism::prelude::{
     SlackView,
 };
 
+use crate::models::approval::RiskLevel;
+use crate::models::prompt::PromptType;
 use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
 
 /// Build a severity-formatted section block for log messages.
@@ -375,4 +380,162 @@ pub fn session_ended_blocks(session: &Session, reason: &str) -> Vec<SlackBlock> 
          *Duration:* {duration_text}",
     );
     vec![text_section(&text)]
+}
+
+// ── Shared approval and prompt block builders (D1) ───────────────────────────
+// Extracted from mcp/tools/ask_approval.rs and mcp/tools/forward_prompt.rs so
+// both MCP tool handlers and ACP event handlers use identical rendering logic.
+
+/// Maximum number of diff lines to render inline in a Slack block.
+///
+/// Diffs with at most this many lines are rendered inline; diffs with more
+/// lines are replaced with a line-count indicator and uploaded as a file
+/// snippet by the caller.
+pub const INLINE_DIFF_THRESHOLD: usize = 20;
+
+/// Escape Slack mrkdwn special characters in a user-supplied string.
+///
+/// Slack renders `&`, `<`, and `>` as HTML entities / link syntax in mrkdwn
+/// fields. This function escapes those characters so agent-supplied titles and
+/// descriptions are displayed as literal text rather than as links or mentions.
+#[must_use]
+pub fn slack_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Build Slack Block Kit blocks for an approval request message.
+///
+/// Produces a header section with title, file path, and risk badge; an
+/// optional description section; and either an inline diff code block (for
+/// diffs with at most `INLINE_DIFF_THRESHOLD` lines) or a line-count
+/// indicator. Action buttons are **not** included — callers append
+/// `approval_buttons` separately so both MCP and ACP paths control button
+/// placement.
+#[must_use]
+pub fn build_approval_blocks(
+    title: &str,
+    description: Option<&str>,
+    diff: &str,
+    file_path: &str,
+    risk_level: RiskLevel,
+) -> Vec<SlackBlock> {
+    let mut result = Vec::new();
+
+    let risk_emoji = match risk_level {
+        RiskLevel::Low => "\u{1f7e2}",
+        RiskLevel::High => "\u{1f7e1}",
+        RiskLevel::Critical => "\u{1f534}",
+    };
+    let escaped_title = slack_escape(title);
+    result.push(text_section(&format!(
+        "{risk_emoji} *{escaped_title}*\n\u{1f4c4} `{file_path}` | Risk: *{risk_level:?}*"
+    )));
+
+    if let Some(desc) = description {
+        result.push(text_section(&slack_escape(desc)));
+    }
+
+    let diff_line_count = diff.lines().count();
+    if diff_line_count <= INLINE_DIFF_THRESHOLD {
+        result.push(diff_section(diff));
+    } else {
+        result.push(text_section(&format!(
+            "\u{1f4ce} Diff uploaded as file ({diff_line_count} lines)"
+        )));
+    }
+
+    result
+}
+
+/// Build Slack Block Kit blocks for a continuation prompt message.
+///
+/// Produces a header with the prompt type icon and label, the prompt text,
+/// an optional context line with elapsed time and action count, and prompt
+/// action buttons (Continue / Refine / Stop).
+#[must_use]
+pub fn build_prompt_blocks(
+    prompt_text: &str,
+    prompt_type: PromptType,
+    elapsed_seconds: Option<i64>,
+    actions_taken: Option<i64>,
+    prompt_id: &str,
+) -> Vec<SlackBlock> {
+    let mut result = Vec::new();
+
+    let icon = prompt_type_icon(prompt_type);
+    let label = prompt_type_label(prompt_type);
+    result.push(text_section(&format!("{icon} *{label} Prompt*")));
+
+    result.push(text_section(&slack_escape(prompt_text)));
+
+    let mut context_parts = Vec::new();
+    if let Some(secs) = elapsed_seconds {
+        context_parts.push(format!("\u{23f1}\u{fe0f} {secs}s elapsed"));
+    }
+    if let Some(count) = actions_taken {
+        context_parts.push(format!("\u{1f4cb} {count} actions taken"));
+    }
+    if !context_parts.is_empty() {
+        result.push(text_section(&context_parts.join(" | ")));
+    }
+
+    result.push(prompt_buttons(prompt_id));
+
+    result
+}
+
+/// Get the display icon for a prompt type.
+#[must_use]
+pub fn prompt_type_icon(prompt_type: PromptType) -> &'static str {
+    match prompt_type {
+        PromptType::Continuation => "\u{1f504}",
+        PromptType::Clarification => "\u{2753}",
+        PromptType::ErrorRecovery => "\u{26a0}\u{fe0f}",
+        PromptType::ResourceWarning => "\u{1f4ca}",
+    }
+}
+
+/// Get the display label for a prompt type.
+#[must_use]
+pub fn prompt_type_label(prompt_type: PromptType) -> &'static str {
+    match prompt_type {
+        PromptType::Continuation => "Continuation",
+        PromptType::Clarification => "Clarification",
+        PromptType::ErrorRecovery => "Error Recovery",
+        PromptType::ResourceWarning => "Resource Warning",
+    }
+}
+
+/// Truncate `text` to at most `max_len` bytes, breaking at the nearest
+/// preceding char boundary so the result is always valid UTF-8.
+/// Appends `"..."` when truncation occurs and `max_len >= 3`.
+/// For `max_len < 3`, returns a prefix truncated to the nearest char
+/// boundary without an ellipsis.
+#[must_use]
+pub fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_owned();
+    }
+
+    if max_len < 3 {
+        let boundary = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= max_len)
+            .last()
+            .unwrap_or(0);
+        return text[..boundary].to_owned();
+    }
+
+    let limit = max_len.saturating_sub(3);
+    let boundary = text
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= limit)
+        .last()
+        .unwrap_or(0);
+
+    format!("{}...", &text[..boundary])
 }

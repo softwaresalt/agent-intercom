@@ -146,13 +146,26 @@ impl AcpDriver {
 
     /// Remove a session's writer channel on disconnection or termination.
     ///
-    /// Also removes the agent session ID mapping and sequence counter.
+    /// Also removes the agent session ID mapping, sequence counter, and any
+    /// pending clearance or prompt-forward entries owned by this session.
     /// Idempotent — removing an unknown `session_id` is a no-op.
     pub async fn deregister_session(&self, session_id: &str) {
         self.stream_writers.lock().await.remove(session_id);
         self.agent_session_ids.lock().await.remove(session_id);
         self.seq_counters.lock().await.remove(session_id);
-        debug!(session_id, "acp driver: session writer deregistered");
+
+        // F-09: remove any pending clearance / prompt entries owned by this
+        // session so they do not accumulate as memory leaks after termination.
+        self.pending_clearances
+            .lock()
+            .await
+            .retain(|_, v| v.session_id != session_id);
+        self.pending_prompts_acp
+            .lock()
+            .await
+            .retain(|_, v| v.session_id != session_id);
+
+        debug!(session_id, "acp driver: session deregistered");
     }
 
     /// Register a pending clearance request for response routing.
