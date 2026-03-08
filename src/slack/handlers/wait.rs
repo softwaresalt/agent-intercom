@@ -124,7 +124,9 @@ pub async fn handle_wait_action(
                 if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
                     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
                     crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                        chan_id.as_str(),
                         thread_ts.clone(),
+                        session_id.to_owned(),
                         user_id.to_owned(),
                         tx,
                         Arc::clone(&state.pending_thread_replies),
@@ -145,27 +147,42 @@ pub async fn handle_wait_action(
                     }
                     // Post fallback instruction in the thread so the operator knows to reply.
                     let fallback_msg = crate::slack::client::SlackMessage {
-                        channel: slack_morphism::prelude::SlackChannelId(chan_id),
+                        channel: slack_morphism::prelude::SlackChannelId(chan_id.clone()),
                         text: Some(
                             "Modal unavailable \u{2014} please reply in this thread with your instructions.".to_owned()
                         ),
                         blocks: None,
-                        thread_ts: Some(slack_morphism::prelude::SlackTs(thread_ts)),
+                        thread_ts: Some(slack_morphism::prelude::SlackTs(thread_ts.clone())),
                     };
+                    // Fix C (CS-05/TQ-004): only spawn the waiter if the post succeeded.
+                    // If the operator never sees a prompt, there is nobody to reply.
                     if let Err(post_err) = slack.enqueue(fallback_msg).await {
-                        warn!(%post_err, session_id, "failed to post wait thread-reply fallback message (F-16)");
+                        warn!(%post_err, session_id, "failed to post fallback message — removing pending entry and aborting (F-16)");
+                        let key = crate::slack::handlers::thread_reply::fallback_map_key(
+                            chan_id.as_str(),
+                            &thread_ts,
+                        );
+                        let mut guard = state.pending_thread_replies.lock().await;
+                        guard.remove(&key);
+                        drop(guard);
+                        return Err(format!(
+                            "failed to open instruction modal and post fallback message: {err}"
+                        ));
                     }
                     // Spawn a task to wait for the operator's reply and resolve the wait.
                     let state_clone = Arc::clone(state);
                     let session_id_owned = session_id.to_owned();
                     tokio::spawn(async move {
-                        // TODO(F-20): add timeout on this task — currently awaits rx indefinitely.
-                        // TODO(F-20): cleanup on session termination — entries are not removed when session ends.
                         // NOTE: FR-022 button replacement was applied at fallback activation time.
                         // A final "decision applied" replacement is not possible here because
                         // the spawned task does not have access to the Slack message coordinates.
-                        match rx.await {
-                            Ok(reply_text) => {
+                        match tokio::time::timeout(
+                            crate::slack::handlers::thread_reply::FALLBACK_REPLY_TIMEOUT,
+                            rx,
+                        )
+                        .await
+                        {
+                            Ok(Ok(reply_text)) => {
                                 if let Err(err) = state_clone
                                     .driver
                                     .resolve_wait(&session_id_owned, Some(reply_text))
@@ -178,10 +195,21 @@ pub async fn handle_wait_action(
                                     );
                                 }
                             }
-                            Err(_) => {
+                            Ok(Err(_)) => {
+                                // Sender dropped — session terminated or cleanup called.
                                 warn!(
                                     session_id = session_id_owned,
-                                    "wait thread-reply fallback oneshot dropped before reply received (F-16)"
+                                    "thread-reply fallback sender dropped — task exiting (F-16)"
+                                );
+                            }
+                            Err(_elapsed) => {
+                                // Operator did not reply within the timeout window.
+                                warn!(
+                                    session_id = session_id_owned,
+                                    timeout_secs =
+                                        crate::slack::handlers::thread_reply::FALLBACK_REPLY_TIMEOUT
+                                            .as_secs(),
+                                    "wait thread-reply fallback timed out — task exiting without resolution (F-16)"
                                 );
                             }
                         }

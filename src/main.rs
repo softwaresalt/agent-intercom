@@ -887,6 +887,14 @@ async fn handle_session_terminated(state: &Arc<AppState>, session_id: &str, reas
         acp_driver.deregister_session(session_id).await;
     }
 
+    // F-20: clean up any pending thread-reply fallback entries for this session.
+    // Dropping the senders causes the spawned waiter tasks to exit cleanly.
+    agent_intercom::slack::handlers::thread_reply::cleanup_session_fallbacks(
+        session_id,
+        &state.pending_thread_replies,
+    )
+    .await;
+
     // Notify the operator via Slack (when available).
     let Some(ref slack) = state.slack else { return };
     let (ch, ts) = match session_repo.get_by_id(session_id).await {

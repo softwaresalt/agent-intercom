@@ -9,25 +9,31 @@ use std::sync::Arc;
 
 use tokio::sync::{oneshot, Mutex};
 
-/// Convenience alias matching the production type.
-type PendingThreadReplies = Arc<Mutex<HashMap<String, (String, oneshot::Sender<String>)>>>;
+/// Convenience alias matching the production type after Fix B (3-tuple value).
+type PendingThreadReplies =
+    Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
 
 // ── T039 / S029 ───────────────────────────────────────────────────────────────
 
 /// Modal failure triggers fallback message registration.
 ///
 /// When `open_modal` fails, a oneshot sender should be registered in
-/// `pending_thread_replies` keyed by `thread_ts`.
+/// `pending_thread_replies` keyed by the composite `"{channel_id}\x1f{thread_ts}"`.
 #[tokio::test]
 async fn test_s029_fallback_message_registration() {
-    use agent_intercom::slack::handlers::thread_reply::register_thread_reply_fallback;
+    use agent_intercom::slack::handlers::thread_reply::{
+        fallback_map_key, register_thread_reply_fallback,
+    };
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let channel_id = "C12345";
     let thread_ts = "1234567890.000100".to_owned();
 
     let (tx, _rx) = oneshot::channel::<String>();
     register_thread_reply_fallback(
+        channel_id,
         thread_ts.clone(),
+        "session-001".to_owned(),
         "U12345".to_owned(),
         tx,
         Arc::clone(&pending),
@@ -35,9 +41,10 @@ async fn test_s029_fallback_message_registration() {
     .await;
 
     let guard = pending.lock().await;
+    let key = fallback_map_key(channel_id, &thread_ts);
     assert!(
-        guard.contains_key(&thread_ts),
-        "sender should be registered for thread_ts"
+        guard.contains_key(&key),
+        "sender should be registered for composite (channel_id, thread_ts) key"
     );
 }
 
@@ -49,19 +56,24 @@ async fn test_s029_fallback_message_registration() {
 /// must be delivered through the registered oneshot channel.
 #[tokio::test]
 async fn test_s030_reply_routes_to_oneshot() {
-    use agent_intercom::slack::handlers::thread_reply::route_thread_reply;
+    use agent_intercom::slack::handlers::thread_reply::{
+        fallback_map_key, route_thread_reply,
+    };
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let channel_id = "C12345";
     let thread_ts = "1234567890.000200".to_owned();
     let authorized_user = "U12345".to_owned();
 
     let (tx, rx) = oneshot::channel::<String>();
+    let key = fallback_map_key(channel_id, &thread_ts);
     pending
         .lock()
         .await
-        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
+        .insert(key, ("session-001".to_owned(), authorized_user.clone(), tx));
 
     let result = route_thread_reply(
+        channel_id,
         &thread_ts,
         &authorized_user,
         "approve",
@@ -82,19 +94,24 @@ async fn test_s030_reply_routes_to_oneshot() {
 /// subsequent replies are not forwarded again (only first captured).
 #[tokio::test]
 async fn test_s031_entry_removed_after_capture() {
-    use agent_intercom::slack::handlers::thread_reply::route_thread_reply;
+    use agent_intercom::slack::handlers::thread_reply::{
+        fallback_map_key, route_thread_reply,
+    };
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let channel_id = "C12345";
     let thread_ts = "1234567890.000300".to_owned();
     let authorized_user = "U12345".to_owned();
 
     let (tx, _rx) = oneshot::channel::<String>();
+    let key = fallback_map_key(channel_id, &thread_ts);
     pending
         .lock()
         .await
-        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
+        .insert(key.clone(), ("session-001".to_owned(), authorized_user.clone(), tx));
 
     let _ = route_thread_reply(
+        channel_id,
         &thread_ts,
         &authorized_user,
         "some text",
@@ -104,7 +121,7 @@ async fn test_s031_entry_removed_after_capture() {
 
     let guard = pending.lock().await;
     assert!(
-        !guard.contains_key(&thread_ts),
+        !guard.contains_key(&key),
         "entry should be removed after capture (S031)"
     );
 }
@@ -117,20 +134,25 @@ async fn test_s031_entry_removed_after_capture() {
 /// rather than panicking or erroring.
 #[tokio::test]
 async fn test_s032_only_first_reply_captured() {
-    use agent_intercom::slack::handlers::thread_reply::route_thread_reply;
+    use agent_intercom::slack::handlers::thread_reply::{
+        fallback_map_key, route_thread_reply,
+    };
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let channel_id = "C12345";
     let thread_ts = "1234567890.000400".to_owned();
     let authorized_user = "U12345".to_owned();
 
     let (tx, rx) = oneshot::channel::<String>();
+    let key = fallback_map_key(channel_id, &thread_ts);
     pending
         .lock()
         .await
-        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
+        .insert(key, ("session-001".to_owned(), authorized_user.clone(), tx));
 
     // First reply — should succeed.
     let first = route_thread_reply(
+        channel_id,
         &thread_ts,
         &authorized_user,
         "first reply",
@@ -142,6 +164,7 @@ async fn test_s032_only_first_reply_captured() {
 
     // Second reply — no pending entry, should return Ok(false) not error.
     let second = route_thread_reply(
+        channel_id,
         &thread_ts,
         &authorized_user,
         "second reply",
@@ -167,21 +190,26 @@ async fn test_s032_only_first_reply_captured() {
 /// reply.
 #[tokio::test]
 async fn test_s033_unauthorized_user_rejected() {
-    use agent_intercom::slack::handlers::thread_reply::route_thread_reply;
+    use agent_intercom::slack::handlers::thread_reply::{
+        fallback_map_key, route_thread_reply,
+    };
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let channel_id = "C12345";
     let thread_ts = "1234567890.000500".to_owned();
     let authorized_user = "U_AUTHORIZED".to_owned();
     let unauthorized_user = "U_BADACTOR".to_owned();
 
     let (tx, rx) = oneshot::channel::<String>();
+    let key = fallback_map_key(channel_id, &thread_ts);
     pending
         .lock()
         .await
-        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
+        .insert(key.clone(), ("session-001".to_owned(), authorized_user.clone(), tx));
 
     // Unauthorized user sends reply — should be silently ignored.
     let result = route_thread_reply(
+        channel_id,
         &thread_ts,
         &unauthorized_user, // sender
         "malicious reply",
@@ -199,16 +227,148 @@ async fn test_s033_unauthorized_user_rejected() {
     {
         let guard = pending.lock().await;
         assert!(
-            guard.contains_key(&thread_ts),
+            guard.contains_key(&key),
             "entry should remain after unauthorized reply"
         );
     }
 
     // Drop the sender (simulate cleanup) and verify rx was never sent.
-    pending.lock().await.remove(&thread_ts);
+    pending.lock().await.remove(&key);
     let recv_result = rx.await;
     assert!(
         recv_result.is_err(),
         "unauthorized reply should not have been forwarded through oneshot"
+    );
+}
+
+// ── T044b / S034 — composite key isolation ────────────────────────────────────
+
+/// Two entries with the same `thread_ts` but different channels must be
+/// independent (Fix E — CS-02 / LC-05: composite key prevents cross-channel
+/// collision).
+#[tokio::test]
+async fn test_s034_composite_key_prevents_cross_channel_collision() {
+    use agent_intercom::slack::handlers::thread_reply::{
+        fallback_map_key, register_thread_reply_fallback, route_thread_reply,
+    };
+
+    let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let thread_ts = "1700000000.000001".to_owned(); // same timestamp in both channels
+
+    // Register in channel A.
+    let (tx_a, rx_a) = oneshot::channel::<String>();
+    register_thread_reply_fallback(
+        "C_CHANNEL_A",
+        thread_ts.clone(),
+        "session-a".to_owned(),
+        "U_OP_A".to_owned(),
+        tx_a,
+        Arc::clone(&pending),
+    )
+    .await;
+
+    // Register in channel B.
+    let (tx_b, rx_b) = oneshot::channel::<String>();
+    register_thread_reply_fallback(
+        "C_CHANNEL_B",
+        thread_ts.clone(),
+        "session-b".to_owned(),
+        "U_OP_B".to_owned(),
+        tx_b,
+        Arc::clone(&pending),
+    )
+    .await;
+
+    // Both keys should be present.
+    {
+        let guard = pending.lock().await;
+        assert_eq!(guard.len(), 2, "both channel entries should be distinct");
+        assert!(guard.contains_key(&fallback_map_key("C_CHANNEL_A", &thread_ts)));
+        assert!(guard.contains_key(&fallback_map_key("C_CHANNEL_B", &thread_ts)));
+    }
+
+    // Reply in channel A — must only resolve channel A.
+    let res_a = route_thread_reply(
+        "C_CHANNEL_A",
+        &thread_ts,
+        "U_OP_A",
+        "reply for A",
+        Arc::clone(&pending),
+    )
+    .await;
+    assert!(res_a.is_ok_and(|v| v), "channel A reply should be captured");
+    assert_eq!(rx_a.await.unwrap(), "reply for A");
+
+    // Channel B entry must still be present.
+    assert!(
+        pending
+            .lock()
+            .await
+            .contains_key(&fallback_map_key("C_CHANNEL_B", &thread_ts)),
+        "channel B entry must survive channel A reply"
+    );
+
+    // Clean up channel B.
+    let res_b = route_thread_reply(
+        "C_CHANNEL_B",
+        &thread_ts,
+        "U_OP_B",
+        "reply for B",
+        Arc::clone(&pending),
+    )
+    .await;
+    assert!(res_b.is_ok_and(|v| v), "channel B reply should be captured");
+    assert_eq!(rx_b.await.unwrap(), "reply for B");
+}
+
+// ── T045 / S035 — cleanup_session_fallbacks ───────────────────────────────────
+
+/// `cleanup_session_fallbacks` removes all entries for the terminated session
+/// and leaves entries for other sessions intact (Fix B — F-20).
+#[tokio::test]
+async fn test_s035_cleanup_session_fallbacks_removes_correct_entries() {
+    use agent_intercom::slack::handlers::thread_reply::{
+        cleanup_session_fallbacks, fallback_map_key,
+    };
+
+    let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+
+    let (tx_a1, _rx_a1) = oneshot::channel::<String>();
+    let (tx_a2, _rx_a2) = oneshot::channel::<String>();
+    let (tx_b1, _rx_b1) = oneshot::channel::<String>();
+
+    {
+        let mut guard = pending.lock().await;
+        // Two entries for session-A in different channels.
+        guard.insert(
+            fallback_map_key("C1", "1700000001.000001"),
+            ("session-A".to_owned(), "U1".to_owned(), tx_a1),
+        );
+        guard.insert(
+            fallback_map_key("C2", "1700000002.000001"),
+            ("session-A".to_owned(), "U2".to_owned(), tx_a2),
+        );
+        // One entry for session-B.
+        guard.insert(
+            fallback_map_key("C1", "1700000003.000001"),
+            ("session-B".to_owned(), "U3".to_owned(), tx_b1),
+        );
+    }
+
+    // Terminate session-A — both its entries should be removed.
+    cleanup_session_fallbacks("session-A", &pending).await;
+
+    let guard = pending.lock().await;
+    assert!(
+        !guard.contains_key(&fallback_map_key("C1", "1700000001.000001")),
+        "session-A entry 1 must be removed"
+    );
+    assert!(
+        !guard.contains_key(&fallback_map_key("C2", "1700000002.000001")),
+        "session-A entry 2 must be removed"
+    );
+    assert!(
+        guard.contains_key(&fallback_map_key("C1", "1700000003.000001")),
+        "session-B entry must remain after session-A cleanup"
     );
 }

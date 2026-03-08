@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 
 use agent_intercom::slack::handlers::thread_reply::{
-    register_thread_reply_fallback, route_thread_reply,
+    fallback_map_key, register_thread_reply_fallback, route_thread_reply,
 };
 
 /// Full fallback flow: register → reply → verify delivery and cleanup.
@@ -19,24 +19,29 @@ use agent_intercom::slack::handlers::thread_reply::{
 async fn test_s029_s030_s031_full_fallback_flow() {
     let pending = Arc::new(Mutex::new(HashMap::<
         String,
-        (String, oneshot::Sender<String>),
+        (String, String, oneshot::Sender<String>),
     >::new()));
+    let channel_id = "C_INTEGRATION";
     let thread_ts = "1700000000.000100".to_owned();
     let authorized_user = "U_OPERATOR".to_owned();
+    let session_id = "session-integration-001".to_owned();
 
     // Step 1: modal fails → register fallback (S029).
     let (tx, rx) = oneshot::channel::<String>();
     register_thread_reply_fallback(
+        channel_id,
         thread_ts.clone(),
+        session_id.clone(),
         authorized_user.clone(),
         tx,
         Arc::clone(&pending),
     )
     .await;
 
-    // Verify registration.
+    // Verify registration via composite key.
+    let key = fallback_map_key(channel_id, &thread_ts);
     assert!(
-        pending.lock().await.contains_key(&thread_ts),
+        pending.lock().await.contains_key(&key),
         "S029: fallback entry should be registered after modal failure"
     );
 
@@ -47,6 +52,7 @@ async fn test_s029_s030_s031_full_fallback_flow() {
         let authorized_user = authorized_user.clone();
         tokio::spawn(async move {
             route_thread_reply(
+                channel_id,
                 &thread_ts,
                 &authorized_user,
                 "refine: use smaller steps",
@@ -72,7 +78,7 @@ async fn test_s029_s030_s031_full_fallback_flow() {
 
     // S031: entry is removed — the caller would post an ack message after this.
     assert!(
-        !pending.lock().await.contains_key(&thread_ts),
+        !pending.lock().await.contains_key(&key),
         "S031: entry should be removed from map after reply is captured"
     );
 }

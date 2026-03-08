@@ -1,10 +1,11 @@
-//! Unit tests for `SessionRepo::count_active_acp` (T009–T011, T014).
+//! Unit tests for `SessionRepo::count_active_acp` (T009–T011, T014, T015).
 //!
 //! Covers:
 //! - T009 (S010): `count_active_acp` counts both `active` and `created` ACP sessions
 //! - T010 (S011): `count_active_acp` excludes MCP sessions from count
-//! - T011 (S015): `count_active_acp` excludes paused and terminated ACP sessions
+//! - T011 (S015): `count_active_acp` excludes `terminated` and `interrupted` ACP sessions
 //! - T014 (S014): with `max_sessions = 0`, count `>= max` always rejects all starts
+//! - T015 (LC-06): `count_active_acp` counts `paused` ACP sessions (live child process)
 
 use std::sync::Arc;
 
@@ -116,24 +117,47 @@ async fn count_active_acp_excludes_mcp_sessions() {
 
 // ── T011 / S015 ───────────────────────────────────────────────────────────────
 
-/// `count_active_acp` must exclude `paused` and `terminated` ACP sessions.
+/// `count_active_acp` must exclude `terminated` and `interrupted` ACP sessions.
 ///
-/// Only sessions that are actively occupying server resources (`active` or
-/// `created`) contribute to the capacity limit.
+/// Only sessions that actively occupy server resources contribute to the
+/// capacity limit. Terminated and interrupted sessions are done — their child
+/// processes have exited — and must not block new ACP starts.
 #[tokio::test]
-async fn count_active_acp_excludes_paused_and_terminated_sessions() {
+async fn count_active_acp_excludes_terminated_and_interrupted_sessions() {
     let db = db::connect_memory().await.expect("db connect");
     let repo = SessionRepo::new(Arc::new(db));
 
-    // A paused ACP session — not consuming resources, must not count.
-    insert_acp_session(&repo, SessionStatus::Paused).await;
     // A terminated ACP session — done, must not count.
     insert_acp_session(&repo, SessionStatus::Terminated).await;
+    // An interrupted ACP session — done, must not count.
+    insert_acp_session(&repo, SessionStatus::Interrupted).await;
 
     let count = repo.count_active_acp().await.expect("count_active_acp");
     assert_eq!(
         count, 0,
-        "paused and terminated ACP sessions must not consume ACP capacity slots"
+        "terminated and interrupted ACP sessions must not consume ACP capacity slots"
+    );
+}
+
+// ── T015 / LC-06 ──────────────────────────────────────────────────────────────
+
+/// `count_active_acp` must count `paused` ACP sessions toward the capacity limit.
+///
+/// A paused session still holds a live child process. Without counting it, an
+/// operator could pause N sessions and then immediately start N more, effectively
+/// doubling the configured limit (LC-06: capacity enforcement must include paused).
+#[tokio::test]
+async fn count_active_acp_includes_paused_sessions() {
+    let db = db::connect_memory().await.expect("db connect");
+    let repo = SessionRepo::new(Arc::new(db));
+
+    // One paused ACP session — must count (live child process still running).
+    insert_acp_session(&repo, SessionStatus::Paused).await;
+
+    let count = repo.count_active_acp().await.expect("count_active_acp");
+    assert_eq!(
+        count, 1,
+        "a paused ACP session must consume an ACP capacity slot (LC-06)"
     );
 }
 

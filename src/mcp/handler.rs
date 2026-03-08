@@ -92,10 +92,12 @@ pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
 ///
 /// Used by the thread-reply fallback (F-16/F-17) when Slack modals cannot be
 /// opened (e.g. `trigger_id` expiry in Socket Mode). The button handler
-/// registers a `(authorized_user_id, sender)` pair here; the push-event handler
-/// delivers the operator's reply text through the oneshot only when the reply
-/// comes from the stored authorized user.
-pub type PendingThreadReplies = Arc<Mutex<HashMap<String, (String, oneshot::Sender<String>)>>>;
+/// registers a `(session_id, authorized_user_id, sender)` triple here. The push-event
+/// handler delivers the operator's reply text through the oneshot only when the reply
+/// comes from the stored authorized user. The `session_id` enables cleanup when the
+/// owning session terminates (`cleanup_session_fallbacks` — F-20).
+pub type PendingThreadReplies =
+    Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
 
 /// Live child processes spawned by the `session-start` slash command,
 /// keyed by `session_id`. Keeping them here prevents `kill_on_drop` from

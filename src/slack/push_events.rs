@@ -113,8 +113,9 @@ pub async fn handle_push_event(
 
             // F-16/F-17: Check for a pending thread-reply fallback first.
             // If a modal failed to open, a oneshot sender was registered for this
-            // thread_ts. Route the reply there and skip the normal steering path.
+            // (channel_id, thread_ts) pair. Route the reply there and skip steering.
             match crate::slack::handlers::thread_reply::route_thread_reply(
+                &channel_str,
                 thread_ts.0.as_str(),
                 &user_str,
                 text,
@@ -139,8 +140,14 @@ pub async fn handle_push_event(
                     warn!(
                         %err,
                         channel = channel_str,
-                        "push event: thread-reply fallback routing error; falling through to steering"
+                        "push event: thread-reply fallback routing error; skipping steering \
+                         (message targeted a pending fallback entry — TQ-004)"
                     );
+                    // TQ-004: the text was a reply to a pending fallback prompt.
+                    // Even though delivery failed (receiver dropped or timed out),
+                    // do NOT route the operator's text into steering — it was not
+                    // a steering command.
+                    return Ok(());
                 }
             }
 
