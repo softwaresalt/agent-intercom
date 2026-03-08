@@ -25,12 +25,12 @@ Batch of targeted correctness fixes found during adversarial review, plus a mobi
 
 **ACP Correctness Fixes**
 
-- **F-06**: `src/acp/reader.rs:346–355` — Queued steering messages marked consumed even when `send_prompt` fails. Only mark consumed after successful send; keep failed deliveries for retry.
-- **F-07**: `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes `created`-state sessions and counts all protocols against `acp.max_sessions`. Fix: count `created` sessions, add `count_active_by_protocol`.
+- ~~**F-06**: `src/acp/reader.rs:346–355` — Queued steering messages marked consumed even when `send_prompt` fails. Only mark consumed after successful send; keep failed deliveries for retry.~~ ✅ Complete — 007-acp-correctness-mobile
+- ~~**F-07**: `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes `created`-state sessions and counts all protocols against `acp.max_sessions`. Fix: count `created` sessions, add `count_active_by_protocol`.~~ ✅ Complete — 007-acp-correctness-mobile
 - **F-08**: `src/slack/commands.rs:415–425` — ACP session start resolves workspace from static `state.config` instead of hot-reloaded `state.workspace_mappings`. Violates FR-014.
 - **F-09**: `src/driver/acp_driver.rs:130–134` — `deregister_session` doesn't clean up `pending_clearances` or `pending_prompts_acp`. Orphaned entries accumulate as memory leaks once F-01/F-02 are fixed.
-- **F-10**: `src/mcp/sse.rs:421–446` — No deprecation warning when both `workspace_id` and `channel_id` query params are provided (FR-013 violation).
-- **F-13**: `src/acp/handshake.rs:40–47` — Static handshake correlation ID `"intercom-prompt-1"` collides with `AcpDriver::PROMPT_COUNTER` starting at 1. Start counter at 1000 or use UUIDs.
+- ~~**F-10**: `src/mcp/sse.rs:421–446` — No deprecation warning when both `workspace_id` and `channel_id` query params are provided (FR-013 violation).~~ ✅ Complete — 007-acp-correctness-mobile (`channel_id` removed entirely; `workspace_id` is sole routing mechanism)
+- ~~**F-13**: `src/acp/handshake.rs:40–47` — Static handshake correlation ID `"intercom-prompt-1"` collides with `AcpDriver::PROMPT_COUNTER` starting at 1. Start counter at 1000 or use UUIDs.~~ ✅ Complete — 007-acp-correctness-mobile
 
 **Mobile Input Accessibility**
 
