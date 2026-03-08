@@ -219,10 +219,24 @@ pub async fn handle_approval_action(
                     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
                     crate::slack::handlers::thread_reply::register_thread_reply_fallback(
                         thread_ts.clone(),
+                        user_id.to_owned(),
                         tx,
                         Arc::clone(&state.pending_thread_replies),
                     )
                     .await;
+                    // FR-022: Replace buttons with "awaiting thread reply" status immediately.
+                    {
+                        let msg_ts_raw = message.map(|m| m.origin.ts.clone());
+                        let chan_raw = channel.map(|c| c.id.clone());
+                        if let (Some(ts), Some(ch)) = (msg_ts_raw, chan_raw) {
+                            let replacement = vec![crate::slack::blocks::text_section(
+                                "\u{23f3} *Awaiting thread reply\u{2026}* (modal unavailable \u{2014} please reply in this thread)",
+                            )];
+                            if let Err(err) = slack.update_message(ch, ts, replacement).await {
+                                warn!(%err, request_id, "failed to replace buttons on fallback activation (F-16 FR-022)");
+                            }
+                        }
+                    }
                     // Post fallback instruction in the thread so the operator knows to reply.
                     let fallback_msg = crate::slack::client::SlackMessage {
                         channel: slack_morphism::prelude::SlackChannelId(chan_id),
@@ -240,6 +254,11 @@ pub async fn handle_approval_action(
                     let request_id_owned = request_id.to_owned();
                     let user_id_owned = user_id.to_owned();
                     tokio::spawn(async move {
+                        // TODO(F-20): add timeout on this task — currently awaits rx indefinitely.
+                        // TODO(F-20): cleanup on session termination — entries are not removed when session ends.
+                        // NOTE: FR-022 button replacement was applied at fallback activation time.
+                        // A final "decision applied" replacement is not possible here because
+                        // the spawned task does not have access to the Slack message coordinates.
                         match rx.await {
                             Ok(reply_text) => {
                                 let approval_repo = ApprovalRepo::new(Arc::clone(&state_clone.db));

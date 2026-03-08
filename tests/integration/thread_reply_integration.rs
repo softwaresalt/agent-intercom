@@ -17,13 +17,22 @@ use agent_intercom::slack::handlers::thread_reply::{
 /// Full fallback flow: register → reply → verify delivery and cleanup.
 #[tokio::test]
 async fn test_s029_s030_s031_full_fallback_flow() {
-    let pending = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<String>>::new()));
+    let pending = Arc::new(Mutex::new(HashMap::<
+        String,
+        (String, oneshot::Sender<String>),
+    >::new()));
     let thread_ts = "1700000000.000100".to_owned();
     let authorized_user = "U_OPERATOR".to_owned();
 
     // Step 1: modal fails → register fallback (S029).
     let (tx, rx) = oneshot::channel::<String>();
-    register_thread_reply_fallback(thread_ts.clone(), tx, Arc::clone(&pending)).await;
+    register_thread_reply_fallback(
+        thread_ts.clone(),
+        authorized_user.clone(),
+        tx,
+        Arc::clone(&pending),
+    )
+    .await;
 
     // Verify registration.
     assert!(
@@ -41,7 +50,6 @@ async fn test_s029_s030_s031_full_fallback_flow() {
                 &thread_ts,
                 &authorized_user,
                 "refine: use smaller steps",
-                &authorized_user,
                 pending,
             )
             .await

@@ -24,38 +24,39 @@ use tracing::{info, warn};
 
 /// Thread-safe map type for pending thread-reply oneshot senders.
 ///
-/// Keyed by `thread_ts` (the Slack message timestamp that identifies the
-/// thread). The value is a `oneshot::Sender<String>` that delivers the
-/// operator's reply text to the waiting fallback task.
-pub type PendingThreadReplies = Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>;
+/// Keyed by `thread_ts`. The value is a `(authorized_user_id, oneshot::Sender<String>)` pair
+/// so that only the specific operator who triggered the fallback can complete it.
+pub type PendingThreadReplies = Arc<Mutex<HashMap<String, (String, oneshot::Sender<String>)>>>;
 
-/// Register a thread-reply fallback by storing the oneshot sender keyed by `thread_ts`.
+/// Register a thread-reply fallback by storing the authorized user and oneshot sender keyed by
+/// `thread_ts`.
 ///
 /// Called immediately after a `views.open` failure. The companion
 /// [`route_thread_reply`] function will deliver the operator's reply text
-/// through this sender when the authorized user replies in the thread.
+/// through this sender when `authorized_user_id` replies in the thread.
 ///
 /// # Arguments
 ///
 /// * `thread_ts` — Slack message timestamp identifying the fallback thread.
+/// * `authorized_user_id` — The single Slack user ID allowed to complete this fallback.
 /// * `tx` — The oneshot sender. The spawned fallback task holds the `rx` end.
 /// * `pending` — Shared map of pending thread-reply senders.
 pub async fn register_thread_reply_fallback(
     thread_ts: String,
+    authorized_user_id: String,
     tx: oneshot::Sender<String>,
     pending: PendingThreadReplies,
 ) {
     let mut guard = pending.lock().await;
-    guard.insert(thread_ts, tx);
+    guard.insert(thread_ts, (authorized_user_id, tx));
 }
 
 /// Route an incoming thread reply to the waiting oneshot sender.
 ///
-/// Checks whether `thread_ts` has a registered fallback and whether
-/// `sender_user_id` matches `authorized_user_id`. If both conditions hold,
-/// removes the entry and sends `text` through the oneshot. Unauthorized
-/// senders are silently ignored — the entry remains so the authorized user
-/// can still reply.
+/// Looks up `thread_ts` in the pending map and extracts the authorized user from
+/// the stored pair. If `sender_user_id` matches the stored authorized user, removes
+/// the entry and sends `text` through the oneshot. Unauthorized senders are silently
+/// ignored — the entry remains so the authorized user can still reply.
 ///
 /// # Returns
 ///
@@ -68,7 +69,6 @@ pub async fn register_thread_reply_fallback(
 /// * `thread_ts` — Slack thread timestamp to look up in the pending map.
 /// * `sender_user_id` — Slack user ID of the person who replied.
 /// * `text` — The raw text of the thread reply.
-/// * `authorized_user_id` — The single user allowed to complete this fallback.
 /// * `pending` — Shared map of pending thread-reply senders.
 ///
 /// # Errors
@@ -78,7 +78,6 @@ pub async fn route_thread_reply(
     thread_ts: &str,
     sender_user_id: &str,
     text: &str,
-    authorized_user_id: &str,
     pending: PendingThreadReplies,
 ) -> Result<bool, String> {
     let mut guard = pending.lock().await;
@@ -87,18 +86,19 @@ pub async fn route_thread_reply(
         return Ok(false); // no pending fallback for this thread
     }
 
-    if sender_user_id != authorized_user_id {
+    let (ref authorized_user_id, _) = guard[thread_ts];
+    if sender_user_id != authorized_user_id.as_str() {
         warn!(
             thread_ts,
             sender_user_id,
-            authorized_user_id,
+            authorized_user_id = authorized_user_id.as_str(),
             "unauthorized thread reply ignored (F-16/F-17 fallback)"
         );
         return Ok(false); // silently ignore unauthorized sender; entry remains
     }
 
     // Remove and send — only the first authorized reply is captured.
-    let tx = guard
+    let (_, tx) = guard
         .remove(thread_ts)
         .ok_or_else(|| "oneshot sender disappeared during lock".to_owned())?;
     drop(guard); // release lock before send to minimize contention

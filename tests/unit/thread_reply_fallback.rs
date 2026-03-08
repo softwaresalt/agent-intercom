@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 
 /// Convenience alias matching the production type.
-type PendingThreadReplies = Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>;
+type PendingThreadReplies = Arc<Mutex<HashMap<String, (String, oneshot::Sender<String>)>>>;
 
 // ── T039 / S029 ───────────────────────────────────────────────────────────────
 
@@ -26,7 +26,13 @@ async fn test_s029_fallback_message_registration() {
     let thread_ts = "1234567890.000100".to_owned();
 
     let (tx, _rx) = oneshot::channel::<String>();
-    register_thread_reply_fallback(thread_ts.clone(), tx, Arc::clone(&pending)).await;
+    register_thread_reply_fallback(
+        thread_ts.clone(),
+        "U12345".to_owned(),
+        tx,
+        Arc::clone(&pending),
+    )
+    .await;
 
     let guard = pending.lock().await;
     assert!(
@@ -50,13 +56,15 @@ async fn test_s030_reply_routes_to_oneshot() {
     let authorized_user = "U12345".to_owned();
 
     let (tx, rx) = oneshot::channel::<String>();
-    pending.lock().await.insert(thread_ts.clone(), tx);
+    pending
+        .lock()
+        .await
+        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
 
     let result = route_thread_reply(
         &thread_ts,
         &authorized_user,
         "approve",
-        &authorized_user,
         Arc::clone(&pending),
     )
     .await;
@@ -81,13 +89,15 @@ async fn test_s031_entry_removed_after_capture() {
     let authorized_user = "U12345".to_owned();
 
     let (tx, _rx) = oneshot::channel::<String>();
-    pending.lock().await.insert(thread_ts.clone(), tx);
+    pending
+        .lock()
+        .await
+        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
 
     let _ = route_thread_reply(
         &thread_ts,
         &authorized_user,
         "some text",
-        &authorized_user,
         Arc::clone(&pending),
     )
     .await;
@@ -114,14 +124,16 @@ async fn test_s032_only_first_reply_captured() {
     let authorized_user = "U12345".to_owned();
 
     let (tx, rx) = oneshot::channel::<String>();
-    pending.lock().await.insert(thread_ts.clone(), tx);
+    pending
+        .lock()
+        .await
+        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
 
     // First reply — should succeed.
     let first = route_thread_reply(
         &thread_ts,
         &authorized_user,
         "first reply",
-        &authorized_user,
         Arc::clone(&pending),
     )
     .await;
@@ -133,7 +145,6 @@ async fn test_s032_only_first_reply_captured() {
         &thread_ts,
         &authorized_user,
         "second reply",
-        &authorized_user,
         Arc::clone(&pending),
     )
     .await;
@@ -164,14 +175,16 @@ async fn test_s033_unauthorized_user_rejected() {
     let unauthorized_user = "U_BADACTOR".to_owned();
 
     let (tx, rx) = oneshot::channel::<String>();
-    pending.lock().await.insert(thread_ts.clone(), tx);
+    pending
+        .lock()
+        .await
+        .insert(thread_ts.clone(), (authorized_user.clone(), tx));
 
     // Unauthorized user sends reply — should be silently ignored.
     let result = route_thread_reply(
         &thread_ts,
         &unauthorized_user, // sender
         "malicious reply",
-        &authorized_user, // expected authorized user
         Arc::clone(&pending),
     )
     .await;

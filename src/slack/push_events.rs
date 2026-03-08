@@ -118,7 +118,6 @@ pub async fn handle_push_event(
                 thread_ts.0.as_str(),
                 &user_str,
                 text,
-                &user_str, // sender is already verified authorized by is_authorized() above
                 Arc::clone(&app.pending_thread_replies),
             )
             .await
