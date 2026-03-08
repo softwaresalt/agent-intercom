@@ -154,8 +154,8 @@ operator actions complete successfully.
 
 ### F-15: Research Phase
 
-- [ ] T037 [US4] Research Slack `views.open` and `plain_text_input` behavior on iOS — consult API docs, Block Kit reference, community reports
-- [ ] T038 [US4] Document research findings in `specs/007-acp-correctness-mobile/research-f15-mobile-modals.md` — conclude with one of: (a) modals work, (b) input broken, (c) modals swallowed
+- [x] T037 [US4] Research Slack `views.open` and `plain_text_input` behavior on iOS — consult API docs, Block Kit reference, community reports
+- [x] T038 [US4] Document research findings in `specs/007-acp-correctness-mobile/research-f15-mobile-modals.md` — conclude with one of: (a) modals work, (b) input broken, (c) modals swallowed
 
 **Gate**: If finding is (a), skip T039–T050. If (b) or (c), proceed.
 

@@ -24,6 +24,7 @@ use crate::slack::{client::SlackMessage, handlers};
 /// # Errors
 ///
 /// Returns `Ok(())` on success or if the event is silently ignored.
+#[allow(clippy::too_many_lines)] // F-16/F-17 fallback check + steering dispatch cannot be shortened further.
 pub async fn handle_push_event(
     callback: SlackPushEventCallback,
     _client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
@@ -107,8 +108,42 @@ pub async fn handle_push_event(
             info!(
                 user = user_str,
                 channel = channel_str,
-                "push event: thread message → steering"
+                "push event: thread message → checking modal fallback then steering"
             );
+
+            // F-16/F-17: Check for a pending thread-reply fallback first.
+            // If a modal failed to open, a oneshot sender was registered for this
+            // thread_ts. Route the reply there and skip the normal steering path.
+            match crate::slack::handlers::thread_reply::route_thread_reply(
+                thread_ts.0.as_str(),
+                &user_str,
+                text,
+                &user_str, // sender is already verified authorized by is_authorized() above
+                Arc::clone(&app.pending_thread_replies),
+            )
+            .await
+            {
+                Ok(true) => {
+                    // Reply captured by fallback — acknowledge and return.
+                    info!(
+                        user = user_str,
+                        channel = channel_str,
+                        "push event: thread reply captured by modal fallback (F-16/F-17)"
+                    );
+                    post_ack(&app, &channel_str, Some(thread_ts)).await;
+                    return Ok(());
+                }
+                Ok(false) => {
+                    // No pending fallback — fall through to normal steering.
+                }
+                Err(err) => {
+                    warn!(
+                        %err,
+                        channel = channel_str,
+                        "push event: thread-reply fallback routing error; falling through to steering"
+                    );
+                }
+            }
 
             match handlers::steer::store_from_slack(
                 text,

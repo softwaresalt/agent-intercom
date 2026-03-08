@@ -111,10 +111,76 @@ pub async fn handle_prompt_action(
                 "Type your revised instructions\u{2026}",
             );
             if let Err(err) = slack.open_modal(trigger_id.clone(), modal).await {
-                warn!(%err, prompt_id, "failed to open refine modal");
+                warn!(%err, prompt_id, "failed to open refine modal; activating thread-reply fallback (F-16)");
                 // Clean up cached context on failure.
                 let mut ctx = state.pending_modal_contexts.lock().await;
                 ctx.remove(&callback_id);
+                // F-16/F-17: register thread-reply fallback when modal is unavailable.
+                let thread_ts_opt = message.map(|m| m.origin.ts.to_string());
+                let chan_id_opt = channel.map(|c| c.id.to_string());
+                if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
+                    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+                    crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                        thread_ts.clone(),
+                        tx,
+                        Arc::clone(&state.pending_thread_replies),
+                    )
+                    .await;
+                    // Post fallback instruction in the thread so the operator knows to reply.
+                    let fallback_msg = crate::slack::client::SlackMessage {
+                        channel: slack_morphism::prelude::SlackChannelId(chan_id),
+                        text: Some(
+                            "Modal unavailable \u{2014} please reply in this thread with your revised instructions.".to_owned()
+                        ),
+                        blocks: None,
+                        thread_ts: Some(slack_morphism::prelude::SlackTs(thread_ts)),
+                    };
+                    if let Err(post_err) = slack.enqueue(fallback_msg).await {
+                        warn!(%post_err, prompt_id, "failed to post thread-reply fallback message (F-16)");
+                    }
+                    // Spawn a task to wait for the operator's reply and resolve the prompt.
+                    let state_clone = Arc::clone(state);
+                    let prompt_id_owned = prompt_id.to_owned();
+                    tokio::spawn(async move {
+                        match rx.await {
+                            Ok(reply_text) => {
+                                let repo = PromptRepo::new(Arc::clone(&state_clone.db));
+                                if let Err(db_err) = repo
+                                    .update_decision(
+                                        &prompt_id_owned,
+                                        PromptDecision::Refine,
+                                        Some(reply_text.clone()),
+                                    )
+                                    .await
+                                {
+                                    warn!(
+                                        prompt_id = prompt_id_owned,
+                                        %db_err,
+                                        "thread-reply fallback: failed to update prompt decision in DB"
+                                    );
+                                }
+                                if let Err(driver_err) = state_clone
+                                    .driver
+                                    .resolve_prompt(&prompt_id_owned, "refine", Some(reply_text))
+                                    .await
+                                {
+                                    warn!(
+                                        prompt_id = prompt_id_owned,
+                                        %driver_err,
+                                        "thread-reply fallback: failed to resolve prompt via driver"
+                                    );
+                                }
+                            }
+                            Err(_) => {
+                                warn!(
+                                    prompt_id = prompt_id_owned,
+                                    "thread-reply fallback oneshot dropped before reply received (F-16)"
+                                );
+                            }
+                        }
+                    });
+                    return Ok(());
+                }
                 return Err(format!("failed to open refine modal: {err}"));
             }
         }

@@ -88,6 +88,14 @@ pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 /// line (FR-022).
 pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
 
+/// Thread-safe map of pending thread-reply oneshot senders keyed by `thread_ts`.
+///
+/// Used by the thread-reply fallback (F-16/F-17) when Slack modals cannot be
+/// opened (e.g. `trigger_id` expiry in Socket Mode). The button handler
+/// registers a sender here; the push-event handler delivers the operator's
+/// reply text through it when the authorized user replies in the thread.
+pub type PendingThreadReplies = Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>;
+
 /// Live child processes spawned by the `session-start` slash command,
 /// keyed by `session_id`. Keeping them here prevents `kill_on_drop` from
 /// terminating the process the moment `spawn_session` returns.
@@ -114,6 +122,13 @@ pub struct AppState {
     pub pending_command_approvals: PendingCommandApprovals,
     /// Cached modal message contexts for FR-022 button replacement.
     pub pending_modal_contexts: PendingModalContexts,
+    /// Pending thread-reply oneshot senders keyed by `thread_ts` (F-16/F-17 fallback).
+    ///
+    /// When `views.open` fails, a oneshot sender is registered here by the
+    /// button handler. The push-event handler ([`crate::slack::push_events`])
+    /// delivers the operator's reply text through the oneshot when the
+    /// authorized user replies in the fallback thread.
+    pub pending_thread_replies: PendingThreadReplies,
     /// Per-session stall detector handles keyed by `session_id`.
     pub stall_detectors: Option<StallDetectors>,
     /// Shared secret for IPC authentication (`None` disables auth).

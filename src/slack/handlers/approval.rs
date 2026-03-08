@@ -200,10 +200,85 @@ pub async fn handle_approval_action(
                 "Describe why this change is being rejected\u{2026}",
             );
             if let Err(err) = slack.open_modal(trigger_id.clone(), modal).await {
-                warn!(%err, request_id, "failed to open rejection reason modal");
+                warn!(%err, request_id, "failed to open rejection reason modal; activating thread-reply fallback (F-16)");
                 // Clean up cached context on failure.
                 let mut ctx = state.pending_modal_contexts.lock().await;
                 ctx.remove(&callback_id);
+                // F-16/F-17: register thread-reply fallback when modal is unavailable.
+                let thread_ts_opt = message.map(|m| m.origin.ts.to_string());
+                let chan_id_opt = channel.map(|c| c.id.to_string());
+                if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
+                    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+                    crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                        thread_ts.clone(),
+                        tx,
+                        Arc::clone(&state.pending_thread_replies),
+                    )
+                    .await;
+                    // Post fallback instruction in the thread so the operator knows to reply.
+                    let fallback_msg = crate::slack::client::SlackMessage {
+                        channel: slack_morphism::prelude::SlackChannelId(chan_id),
+                        text: Some(
+                            "Modal unavailable \u{2014} please reply in this thread with your rejection reason.".to_owned()
+                        ),
+                        blocks: None,
+                        thread_ts: Some(slack_morphism::prelude::SlackTs(thread_ts)),
+                    };
+                    if let Err(post_err) = slack.enqueue(fallback_msg).await {
+                        warn!(%post_err, request_id, "failed to post approval thread-reply fallback message (F-16)");
+                    }
+                    // Spawn a task to wait for the rejection reason reply.
+                    let state_clone = Arc::clone(state);
+                    let request_id_owned = request_id.to_owned();
+                    let user_id_owned = user_id.to_owned();
+                    tokio::spawn(async move {
+                        match rx.await {
+                            Ok(reply_text) => {
+                                let approval_repo = ApprovalRepo::new(Arc::clone(&state_clone.db));
+                                if let Err(db_err) = approval_repo
+                                    .update_status(&request_id_owned, ApprovalStatus::Rejected)
+                                    .await
+                                {
+                                    warn!(
+                                        request_id = request_id_owned,
+                                        %db_err,
+                                        "thread-reply fallback: failed to update approval status in DB"
+                                    );
+                                }
+                                if let Some(ref logger) = state_clone.audit_logger {
+                                    let entry = AuditEntry::new(AuditEventType::Rejection)
+                                        .with_request_id(request_id_owned.clone())
+                                        .with_operator(user_id_owned.clone())
+                                        .with_reason(reply_text.clone());
+                                    if let Err(audit_err) = logger.log_entry(entry) {
+                                        warn!(
+                                            %audit_err,
+                                            "thread-reply fallback: audit log write failed"
+                                        );
+                                    }
+                                }
+                                if let Err(driver_err) = state_clone
+                                    .driver
+                                    .resolve_clearance(&request_id_owned, false, Some(reply_text))
+                                    .await
+                                {
+                                    warn!(
+                                        request_id = request_id_owned,
+                                        %driver_err,
+                                        "thread-reply fallback: failed to resolve clearance via driver"
+                                    );
+                                }
+                            }
+                            Err(_) => {
+                                warn!(
+                                    request_id = request_id_owned,
+                                    "approval thread-reply fallback oneshot dropped before reply received (F-16)"
+                                );
+                            }
+                        }
+                    });
+                    return Ok(());
+                }
                 return Err(format!("failed to open rejection reason modal: {err}"));
             }
         }

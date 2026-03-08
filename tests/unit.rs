@@ -42,6 +42,7 @@ mod unit {
     mod stall_detector_tests;
     mod stall_repo_tests;
     mod steering_repo_tests;
+    mod thread_reply_fallback;
     mod version_tests;
     mod workspace_mapping_tests;
 }

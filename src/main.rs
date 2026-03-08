@@ -276,6 +276,7 @@ async fn run(args: Cli) -> Result<()> {
         pending_prompts,
         pending_waits,
         pending_modal_contexts: Arc::default(),
+        pending_thread_replies: Arc::default(),
         stall_detectors: Some(StallDetectors::default()),
         ipc_auth_token,
         policy_cache,

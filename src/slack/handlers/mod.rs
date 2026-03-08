@@ -10,6 +10,7 @@ pub mod nudge;
 pub mod prompt;
 pub mod steer;
 pub mod task;
+pub mod thread_reply;
 pub mod wait;
 
 use crate::models::session::Session;
