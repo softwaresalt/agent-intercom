@@ -615,10 +615,18 @@ async fn finish_acp_session_start(
     // Perform the ACP handshake: initialize → result → initialized → session/new → prompt.
     let handshake_timeout = Duration::from_secs(state.config.acp.startup_timeout_seconds);
     let handshake_result = async {
-        handshake::send_initialize(&mut conn.stdin, session_id, workspace_root, workspace_name)
-            .await?;
-        handshake::wait_for_initialize_result(&mut conn.stdout, session_id, handshake_timeout)
-            .await?;
+        // F-13: send_initialize now returns the unique correlation ID so that
+        // wait_for_initialize_result can match the response precisely.
+        let init_id =
+            handshake::send_initialize(&mut conn.stdin, session_id, workspace_root, workspace_name)
+                .await?;
+        handshake::wait_for_initialize_result(
+            &mut conn.stdout,
+            session_id,
+            &init_id,
+            handshake_timeout,
+        )
+        .await?;
         handshake::send_initialized(&mut conn.stdin, session_id).await?;
         let agent_session_id = handshake::send_session_new(
             &mut conn.stdin,

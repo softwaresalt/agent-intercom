@@ -23,6 +23,7 @@ use std::sync::{atomic::AtomicU64, Arc};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 use crate::driver::AgentDriver;
 use crate::{AppError, Result};
@@ -49,9 +50,6 @@ type AgentSessionIdMap = Arc<Mutex<HashMap<String, String>>>;
 
 /// Shared map type alias for per-session outbound sequence counters.
 type SeqCounterMap = Arc<Mutex<HashMap<String, Arc<AtomicU64>>>>;
-
-/// Atomic counter for generating unique JSON-RPC request IDs.
-static PROMPT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 // ── AcpDriver ─────────────────────────────────────────────────────────────────
 
@@ -289,10 +287,9 @@ impl AgentDriver for AcpDriver {
                 )));
             };
 
-            let req_id = format!(
-                "intercom-prompt-{}",
-                PROMPT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            );
+            // F-13: generate a unique UUID-based correlation ID — no static
+            // counter that would collide across sessions or server restarts.
+            let req_id = format!("intercom-prompt-{}", Uuid::new_v4());
 
             let msg = json!({
                 "jsonrpc": "2.0",
@@ -424,10 +421,8 @@ impl AgentDriver for AcpDriver {
                 )));
             };
 
-            let req_id = format!(
-                "intercom-prompt-{}",
-                PROMPT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            );
+            // F-13: generate a unique UUID-based correlation ID.
+            let req_id = format!("intercom-prompt-{}", Uuid::new_v4());
 
             let msg = json!({
                 "jsonrpc": "2.0",

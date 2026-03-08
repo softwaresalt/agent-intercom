@@ -3,9 +3,11 @@
 //! Mounts a [`StreamableHttpService`] behind an axum router so that remote
 //! agents can connect via the MCP Streamable-HTTP transport (rmcp 0.13+).
 //!
-//! The `/mcp` endpoint accepts an optional `channel_id` query parameter
-//! (e.g. `/mcp?channel_id=C_WORKSPACE_CHANNEL`) so that each connected
-//! workspace can target a different Slack channel.
+//! The `/mcp` endpoint accepts an optional `workspace_id` query parameter
+//! (e.g. `/mcp?workspace_id=my-repo&session_id=<id>`) so that each connected
+//! workspace is routed to the correct Slack channel via the `[[workspace]]`
+//! mapping table in `config.toml`.  The legacy `channel_id` query parameter
+//! has been removed (F-10); clients must use `workspace_id` instead.
 //!
 //! The legacy `/sse` and `/message` endpoints return `410 Gone` to inform
 //! clients that they must upgrade to the `/mcp` endpoint.
@@ -110,30 +112,27 @@ async fn acp_session_guard(
 
 /// Pending URL parameters extracted by the middleware for the rmcp session factory.
 ///
-/// - `channel_id` routes Slack messages to the correct workspace channel (legacy).
-/// - `session_id` associates a spawned agent with a pre-created DB session.
-/// - `workspace_id` resolves to a channel via the `[[workspace]]` config mapping.
-type PendingParams = Arc<Mutex<(Option<String>, Option<String>, Option<String>)>>;
+/// F-10: only `session_id` and `workspace_id` are extracted from the request
+/// URI.  The legacy `channel_id` query parameter has been removed; channel
+/// routing is performed exclusively via the `[[workspace]]` mapping table.
+type PendingParams = Arc<Mutex<(Option<String>, Option<String>)>>;
 
 /// Update the shared pending-params slot from URL query parameters.
 ///
 /// Called by `ensure_accept_header` before the slot is read by the rmcp
-/// session factory closure.  Extracts `channel_id`, `session_id`, and
-/// `workspace_id` from the URI query string.
+/// session factory closure.  Extracts only `session_id` and `workspace_id`
+/// from the URI query string.  The legacy `channel_id` parameter is silently
+/// ignored (F-10).
 fn update_pending_from_uri(uri: &axum::http::Uri, pending: &PendingParams) {
-    let ch = extract_query_param(uri, "channel_id");
     let sid = extract_query_param(uri, "session_id");
     let ws = extract_query_param(uri, "workspace_id");
-    if ch.is_some() || sid.is_some() || ws.is_some() {
+    if sid.is_some() || ws.is_some() {
         if let Ok(mut guard) = pending.lock() {
-            if let Some(v) = ch {
+            if let Some(v) = sid {
                 guard.0 = Some(v);
             }
-            if let Some(v) = sid {
-                guard.1 = Some(v);
-            }
             if let Some(v) = ws {
-                guard.2 = Some(v);
+                guard.1 = Some(v);
             }
         }
     }
@@ -160,7 +159,7 @@ async fn ensure_accept_header(
     request: Request,
     next: Next,
 ) -> Response {
-    // Store channel_id and session_id from the URL so the factory can pick
+    // Store session_id and workspace_id from the URL so the factory can pick
     // them up when rmcp creates a new session.
     update_pending_from_uri(request.uri(), &pending);
     let method = request.method().clone();
@@ -405,8 +404,9 @@ async fn log_all_requests(request: Request, next: Next) -> Response {
 /// Start the HTTP/Streamable-HTTP MCP transport on `config.http_port`.
 ///
 /// Each MCP connection creates a fresh [`IntercomServer`] sharing the
-/// same [`AppState`].  Channel IDs are resolved via the `channel_id` query
-/// parameter on the `/mcp` endpoint.
+/// same [`AppState`].  Channel IDs are resolved via the `workspace_id` query
+/// parameter on the `/mcp` endpoint using the `[[workspace]]` mapping table.
+/// The legacy `channel_id` query parameter has been removed (F-10).
 ///
 /// The legacy `/sse` endpoint responds with `410 Gone`.
 ///
@@ -454,30 +454,31 @@ pub async fn serve_with_listener(
     let session_manager = Arc::new(LocalSessionManager::default());
 
     // Shared slot for passing query parameters from the middleware into the
-    // rmcp factory closure.  Tuple: (channel_id, session_id, workspace_id).
+    // rmcp factory closure.  Tuple: (session_id, workspace_id).  F-10:
+    // channel_id has been removed — channel routing is via workspace_id only.
     // The middleware writes values extracted from the URL query string; the
     // factory `.take()`s them when rmcp creates a new session (Initialize
     // without session ID).
-    let pending_params: PendingParams = Arc::new(Mutex::new((None, None, None)));
+    let pending_params: PendingParams = Arc::new(Mutex::new((None, None)));
 
     // Each inbound MCP connection gets its own IntercomServer instance.
     let state_for_factory = Arc::clone(&state);
     let pending_for_factory = Arc::clone(&pending_params);
     let service = StreamableHttpService::new(
         move || {
-            let (raw_channel, session, workspace) = {
+            let (session, workspace) = {
                 let mut guard = pending_for_factory
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                (guard.0.take(), guard.1.take(), guard.2.take())
+                (guard.0.take(), guard.1.take())
             };
 
-            // Resolve the effective channel ID.
+            // F-10: resolve the effective channel ID via workspace_id only.
             //
-            // FR-011/FR-012/FR-013: workspace_id takes precedence over
-            // channel_id.  If workspace_id is present but unknown, the
-            // session runs without a channel (local-only).  If workspace_id
-            // is absent the raw channel_id is used as-is (legacy compat).
+            // If workspace_id is present but not found in the hot-reloadable
+            // mapping table, the session runs without a Slack channel
+            // (local-only mode).  There is no fallback to a bare channel_id
+            // parameter — that parameter has been removed.
             let effective_channel: Option<String> = {
                 let mappings = state_for_factory
                     .workspace_mappings
@@ -499,22 +500,13 @@ pub async fn serve_with_listener(
                     }
                     resolved
                 } else {
-                    // No workspace_id → use raw channel_id (backward compat).
-                    if raw_channel.is_some() {
-                        warn!(
-                            channel_id = raw_channel.as_deref().unwrap_or(""),
-                            "bare ?channel_id= query parameter is deprecated; \
-                             configure [[workspace]] entries in config.toml \
-                             and connect with ?workspace_id= instead"
-                        );
-                    }
-                    raw_channel.clone()
+                    // No workspace_id → no channel (F-10: channel_id fallback removed).
+                    None
                 }
             };
 
             debug!(
                 workspace_id = workspace.as_deref().unwrap_or("<none>"),
-                channel_id = raw_channel.as_deref().unwrap_or("<none>"),
                 effective_channel = effective_channel.as_deref().unwrap_or("<none>"),
                 session_id = session.as_deref().unwrap_or("<none>"),
                 "creating IntercomServer for new MCP session"

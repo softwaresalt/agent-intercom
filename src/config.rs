@@ -553,45 +553,39 @@ impl GlobalConfig {
         Ok(())
     }
 
-    /// Resolve the effective Slack channel ID from connection parameters.
+    /// Resolve the effective Slack channel ID from the `workspace_id` parameter.
     ///
-    /// Implements FR-011, FR-012, and FR-013:
+    /// Implements F-10 (protocol hygiene): `workspace_id` is the **only**
+    /// routing mechanism.  The legacy `?channel_id=` query parameter has been
+    /// removed.
     ///
-    /// 1. If `workspace_id` is `Some(_)`, look it up in the `[[workspace]]`
-    ///    entries.
-    ///    - **Found** → return the mapped `channel_id`.
-    ///    - **Not found** → return `None` (`workspace_id` takes precedence;
-    ///      the bare `channel_id` parameter is **not** used as a fallback).
-    /// 2. If `workspace_id` is `None`, return `channel_id` unchanged
-    ///    (backward compatibility with legacy `?channel_id=` clients).
+    /// - If `workspace_id` is `Some(_)`, look it up in the `[[workspace]]`
+    ///   entries.
+    ///   - **Found** → return the mapped `channel_id`.
+    ///   - **Not found** → return `None` (the session runs without a channel).
+    /// - If `workspace_id` is `None` → return `None`.
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # let config = agent_intercom::config::GlobalConfig::from_toml_str("").unwrap();
     /// // workspace_id resolves to mapped channel
-    /// let ch = config.resolve_channel_id(Some("my-repo"), None);
+    /// let ch = config.resolve_channel_id(Some("my-repo"));
+    /// assert_eq!(ch, Some("C0123456789"));
     ///
-    /// // bare channel_id used as-is (legacy clients)
-    /// let ch = config.resolve_channel_id(None, Some("C0123456789"));
+    /// // no workspace_id → no channel
+    /// let ch = config.resolve_channel_id(None);
+    /// assert_eq!(ch, None);
     /// ```
     #[must_use]
-    pub fn resolve_channel_id<'a>(
-        &'a self,
-        workspace_id: Option<&str>,
-        channel_id: Option<&'a str>,
-    ) -> Option<&'a str> {
-        if let Some(ws_id) = workspace_id {
-            // workspace_id present → look up in the mapping table.
-            // If not found, return None (no silent fallback).
-            self.workspaces
-                .iter()
-                .find(|m| m.workspace_id == ws_id)
-                .map(|m| m.channel_id.as_str())
-        } else {
-            // No workspace_id → pass channel_id through unchanged.
-            channel_id
-        }
+    pub fn resolve_channel_id(&self, workspace_id: Option<&str>) -> Option<&str> {
+        let ws_id = workspace_id?;
+        // workspace_id present → look up in the mapping table.
+        // If not found, return None — no silent fallback to any channel_id param.
+        self.workspaces
+            .iter()
+            .find(|m| m.workspace_id == ws_id)
+            .map(|m| m.channel_id.as_str())
     }
 
     /// Resolve the workspace mapping associated with a Slack channel ID.

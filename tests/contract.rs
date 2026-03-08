@@ -12,6 +12,7 @@ mod contract {
     mod driver_contract_tests;
     mod forward_prompt_tests;
     mod heartbeat_tests;
+    mod mcp_no_channel_id_contract;
     mod mode_tests;
     mod ping_contract_tests;
     mod prompt_contract_tests;

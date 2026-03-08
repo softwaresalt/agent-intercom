@@ -18,6 +18,7 @@ mod unit {
     mod command_exec_tests;
     mod command_tests;
     mod config_tests;
+    mod correlation_id_uniqueness;
     mod credential_loading_tests;
     mod diff_tests;
     mod driver_trait_tests;
@@ -36,6 +37,7 @@ mod unit {
     mod session_repo_tests;
     mod session_routing_tests;
     mod slack_client_tests;
+    mod sse_workspace_only_routing;
     mod stall_consumer_tests;
     mod stall_detector_tests;
     mod stall_repo_tests;

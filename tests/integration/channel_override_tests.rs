@@ -1,11 +1,14 @@
 //! Integration tests for dynamic Slack channel selection (T204, US12).
 //!
 //! Validates:
-//! - `?channel_id=C_OVERRIDE` on SSE endpoint uses per-session override
-//! - Missing `?channel_id=` falls back to config default (when non-empty)
-//! - Empty `?channel_id=` falls back to config default
+//! - `with_channel_override` sets a per-session channel ID (programmatic API)
+//! - Missing override falls back to config default (when non-empty)
 //! - No channel configured at all returns `None`
 //! - Two concurrent sessions with different overrides route independently
+//!
+//! F-10 note: the legacy `?channel_id=` URL query parameter routing has been
+//! removed.  Use `?workspace_id=` for URL-based routing, or the programmatic
+//! `with_channel_override` / `with_overrides` API for test/internal use.
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -49,17 +49,17 @@ unconsumed in the database; simulate success and verify consumption.
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T001 [P] [US1] Unit test: successful delivery marks consumed — verify `mark_consumed` called after `send_prompt` succeeds (S001) in `tests/unit/acp_reader_steering_delivery.rs`
-- [ ] T002 [P] [US1] Unit test: failed delivery preserves unconsumed status — mock driver returns error, verify `mark_consumed` NOT called (S002) in `tests/unit/acp_reader_steering_delivery.rs`
-- [ ] T003 [P] [US1] Unit test: partial failure — 3 messages, middle fails, verify only failed one stays unconsumed (S003) in `tests/unit/acp_reader_steering_delivery.rs`
-- [ ] T004 [P] [US1] Unit test: retry succeeds on next flush — previously failed message delivered on second call (S004) in `tests/unit/acp_reader_steering_delivery.rs`
-- [ ] T005 [P] [US1] Unit test: empty queue is no-op (S006) in `tests/unit/acp_reader_steering_delivery.rs`
-- [ ] T006 [P] [US1] Unit test: mark_consumed failure after successful send — warning logged, message stays unconsumed (S007) in `tests/unit/acp_reader_steering_delivery.rs`
+- [x] T001 [P] [US1] Unit test: successful delivery marks consumed — verify `mark_consumed` called after `send_prompt` succeeds (S001) in `tests/unit/acp_reader_steering_delivery.rs`
+- [x] T002 [P] [US1] Unit test: failed delivery preserves unconsumed status — mock driver returns error, verify `mark_consumed` NOT called (S002) in `tests/unit/acp_reader_steering_delivery.rs`
+- [x] T003 [P] [US1] Unit test: partial failure — 3 messages, middle fails, verify only failed one stays unconsumed (S003) in `tests/unit/acp_reader_steering_delivery.rs`
+- [x] T004 [P] [US1] Unit test: retry succeeds on next flush — previously failed message delivered on second call (S004) in `tests/unit/acp_reader_steering_delivery.rs`
+- [x] T005 [P] [US1] Unit test: empty queue is no-op (S006) in `tests/unit/acp_reader_steering_delivery.rs`
+- [x] T006 [P] [US1] Unit test: mark_consumed failure after successful send — warning logged, message stays unconsumed (S007) in `tests/unit/acp_reader_steering_delivery.rs`
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Fix `flush_queued_messages` in `src/acp/reader.rs` — restructure loop so `mark_consumed` is only called when `send_prompt` returns `Ok`; on error, log warning and continue to next message
-- [ ] T008 [US1] Verify all existing tests pass after F-06 fix — run `cargo test`
+- [x] T007 [US1] Fix `flush_queued_messages` in `src/acp/reader.rs` — restructure loop so `mark_consumed` is only called when `send_prompt` returns `Ok`; on error, log warning and continue to next message
+- [x] T008 [US1] Verify all existing tests pass after F-06 fix — run `cargo test`
 
 **Checkpoint**: Steering messages survive delivery failures and retry on next reconnect.
 
@@ -78,18 +78,18 @@ unconsumed in the database; simulate success and verify consumption.
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T009 [P] [US2] Unit test: `count_active_acp` counts both `active` and `created` ACP sessions (S010) in `tests/unit/session_repo_count_acp.rs`
-- [ ] T010 [P] [US2] Unit test: `count_active_acp` excludes MCP sessions from count (S011) in `tests/unit/session_repo_count_acp.rs`
-- [ ] T011 [P] [US2] Unit test: `count_active_acp` excludes paused and terminated sessions (S015) in `tests/unit/session_repo_count_acp.rs`
-- [ ] T012 [P] [US2] Contract test: ACP session start rejected at capacity including `created` sessions (S008, S010) in `tests/contract/acp_capacity_contract.rs`
-- [ ] T013 [P] [US2] Contract test: ACP session start succeeds when only MCP sessions are active (S011) in `tests/contract/acp_capacity_contract.rs`
-- [ ] T014 [P] [US2] Unit test: max_sessions = 0 rejects all starts (S014) in `tests/unit/session_repo_count_acp.rs`
+- [x] T009 [P] [US2] Unit test: `count_active_acp` counts both `active` and `created` ACP sessions (S010) in `tests/unit/session_repo_count_acp.rs`
+- [x] T010 [P] [US2] Unit test: `count_active_acp` excludes MCP sessions from count (S011) in `tests/unit/session_repo_count_acp.rs`
+- [x] T011 [P] [US2] Unit test: `count_active_acp` excludes paused and terminated sessions (S015) in `tests/unit/session_repo_count_acp.rs`
+- [x] T012 [P] [US2] Contract test: ACP session start rejected at capacity including `created` sessions (S008, S010) in `tests/contract/acp_capacity_contract.rs`
+- [x] T013 [P] [US2] Contract test: ACP session start succeeds when only MCP sessions are active (S011) in `tests/contract/acp_capacity_contract.rs`
+- [x] T014 [P] [US2] Unit test: max_sessions = 0 rejects all starts (S014) in `tests/unit/session_repo_count_acp.rs`
 
 ### Implementation for User Story 2
 
-- [ ] T015 [US2] Add `count_active_acp()` method to `src/persistence/session_repo.rs` — query `WHERE (status = 'active' OR status = 'created') AND protocol_mode = 'acp'`
-- [ ] T016 [US2] Replace `repo.count_active()` with `repo.count_active_acp()` in `handle_acp_session_start` in `src/slack/commands.rs`
-- [ ] T017 [US2] Verify all existing tests pass after F-07 fix — run `cargo test`
+- [x] T015 [US2] Add `count_active_acp()` method to `src/persistence/session_repo.rs` — query `WHERE (status = 'active' OR status = 'created') AND protocol_mode = 'acp'`
+- [x] T016 [US2] Replace `repo.count_active()` with `repo.count_active_acp()` in `handle_acp_session_start` in `src/slack/commands.rs`
+- [x] T017 [US2] Verify all existing tests pass after F-07 fix — run `cargo test`
 
 **Checkpoint**: ACP capacity enforcement accurately counts initializing sessions and only ACP protocol.
 
@@ -109,34 +109,34 @@ ignored. Generate thousands of correlation IDs and verify zero collisions.
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T018 [P] [US5] Unit test: `update_pending_from_uri` only extracts `session_id` and `workspace_id` (S018, S019) in `tests/unit/sse_workspace_only_routing.rs`
-- [ ] T019 [P] [US5] Unit test: `workspace_id` resolves channel from mapping (S016) in `tests/unit/sse_workspace_only_routing.rs`
-- [ ] T020 [P] [US5] Unit test: unknown workspace_id logs warning, no channel (S020) in `tests/unit/sse_workspace_only_routing.rs`
-- [ ] T021 [P] [US5] Contract test: `/mcp?channel_id=C_DIRECT` — channel_id silently ignored (S018) in `tests/contract/mcp_no_channel_id_contract.rs`
-- [ ] T022 [P] [US5] Update existing `workspace_mapping_tests.rs` — remove/update tests that reference `channel_id` as fallback param in `tests/unit/workspace_mapping_tests.rs`
+- [x] T018 [P] [US5] Unit test: `update_pending_from_uri` only extracts `session_id` and `workspace_id` (S018, S019) in `tests/unit/sse_workspace_only_routing.rs`
+- [x] T019 [P] [US5] Unit test: `workspace_id` resolves channel from mapping (S016) in `tests/unit/sse_workspace_only_routing.rs`
+- [x] T020 [P] [US5] Unit test: unknown workspace_id logs warning, no channel (S020) in `tests/unit/sse_workspace_only_routing.rs`
+- [x] T021 [P] [US5] Contract test: `/mcp?channel_id=C_DIRECT` — channel_id silently ignored (S018) in `tests/contract/mcp_no_channel_id_contract.rs`
+- [x] T022 [P] [US5] Update existing `workspace_mapping_tests.rs` — remove/update tests that reference `channel_id` as fallback param in `tests/unit/workspace_mapping_tests.rs`
 
 ### Tests for User Story 5 — F-13 (correlation ID uniqueness) ⚠️
 
-- [ ] T023 [P] [US5] Unit test: handshake IDs match `intercom-{purpose}-{uuid}` pattern (S022) in `tests/unit/correlation_id_uniqueness.rs`
-- [ ] T024 [P] [US5] Unit test: runtime prompt IDs match UUID pattern (S023) in `tests/unit/correlation_id_uniqueness.rs`
-- [ ] T025 [P] [US5] Unit test: 10,000 IDs with zero collisions (S024) in `tests/unit/correlation_id_uniqueness.rs`
-- [ ] T026 [P] [US5] Unit test: concurrent sessions produce distinct IDs (S026) in `tests/unit/correlation_id_uniqueness.rs`
+- [x] T023 [P] [US5] Unit test: handshake IDs match `intercom-{purpose}-{uuid}` pattern (S022) in `tests/unit/correlation_id_uniqueness.rs`
+- [x] T024 [P] [US5] Unit test: runtime prompt IDs match UUID pattern (S023) in `tests/unit/correlation_id_uniqueness.rs`
+- [x] T025 [P] [US5] Unit test: 10,000 IDs with zero collisions (S024) in `tests/unit/correlation_id_uniqueness.rs`
+- [x] T026 [P] [US5] Unit test: concurrent sessions produce distinct IDs (S026) in `tests/unit/correlation_id_uniqueness.rs`
 
 ### Implementation for User Story 5 — F-10
 
-- [ ] T027 [US5] Remove `channel_id` extraction from `update_pending_from_uri()` in `src/mcp/sse.rs` — only extract `session_id` and `workspace_id`
-- [ ] T028 [US5] Change `PendingParams` type from 3-tuple to 2-tuple `(Option<String>, Option<String>)` for `(session_id, workspace_id)` in `src/mcp/sse.rs`
-- [ ] T029 [US5] Remove `raw_channel` fallback branch from factory closure in `src/mcp/sse.rs` — resolve channel exclusively via workspace mappings
-- [ ] T030 [US5] Update module-level doc comment in `src/mcp/sse.rs` — document `workspace_id` as the only routing query parameter
-- [ ] T031 [US5] Update `resolve_channel_id()` signature in `src/config.rs` — remove `channel_id` fallback parameter
-- [ ] T032 [US5] Update `tests/unit/workspace_routing_tests.rs` — remove `channel_id` as second arg in `resolve_channel_id` calls
-- [ ] T033 [US5] Update `tests/integration/channel_override_tests.rs` — rewrite for workspace_id-only routing or remove channel_id-specific tests
+- [x] T027 [US5] Remove `channel_id` extraction from `update_pending_from_uri()` in `src/mcp/sse.rs` — only extract `session_id` and `workspace_id`
+- [x] T028 [US5] Change `PendingParams` type from 3-tuple to 2-tuple `(Option<String>, Option<String>)` for `(session_id, workspace_id)` in `src/mcp/sse.rs`
+- [x] T029 [US5] Remove `raw_channel` fallback branch from factory closure in `src/mcp/sse.rs` — resolve channel exclusively via workspace mappings
+- [x] T030 [US5] Update module-level doc comment in `src/mcp/sse.rs` — document `workspace_id` as the only routing query parameter
+- [x] T031 [US5] Update `resolve_channel_id()` signature in `src/config.rs` — remove `channel_id` fallback parameter
+- [x] T032 [US5] Update `tests/unit/workspace_routing_tests.rs` — remove `channel_id` as second arg in `resolve_channel_id` calls
+- [x] T033 [US5] Update `tests/integration/channel_override_tests.rs` — rewrite for workspace_id-only routing or remove channel_id-specific tests
 
 ### Implementation for User Story 5 — F-13
 
-- [ ] T034 [US5] Replace static `INIT_ID`, `SESSION_NEW_ID`, `PROMPT_ID` constants with UUID-based generation in `src/acp/handshake.rs` — use `format!("intercom-{purpose}-{}", Uuid::new_v4())`
-- [ ] T035 [US5] Remove `PROMPT_COUNTER` static and replace with UUID-based generation in `src/driver/acp_driver.rs` — all `resolve_clearance` and `resolve_prompt` calls use `Uuid::new_v4()`
-- [ ] T036 [US5] Verify all existing tests pass after F-10 and F-13 changes — run `cargo test`
+- [x] T034 [US5] Replace static `INIT_ID`, `SESSION_NEW_ID`, `PROMPT_ID` constants with UUID-based generation in `src/acp/handshake.rs` — use `format!("intercom-{purpose}-{}", Uuid::new_v4())`
+- [x] T035 [US5] Remove `PROMPT_COUNTER` static and replace with UUID-based generation in `src/driver/acp_driver.rs` — all `resolve_clearance` and `resolve_prompt` calls use `Uuid::new_v4()`
+- [x] T036 [US5] Verify all existing tests pass after F-10 and F-13 changes — run `cargo test`
 
 **Checkpoint**: MCP endpoint accepts only `workspace_id`; all correlation IDs are UUID-based with zero collision risk.
 
