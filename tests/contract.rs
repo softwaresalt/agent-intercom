@@ -2,6 +2,7 @@
 
 mod contract {
     mod accept_diff_tests;
+    mod acp_capacity_contract;
     mod acp_driver_contract_tests;
     mod acp_event_contract;
     mod ask_approval_contract_tests;

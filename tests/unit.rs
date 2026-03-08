@@ -32,6 +32,7 @@ mod unit {
     mod policy_tests;
     mod prompt_repo_tests;
     mod session_model_tests;
+    mod session_repo_count_acp;
     mod session_repo_tests;
     mod session_routing_tests;
     mod slack_client_tests;
