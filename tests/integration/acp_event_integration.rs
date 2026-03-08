@@ -577,6 +577,11 @@ async fn clearance_db_persistence_precedes_driver_registration() {
 
 /// S052 — When all `mpsc::Sender` handles are dropped, `rx.recv()` returns
 /// `None`, which signals the event consumer to exit its loop gracefully.
+///
+/// **Scope note**: `run_acp_event_consumer` is private and requires full
+/// `AppState` + `SlackService`. These tests validate the Tokio primitives the
+/// consumer relies on. A separate integration test that spawns the actual
+/// consumer function would require extracting it to `pub(crate)` — deferred.
 #[tokio::test]
 async fn mpsc_sender_dropped_causes_recv_to_return_none() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<u32>(1);
@@ -593,6 +598,9 @@ async fn mpsc_sender_dropped_causes_recv_to_return_none() {
 /// S053 — When the `CancellationToken` is cancelled, `.cancelled()` becomes
 /// ready. In the `tokio::select!` loop, this is the `biased` first branch,
 /// causing the consumer to exit cleanly.
+///
+/// **Scope note**: Same as S052 — tests Tokio primitives that the production
+/// consumer loop depends on. The `biased` priority ordering is verified here.
 #[tokio::test]
 async fn cancellation_token_becomes_ready_when_cancelled() {
     use tokio_util::sync::CancellationToken;
@@ -607,7 +615,7 @@ async fn cancellation_token_becomes_ready_when_cancelled() {
         ct.is_cancelled(),
         "S053: cancelled token must be ready — signals consumer loop exit"
     );
-    // Also verify the future resolves immediately.
+    // Also verify the future resolves immediately (biased first-branch behavior).
     tokio::select! {
         biased;
         () = ct.cancelled() => {},
