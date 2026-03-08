@@ -467,6 +467,31 @@ impl SessionRepo {
         Ok(count)
     }
 
+    /// Count ACP sessions that occupy a capacity slot.
+    ///
+    /// Counts sessions where `protocol_mode = 'acp'` AND `status` is either
+    /// `'active'` or `'created'`.  Including `created` prevents double-booking
+    /// during the handshake window (F-07): a session is inserted with status
+    /// `created` before the background task completes, so it must already be
+    /// counted against the limit.  MCP sessions are excluded because they use
+    /// an independent capacity pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the query fails.
+    pub async fn count_active_acp(&self) -> Result<i64> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS cnt FROM session \
+             WHERE (status = 'active' OR status = 'created') \
+             AND protocol_mode = 'acp'",
+        )
+        .fetch_one(self.db.as_ref())
+        .await?;
+
+        let count: i64 = row.get("cnt");
+        Ok(count)
+    }
+
     /// Retrieve the most recently interrupted session.
     ///
     /// # Errors

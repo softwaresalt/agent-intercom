@@ -480,8 +480,9 @@ async fn handle_acp_session_start(
 
     let repo = SessionRepo::new(Arc::clone(&state.db));
 
-    // S024: enforce max concurrent ACP sessions.
-    let active_count = repo.count_active().await?;
+    // S024: enforce max concurrent ACP sessions, counting both `active` and
+    // `created` (initialising) ACP sessions and excluding MCP sessions (F-07).
+    let active_count = repo.count_active_acp().await?;
     let max = i64::try_from(state.config.acp.max_sessions).unwrap_or(i64::MAX);
     if active_count >= max {
         return Err(crate::AppError::Acp(format!(
