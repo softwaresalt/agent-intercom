@@ -165,22 +165,22 @@ operator actions complete successfully.
 
 #### Tests (conditional)
 
-- [ ] T039 [P] [US4] Unit test: modal failure triggers thread-reply fallback message (S029) in `tests/unit/thread_reply_fallback.rs`
-- [ ] T040 [P] [US4] Unit test: thread reply captured and routed to waiting oneshot (S030) in `tests/unit/thread_reply_fallback.rs`
-- [ ] T041 [P] [US4] Unit test: acknowledgment posted after reply capture (S031) in `tests/unit/thread_reply_fallback.rs`
-- [ ] T042 [P] [US4] Unit test: multiple replies — only first captured (S032) in `tests/unit/thread_reply_fallback.rs`
-- [ ] T043 [P] [US4] Unit test: unauthorized user reply rejected (S033) in `tests/unit/thread_reply_fallback.rs`
-- [ ] T044 [P] [US4] Integration test: full fallback flow for prompt refine (S029→S030→S031) in `tests/integration/thread_reply_integration.rs`
+- [x] T039 [P] [US4] Unit test: modal failure triggers thread-reply fallback message (S029) in `tests/unit/thread_reply_fallback.rs`
+- [x] T040 [P] [US4] Unit test: thread reply captured and routed to waiting oneshot (S030) in `tests/unit/thread_reply_fallback.rs`
+- [x] T041 [P] [US4] Unit test: acknowledgment posted after reply capture (S031) in `tests/unit/thread_reply_fallback.rs`
+- [x] T042 [P] [US4] Unit test: multiple replies — only first captured (S032) in `tests/unit/thread_reply_fallback.rs`
+- [x] T043 [P] [US4] Unit test: unauthorized user reply rejected (S033) in `tests/unit/thread_reply_fallback.rs`
+- [x] T044 [P] [US4] Integration test: full fallback flow for prompt refine (S029→S030→S031) in `tests/integration/thread_reply_integration.rs`
 
 #### Implementation (conditional)
 
-- [ ] T045 [US4] Add `pending_thread_replies` map to `AppState` in `src/mcp/handler.rs`
-- [ ] T046 [US4] Create `src/slack/handlers/thread_reply.rs` — handler for detecting and routing thread replies to waiting interactions
-- [ ] T047 [US4] Add thread-reply fallback path to `handle_prompt_action` in `src/slack/handlers/prompt.rs` — when `open_modal` fails, post fallback message and register pending reply
-- [ ] T048 [US4] Add thread-reply fallback path to `handle_wait_action` in `src/slack/handlers/wait.rs` — mirror prompt fallback logic
-- [ ] T049 [US4] Add thread-reply fallback path to `handle_approval_action` in `src/slack/handlers/approval.rs` — for rejection reason input
-- [ ] T050 [US4] Subscribe to `message` events in Slack Socket Mode — route thread replies to `thread_reply::handle_thread_reply` in `src/main.rs`
-- [ ] T051 [US4] Verify all existing tests pass after F-16/F-17 changes — run `cargo test`
+- [x] T045 [US4] Add `pending_thread_replies` map to `AppState` in `src/mcp/handler.rs`
+- [x] T046 [US4] Create `src/slack/handlers/thread_reply.rs` — handler for detecting and routing thread replies to waiting interactions
+- [x] T047 [US4] Add thread-reply fallback path to `handle_prompt_action` in `src/slack/handlers/prompt.rs` — when `open_modal` fails, post fallback message and register pending reply
+- [x] T048 [US4] Add thread-reply fallback path to `handle_wait_action` in `src/slack/handlers/wait.rs` — mirror prompt fallback logic
+- [x] T049 [US4] Add thread-reply fallback path to `handle_approval_action` in `src/slack/handlers/approval.rs` — for rejection reason input
+- [x] T050 [US4] Subscribe to `message` events in Slack Socket Mode — route thread replies to `thread_reply::handle_thread_reply` in `src/main.rs`
+- [x] T051 [US4] Verify all existing tests pass after F-16/F-17 changes — run `cargo test`
 
 **Checkpoint**: Mobile operators can complete all approval and prompt interactions via Slack iOS.
 
