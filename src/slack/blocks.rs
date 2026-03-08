@@ -468,7 +468,7 @@ pub fn build_prompt_blocks(
     let label = prompt_type_label(prompt_type);
     result.push(text_section(&format!("{icon} *{label} Prompt*")));
 
-    result.push(text_section(prompt_text));
+    result.push(text_section(&slack_escape(prompt_text)));
 
     let mut context_parts = Vec::new();
     if let Some(secs) = elapsed_seconds {
