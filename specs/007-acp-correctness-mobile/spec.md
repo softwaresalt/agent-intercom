@@ -84,7 +84,7 @@ Server administrators and connected agents operate with confidence that the syst
 
 **Acceptance Scenarios**:
 
-1. **Given** a connection request provides both a workspace identifier and a channel identifier as parameters, **When** the connection is established, **Then** the system logs a deprecation warning indicating the ambiguous configuration and documents which parameter takes precedence.
+1. **Given** a connection request provides a `channel_id` query parameter (with or without `workspace_id`), **When** the connection is established, **Then** the `channel_id` parameter is silently ignored and only `workspace_id` is used for routing.
 2. **Given** multiple concurrent ACP sessions are active, **When** each session exchanges prompt messages with the server, **Then** no two sessions share a prompt correlation identifier, and responses are always delivered to the correct session.
 3. **Given** the server restarts and ACP sessions reconnect, **When** prompt exchanges resume, **Then** new correlation IDs do not collide with IDs that may have been used in the previous server instance.
 
@@ -106,9 +106,9 @@ Server administrators and connected agents operate with confidence that the syst
 - **FR-002**: System MUST preserve unconsumed steering messages in the queue when delivery fails, making them available for subsequent delivery attempts.
 - **FR-003**: System MUST count sessions in the `created` (initializing) state against the ACP concurrent session limit.
 - **FR-004**: System MUST apply the ACP session limit only to ACP protocol sessions, not to MCP or other connection types.
-- **FR-005**: System MUST resolve the workspace root for a new ACP session from the current live workspace mapping configuration, not from the startup snapshot.
-- **FR-006**: System MUST fall back to the global default workspace root when no channel-to-workspace mapping matches the starting session's channel.
-- **FR-007**: System MUST emit a deprecation warning when a connection request supplies both workspace and channel identifier parameters simultaneously.
+- **FR-005**: *(Satisfied by existing implementation — T154 hot-reload lock in `handle_acp_session_start`)* System MUST resolve the workspace root for a new ACP session from the current live workspace mapping configuration, not from the startup snapshot.
+- **FR-006**: *(Satisfied by existing implementation — fallback to `default_workspace_root` in `handle_acp_session_start`)* System MUST fall back to the global default workspace root when no channel-to-workspace mapping matches the starting session's channel.
+- **FR-007**: System MUST NOT accept `channel_id` as a query parameter on the `/mcp` endpoint. Only `workspace_id` is supported for connection routing. Legacy `channel_id` query parameter support is removed.
 - **FR-008**: System MUST generate prompt correlation identifiers that are unique across all concurrent sessions and across server restarts.
 - **FR-009**: System MUST research and document whether Slack modal dialogs function correctly on the iOS Slack client, specifically for the `plain_text_input` element used in operator input flows.
 - **FR-010**: System MUST provide a non-modal input mechanism for all operator interactions that currently require text input, activated when modal dialogs are unavailable or when the mobile client surface is detected.
@@ -133,7 +133,7 @@ Server administrators and connected agents operate with confidence that the syst
 - **SC-003**: New ACP sessions always operate in the workspace directory that corresponds to the live configuration at session-start time, not the configuration at server-start time.
 - **SC-004**: All operator approval and prompt interactions on the feature are completable end-to-end using only the Slack iOS client.
 - **SC-005**: Prompt correlation identifiers are unique across 10,000 concurrent simulated prompt exchanges with zero collisions.
-- **SC-006**: Ambiguous dual-parameter connections always produce a detectable deprecation warning in server logs.
+- **SC-006**: The `/mcp` endpoint does not accept `channel_id` as a query parameter; only `workspace_id` is supported for connection routing.
 - **SC-007**: All existing 996+ automated tests continue to pass after changes; new tests are added covering each corrected behavior and the mobile fallback path.
 
 ## Assumptions
