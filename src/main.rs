@@ -1033,10 +1033,13 @@ async fn handle_clearance_requested(
             (None, "new_file".to_owned())
         }
     };
-    let effective_file_path = validated_path.as_deref().map_or_else(
-        || file_path.to_owned(),
-        |p| p.to_string_lossy().into_owned(),
-    );
+    let effective_file_path = match &validated_path {
+        Some(abs_path) => abs_path.strip_prefix(workspace_root).map_or_else(
+            |_| file_path.to_owned(),
+            |rel| rel.to_string_lossy().into_owned(),
+        ),
+        None => file_path.to_owned(),
+    };
 
     // Step 4: construct the approval request.
     // Use the agent's `request_id` as `approval.id` so that:
@@ -1112,37 +1115,18 @@ async fn handle_clearance_requested(
     );
     message_blocks.push(blocks::approval_buttons(&approval_id));
 
-    // RI-001: mirror the MCP ask_approval behaviour — upload large diffs as a
-    // Slack file attachment so operators can review the full diff content.
-    // The shared build_approval_blocks renders a placeholder message ("Diff
-    // uploaded as file") for diffs ≥ INLINE_DIFF_THRESHOLD; this upload
-    // fulfils that promise in the ACP event path.
-    let diff_line_count = diff_content.lines().count();
-    if diff_line_count >= blocks::INLINE_DIFF_THRESHOLD {
-        let sanitized = effective_file_path.replace(['/', '.', '\\'], "_");
-        let filename = format!("{sanitized}.diff.txt");
-        if let Err(err) = slack
-            .upload_file(
-                SlackChannelId(channel_id.clone()),
-                &filename,
-                &diff_content,
-                session_thread_ts.clone(),
-                Some("text"),
-            )
-            .await
-        {
-            warn!(%err, session_id, approval_id, "failed to upload diff file to Slack");
-        }
-    }
-
+    // C5: post the approval message first so we have a Slack `ts` to use as
+    // the thread anchor for the diff file upload.  Previously the upload ran
+    // before the post, which left the uploaded file detached from the session
+    // thread when `session_thread_ts` was `None`.
     let msg = SlackMessage {
-        channel: SlackChannelId(channel_id),
+        channel: SlackChannelId(channel_id.clone()),
         text: Some(format!("\u{1f4cb} ACP Approval Request: {title}")),
         blocks: Some(message_blocks),
         thread_ts: session_thread_ts.clone(),
     };
 
-    match slack.post_message_direct(msg).await {
+    let posted_ts = match slack.post_message_direct(msg).await {
         Ok(ts) => {
             // If this session had no thread root yet, use the approval post as root.
             if session_thread_ts.is_none() {
@@ -1154,9 +1138,33 @@ async fn handle_clearance_requested(
             if let Err(err) = approval_repo.update_slack_ts(&approval_id, &ts.0).await {
                 warn!(%err, approval_id, "failed to record slack_ts on clearance approval");
             }
+            Some(ts)
         }
         Err(err) => {
             warn!(%err, session_id, approval_id, "failed to post clearance approval message to Slack");
+            None
+        }
+    };
+
+    // RI-001 / C5: upload large diffs after posting so the file is attached to
+    // the session thread (using the ts we just obtained, falling back to the
+    // pre-existing session thread ts).
+    let diff_line_count = diff_content.lines().count();
+    if diff_line_count > blocks::INLINE_DIFF_THRESHOLD {
+        let upload_thread_ts = posted_ts.or(session_thread_ts);
+        let sanitized = effective_file_path.replace(['/', '.', '\\'], "_");
+        let filename = format!("{sanitized}.diff.txt");
+        if let Err(err) = slack
+            .upload_file(
+                SlackChannelId(channel_id),
+                &filename,
+                &diff_content,
+                upload_thread_ts,
+                Some("text"),
+            )
+            .await
+        {
+            warn!(%err, session_id, approval_id, "failed to upload diff file to Slack");
         }
     }
 }
@@ -1255,12 +1263,14 @@ async fn handle_prompt_forwarded(
 
     let session_thread_ts = session.thread_ts.as_deref().map(|s| SlackTs(s.to_owned()));
 
+    let prompt_preview = blocks::truncate_text(prompt_text, 160);
     let msg = SlackMessage {
         channel: SlackChannelId(channel_id),
         text: Some(format!(
-            "{} ACP Prompt: {}",
+            "{} ACP Prompt: {} \u{2014} {}",
             blocks::prompt_type_icon(prompt_type),
             blocks::prompt_type_label(prompt_type),
+            prompt_preview,
         )),
         blocks: Some(message_blocks),
         thread_ts: session_thread_ts.clone(),

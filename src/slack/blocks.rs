@@ -388,16 +388,31 @@ pub fn session_ended_blocks(session: &Session, reason: &str) -> Vec<SlackBlock> 
 
 /// Maximum number of diff lines to render inline in a Slack block.
 ///
-/// Diffs longer than this threshold are replaced with a line-count indicator.
+/// Diffs with at most this many lines are rendered inline; diffs with more
+/// lines are replaced with a line-count indicator and uploaded as a file
+/// snippet by the caller.
 pub const INLINE_DIFF_THRESHOLD: usize = 20;
+
+/// Escape Slack mrkdwn special characters in a user-supplied string.
+///
+/// Slack renders `&`, `<`, and `>` as HTML entities / link syntax in mrkdwn
+/// fields. This function escapes those characters so agent-supplied titles and
+/// descriptions are displayed as literal text rather than as links or mentions.
+#[must_use]
+pub fn slack_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
 
 /// Build Slack Block Kit blocks for an approval request message.
 ///
 /// Produces a header section with title, file path, and risk badge; an
 /// optional description section; and either an inline diff code block (for
-/// diffs under `INLINE_DIFF_THRESHOLD` lines) or a line-count indicator.
-/// Action buttons are **not** included — callers append `approval_buttons`
-/// separately so both MCP and ACP paths control button placement.
+/// diffs with at most `INLINE_DIFF_THRESHOLD` lines) or a line-count
+/// indicator. Action buttons are **not** included — callers append
+/// `approval_buttons` separately so both MCP and ACP paths control button
+/// placement.
 #[must_use]
 pub fn build_approval_blocks(
     title: &str,
@@ -413,16 +428,17 @@ pub fn build_approval_blocks(
         RiskLevel::High => "\u{1f7e1}",
         RiskLevel::Critical => "\u{1f534}",
     };
+    let escaped_title = slack_escape(title);
     result.push(text_section(&format!(
-        "{risk_emoji} *{title}*\n\u{1f4c4} `{file_path}` | Risk: *{risk_level:?}*"
+        "{risk_emoji} *{escaped_title}*\n\u{1f4c4} `{file_path}` | Risk: *{risk_level:?}*"
     )));
 
     if let Some(desc) = description {
-        result.push(text_section(desc));
+        result.push(text_section(&slack_escape(desc)));
     }
 
     let diff_line_count = diff.lines().count();
-    if diff_line_count < INLINE_DIFF_THRESHOLD {
+    if diff_line_count <= INLINE_DIFF_THRESHOLD {
         result.push(diff_section(diff));
     } else {
         result.push(text_section(&format!(

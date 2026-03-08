@@ -224,7 +224,7 @@ pub async fn handle(
 
             let diff_line_count = input.diff.lines().count();
 
-            if diff_line_count >= blocks::INLINE_DIFF_THRESHOLD {
+            if diff_line_count > blocks::INLINE_DIFF_THRESHOLD {
                 // Upload large diff as a file snippet.  Pass snippet_type
                 // "text" so Slack pre-classifies the file before its content
                 // scanner runs, preventing the "Binary" label.
