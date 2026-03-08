@@ -1095,14 +1095,45 @@ async fn handle_clearance_requested(
 
     let session_thread_ts = session.thread_ts.as_deref().map(|s| SlackTs(s.to_owned()));
 
+    // RI-002: treat empty description as absent so build_approval_blocks does
+    // not render a blank section block in the Slack message.
+    let description_opt = if description.is_empty() {
+        None
+    } else {
+        Some(description)
+    };
+
     let mut message_blocks = blocks::build_approval_blocks(
         title,
-        Some(description),
+        description_opt,
         &diff_content,
         &effective_file_path,
         risk_level,
     );
     message_blocks.push(blocks::approval_buttons(&approval_id));
+
+    // RI-001: mirror the MCP ask_approval behaviour — upload large diffs as a
+    // Slack file attachment so operators can review the full diff content.
+    // The shared build_approval_blocks renders a placeholder message ("Diff
+    // uploaded as file") for diffs ≥ INLINE_DIFF_THRESHOLD; this upload
+    // fulfils that promise in the ACP event path.
+    let diff_line_count = diff_content.lines().count();
+    if diff_line_count >= blocks::INLINE_DIFF_THRESHOLD {
+        let sanitized = effective_file_path.replace(['/', '.', '\\'], "_");
+        let filename = format!("{sanitized}.diff.txt");
+        if let Err(err) = slack
+            .upload_file(
+                SlackChannelId(channel_id.clone()),
+                &filename,
+                &diff_content,
+                session_thread_ts.clone(),
+                Some("text"),
+            )
+            .await
+        {
+            warn!(%err, session_id, approval_id, "failed to upload diff file to Slack");
+        }
+    }
 
     let msg = SlackMessage {
         channel: SlackChannelId(channel_id),
