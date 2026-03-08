@@ -111,7 +111,15 @@ pub async fn handle_wait_action(
                 let mut ctx = state.pending_modal_contexts.lock().await;
                 ctx.remove(&callback_id);
                 // F-16/F-17: register thread-reply fallback when modal is unavailable.
-                let thread_ts_opt = message.map(|m| m.origin.ts.to_string());
+                // Use the parent thread_ts (root of the Slack thread) as the map key so
+                // that incoming replies, which report thread_ts = root, find the entry.
+                // Falls back to origin.ts when the button message IS the thread root.
+                let thread_ts_opt = message.map(|m| {
+                    m.origin
+                        .thread_ts
+                        .as_ref()
+                        .map_or_else(|| m.origin.ts.0.clone(), |ts| ts.0.clone())
+                });
                 let chan_id_opt = channel.map(|c| c.id.to_string());
                 if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
                     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
