@@ -10,6 +10,11 @@ mod unit {
     mod ask_approval_tests;
     mod audit_tests;
     mod audit_writer_tests;
+    mod blocks_approval_tests;
+    mod blocks_misc_tests;
+    mod blocks_prompt_tests;
+    mod blocks_session_tests;
+    mod blocks_stall_tests;
     mod blocks_tests;
     mod checkpoint_tests;
     mod child_monitor_tests;
