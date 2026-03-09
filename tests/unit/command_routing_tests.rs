@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::mcp::handler::AppState;
@@ -18,6 +17,7 @@ use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
 use agent_intercom::slack::commands::dispatch_command;
+use tokio::sync::Mutex;
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -155,14 +155,7 @@ async fn mcp_mode_steer_command_accepted() {
             .expect("activate");
     }
 
-    let result = dispatch_command(
-        "steer",
-        &["focus", "on", "tests"],
-        user,
-        "C_TEST",
-        &state,
-    )
-    .await;
+    let result = dispatch_command("steer", &["focus", "on", "tests"], user, "C_TEST", &state).await;
 
     assert!(
         result.is_ok(),
@@ -183,14 +176,7 @@ async fn session_start_rejected_in_mcp_mode_with_mode_mismatch_message() {
 
     let state = app_state_with_mode(root, user, ServerMode::Mcp).await;
 
-    let result = dispatch_command(
-        "session-start",
-        &["test prompt"],
-        user,
-        "C_TEST",
-        &state,
-    )
-    .await;
+    let result = dispatch_command("session-start", &["test prompt"], user, "C_TEST", &state).await;
 
     assert!(
         result.is_ok(),
@@ -395,7 +381,10 @@ async fn unknown_command_returns_descriptive_message() {
 
     let result = dispatch_command("definitely-unknown-cmd", &[], user, "C_TEST", &state).await;
 
-    assert!(result.is_ok(), "unknown command must return Ok with error msg");
+    assert!(
+        result.is_ok(),
+        "unknown command must return Ok with error msg"
+    );
     let msg = result.expect("Ok response");
     assert!(
         msg.contains("Unknown") || msg.contains("unknown"),

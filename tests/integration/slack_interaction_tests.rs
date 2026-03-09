@@ -23,7 +23,7 @@ use tokio::sync::{oneshot, Mutex};
 
 use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::mcp::handler::{
-    ApprovalResponse, AppState, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
+    AppState, ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
     WaitResponse,
 };
 use agent_intercom::mode::ServerMode;
@@ -127,7 +127,10 @@ async fn app_state_with_maps(
 }
 
 /// Create a synthetic `SlackInteractionActionInfo` for testing.
-fn make_action(action_id: &str, value: &str) -> slack_morphism::prelude::SlackInteractionActionInfo {
+fn make_action(
+    action_id: &str,
+    value: &str,
+) -> slack_morphism::prelude::SlackInteractionActionInfo {
     slack_morphism::prelude::SlackInteractionActionInfo::from(SlackInteractionActionInfoInit {
         action_type: SlackActionType("button".into()),
         action_id: SlackActionId(action_id.into()),
@@ -141,11 +144,7 @@ fn no_trigger() -> SlackTriggerId {
 }
 
 /// Create an active session owned by `user_id` in the DB.
-async fn create_session(
-    db: &sqlx::SqlitePool,
-    user_id: &str,
-    workspace_root: &str,
-) -> Session {
+async fn create_session(db: &sqlx::SqlitePool, user_id: &str, workspace_root: &str) -> Session {
     let repo = SessionRepo::new(Arc::new(db.clone()));
     let session = Session::new(
         user_id.into(),
@@ -188,7 +187,10 @@ async fn create_prompt(db: &sqlx::SqlitePool, session_id: &str) -> ContinuationP
 }
 
 /// Create a `StallAlert` linked to a session in the DB.
-async fn create_stall_alert(db: &sqlx::SqlitePool, session_id: &str) -> agent_intercom::models::stall::StallAlert {
+async fn create_stall_alert(
+    db: &sqlx::SqlitePool,
+    session_id: &str,
+) -> agent_intercom::models::stall::StallAlert {
     let repo = StallAlertRepo::new(Arc::new(db.clone()));
     let alert = StallAlert::new(session_id.to_owned(), None, Utc::now(), 60, None);
     repo.create(&alert).await.expect("create stall alert")
@@ -298,7 +300,10 @@ async fn simulated_approval_reject_with_no_slack_returns_ok_and_defers_resolutio
     )
     .await;
 
-    assert!(result.is_ok(), "approve_reject must return Ok when slack is None");
+    assert!(
+        result.is_ok(),
+        "approve_reject must return Ok when slack is None"
+    );
 
     // Oneshot must NOT be resolved immediately — it is pending the modal.
     let immediate = rx.try_recv();
@@ -333,15 +338,9 @@ async fn simulated_prompt_continue_resolves_oneshot_and_updates_db() {
         .insert(prompt_id.clone(), tx);
 
     let action = make_action("prompt_continue", &prompt_id);
-    let result = handlers::prompt::handle_prompt_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let result =
+        handlers::prompt::handle_prompt_action(&action, user, &no_trigger(), None, None, &state)
+            .await;
 
     assert!(result.is_ok(), "prompt_continue must return Ok: {result:?}");
 
@@ -351,7 +350,10 @@ async fn simulated_prompt_continue_resolves_oneshot_and_updates_db() {
         .expect("oneshot must not be dropped");
 
     assert_eq!(response.decision, "continue", "decision must be 'continue'");
-    assert!(response.instruction.is_none(), "no instruction for continue");
+    assert!(
+        response.instruction.is_none(),
+        "no instruction for continue"
+    );
 
     // DB record must show Continue decision.
     let repo = PromptRepo::new(Arc::clone(&state.db));
@@ -391,15 +393,9 @@ async fn simulated_prompt_stop_resolves_oneshot_and_updates_db() {
         .insert(prompt_id.clone(), tx);
 
     let action = make_action("prompt_stop", &prompt_id);
-    let result = handlers::prompt::handle_prompt_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let result =
+        handlers::prompt::handle_prompt_action(&action, user, &no_trigger(), None, None, &state)
+            .await;
 
     assert!(result.is_ok(), "prompt_stop must return Ok: {result:?}");
 
@@ -441,11 +437,8 @@ async fn simulated_stall_nudge_increments_db_counter() {
 
     let action = make_action("stall_nudge", &alert_id);
     let result = handlers::nudge::handle_nudge_action(
-        &action,
-        user,
-        None, // no Slack channel — slack = None
-        None,
-        &state,
+        &action, user, None, // no Slack channel — slack = None
+        None, &state,
     )
     .await;
 
@@ -458,7 +451,10 @@ async fn simulated_stall_nudge_increments_db_counter() {
         .await
         .expect("db query")
         .expect("alert must exist");
-    assert_eq!(updated.nudge_count, 1, "nudge_count must be 1 after one nudge");
+    assert_eq!(
+        updated.nudge_count, 1,
+        "nudge_count must be 1 after one nudge"
+    );
     assert_eq!(
         updated.status,
         StallAlertStatus::Nudged,
@@ -491,15 +487,8 @@ async fn simulated_wait_resume_resolves_oneshot() {
         .insert(session_id.clone(), tx);
 
     let action = make_action("wait_resume", &session_id);
-    let result = handlers::wait::handle_wait_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let result =
+        handlers::wait::handle_wait_action(&action, user, &no_trigger(), None, None, &state).await;
 
     assert!(result.is_ok(), "wait_resume must return Ok: {result:?}");
 
@@ -606,10 +595,7 @@ async fn unauthorized_user_approval_action_is_rejected() {
     .await;
 
     // Handler must return Err for unauthorized user.
-    assert!(
-        result.is_err(),
-        "unauthorized user action must return Err"
-    );
+    assert!(result.is_err(), "unauthorized user action must return Err");
 
     // Oneshot must NOT be resolved — no state change.
     let not_resolved = rx.try_recv();
@@ -711,10 +697,7 @@ async fn unknown_action_id_handled_gracefully() {
     )
     .await;
 
-    assert!(
-        result.is_err(),
-        "unknown action_id must return Err, got Ok"
-    );
+    assert!(result.is_err(), "unknown action_id must return Err, got Ok");
     let err_msg = result.unwrap_err();
     assert!(
         err_msg.contains("unknown approval action_id"),
@@ -744,15 +727,8 @@ async fn stale_session_reference_handled_gracefully() {
 
     // No pending wait registered — driver will return NotFound and handler swallows it.
     let action = make_action("wait_resume", nonexistent_session_id);
-    let result = handlers::wait::handle_wait_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let result =
+        handlers::wait::handle_wait_action(&action, user, &no_trigger(), None, None, &state).await;
 
     assert!(
         result.is_ok(),
@@ -793,15 +769,9 @@ async fn consumed_oneshot_channel_handled_gracefully() {
     drop(rx); // ← receiver dropped; next send will fail silently
 
     let action = make_action("prompt_continue", &prompt_id);
-    let result = handlers::prompt::handle_prompt_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let result =
+        handlers::prompt::handle_prompt_action(&action, user, &no_trigger(), None, None, &state)
+            .await;
 
     // The handler must not panic. The driver swallows the send error with warn!.
     assert!(

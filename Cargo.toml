@@ -82,7 +82,7 @@ bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 glob = "0.3"
 regex = "1.12.3"
-reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json"] }
 tokio-util = { version = "0.7.18", features = ["rt", "codec"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -97,6 +97,12 @@ default = []
 # Placeholder gate for the rmcp 0.13 upgrade (US5). Enable with --features rmcp-upgrade
 # once the ssed13 transport rewrite in src/mcp/sse.rs is complete.
 rmcp-upgrade = []
+# Feature gate for Tier 2 live Slack integration tests.
+# Requires a real Slack test workspace and the following env vars:
+#   SLACK_TEST_BOT_TOKEN   — bot token authorised to post in the test channel
+#   SLACK_TEST_CHANNEL_ID  — channel to post and verify test messages in
+# Enable with: cargo test --test live --features live-slack-tests
+live-slack-tests = []
 
 [workspace.metadata.release]
 # Do not publish to crates.io — this is a private binary, not a library crate.
@@ -119,3 +125,8 @@ path = "src/main.rs"
 [[bin]]
 name = "agent-intercom-ctl"
 path = "ctl/main.rs"
+
+[[test]]
+name = "live"
+path = "tests/live.rs"
+required-features = ["live-slack-tests"]

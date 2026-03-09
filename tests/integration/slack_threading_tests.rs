@@ -20,8 +20,7 @@ use agent_intercom::slack::handlers::thread_reply::{
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-type PendingReplies =
-    Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
+type PendingReplies = Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
 
 fn make_pending() -> PendingReplies {
     Arc::new(Mutex::new(HashMap::new()))
@@ -77,7 +76,10 @@ async fn button_action_in_session_a_thread_only_affects_session_a() {
     // Confirm both entries are registered under distinct keys.
     let key_a = fallback_map_key(channel_id, &thread_ts_a);
     let key_b = fallback_map_key(channel_id, &thread_ts_b);
-    assert_ne!(key_a, key_b, "Session A and B must have distinct composite keys");
+    assert_ne!(
+        key_a, key_b,
+        "Session A and B must have distinct composite keys"
+    );
     {
         let guard = pending.lock().await;
         assert!(guard.contains_key(&key_a), "Session A must be registered");

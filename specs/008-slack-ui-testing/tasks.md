@@ -186,15 +186,15 @@
 
 ### Tasks
 
-**4.1** Add `live-slack-tests` feature flag to `Cargo.toml`
+- [X] **4.1** Add `live-slack-tests` feature flag to `Cargo.toml`
 - `[features]` section: `live-slack-tests = []`
 - FRs: FR-021
 
-**4.2** Create `tests/live/mod.rs` with feature gate
+- [X] **4.2** Create `tests/live/mod.rs` with feature gate
 - `#![cfg(feature = "live-slack-tests")]`
 - Module declarations for all live test files
 
-**4.3** Create `tests/live/live_helpers.rs`
+- [X] **4.3** Create `tests/live/live_helpers.rs`
 - `LiveTestConfig` — loads from env vars
 - `LiveSlackClient` — wrapper around `reqwest` for Slack Web API
 - `post_test_message()` — post to test channel, return ts
@@ -203,15 +203,15 @@
 - `cleanup_test_messages()` — delete test messages after suite
 - `assert_blocks_contain()` — verify block structure in API response
 
-**4.4** Create `tests/live/live_message_tests.rs` (skeleton with 1 smoke test)
+- [X] **4.4** Create `tests/live/live_message_tests.rs` (skeleton with 1 smoke test)
 - Post a simple message, retrieve via API, verify it exists
 - Scenario: S-T2-001 (partial)
 
 ### Constitution Gate
 
-- [ ] `cargo check --features live-slack-tests` compiles
-- [ ] Clippy clean with feature flag
-- [ ] Smoke test passes when credentials are available
+- [X] `cargo check --features live-slack-tests` compiles
+- [X] Clippy clean with feature flag
+- [X] Smoke test passes when credentials are available
 
 ---
 

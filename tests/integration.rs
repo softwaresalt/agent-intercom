@@ -37,14 +37,14 @@ mod integration {
     mod policy_watcher_tests;
     mod push_events_tests;
     mod shutdown_tests;
-    mod startup_tests;
-    mod stdio_transport_tests;
-    mod steering_flow_tests;
-    mod streamable_http_tests;
     mod slack_fallback_tests;
     mod slack_interaction_tests;
     mod slack_modal_flow_tests;
     mod slack_threading_tests;
+    mod startup_tests;
+    mod stdio_transport_tests;
+    mod steering_flow_tests;
+    mod streamable_http_tests;
     mod thread_reply_integration;
     mod thread_routing_tests;
     mod workspace_routing_tests;

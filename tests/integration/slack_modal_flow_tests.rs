@@ -12,13 +12,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use slack_morphism::prelude::{
-    SlackActionId, SlackActionType, SlackInteractionActionInfoInit, SlackInteractionViewSubmissionEvent,
-    SlackTriggerId,
+    SlackActionId, SlackActionType, SlackInteractionActionInfoInit,
+    SlackInteractionViewSubmissionEvent, SlackTriggerId,
 };
 use tokio::sync::{oneshot, Mutex};
 
 use agent_intercom::driver::mcp_driver::McpDriver;
-use agent_intercom::mcp::handler::{AppState, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse};
+use agent_intercom::mcp::handler::{
+    AppState, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
+};
 use agent_intercom::mode::ServerMode;
 use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
@@ -55,8 +57,8 @@ default_nudge_message = "continue"
 "#,
         root = workspace_root.replace('\\', "\\\\"),
     );
-    let mut config = agent_intercom::config::GlobalConfig::from_toml_str(&toml)
-        .expect("valid test config");
+    let mut config =
+        agent_intercom::config::GlobalConfig::from_toml_str(&toml).expect("valid test config");
     config.authorized_user_ids = vec![user.to_owned()];
     config
 }
@@ -219,15 +221,9 @@ async fn prompt_refine_with_no_slack_returns_ok_and_does_not_resolve_oneshot() {
         .insert(prompt_id.clone(), tx);
 
     let action = make_action("prompt_refine", &prompt_id);
-    let result = handlers::prompt::handle_prompt_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let result =
+        handlers::prompt::handle_prompt_action(&action, user, &no_trigger(), None, None, &state)
+            .await;
 
     assert!(
         result.is_ok(),
@@ -266,15 +262,9 @@ async fn prompt_refine_with_no_slack_leaves_modal_context_empty() {
         .insert(prompt_id.clone(), tx);
 
     let action = make_action("prompt_refine", &prompt_id);
-    let _ = handlers::prompt::handle_prompt_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let _ =
+        handlers::prompt::handle_prompt_action(&action, user, &no_trigger(), None, None, &state)
+            .await;
 
     let ctx = state.pending_modal_contexts.lock().await;
     assert!(

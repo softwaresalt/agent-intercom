@@ -24,8 +24,7 @@ use agent_intercom::slack::handlers::thread_reply::{
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-type PendingReplies =
-    Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
+type PendingReplies = Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
 
 fn make_pending() -> PendingReplies {
     Arc::new(Mutex::new(HashMap::new()))
