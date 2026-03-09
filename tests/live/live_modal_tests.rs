@@ -35,11 +35,11 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
+use agent_intercom::models::prompt::PromptType;
 use agent_intercom::slack::blocks;
 use agent_intercom::slack::handlers::thread_reply::{
     fallback_map_key, register_thread_reply_fallback, route_thread_reply, PendingThreadReplies,
 };
-use agent_intercom::models::prompt::PromptType;
 
 use super::live_helpers::{LiveSlackClient, LiveTestConfig};
 
@@ -104,7 +104,10 @@ async fn modal_open_top_level_documents_api_result() {
         &prompt_id,
     );
     let blocks_json = serde_json::to_value(&prompt_blocks).expect("serialize prompt blocks");
-    let live_text = format!("[live-test] modal-top-level diagnostic (run {})", &run_id.to_string()[..8]);
+    let live_text = format!(
+        "[live-test] modal-top-level diagnostic (run {})",
+        &run_id.to_string()[..8]
+    );
 
     let msg_ts = client
         .post_with_blocks(&config.channel_id, &live_text, blocks_json)
@@ -327,7 +330,8 @@ async fn thread_reply_fallback_end_to_end() {
         .expect("post thread anchor");
 
     // Post the fallback instruction as a thread reply (as the production handler does).
-    let fallback_instruction = "Modal unavailable — please reply in this thread with your instructions.";
+    let fallback_instruction =
+        "Modal unavailable — please reply in this thread with your instructions.";
     let fallback_ts = client
         .post_thread_message(&config.channel_id, &anchor_ts, fallback_instruction)
         .await
@@ -472,7 +476,12 @@ async fn wait_instruct_modal_in_thread_documents_api_result() {
     );
 
     let thread_msg_ts = client
-        .post_thread_blocks(&config.channel_id, &anchor_ts, &thread_text, wait_blocks_json)
+        .post_thread_blocks(
+            &config.channel_id,
+            &anchor_ts,
+            &thread_text,
+            wait_blocks_json,
+        )
         .await
         .expect("post threaded wait message");
 

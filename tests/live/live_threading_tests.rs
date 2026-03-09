@@ -32,9 +32,7 @@ async fn two_sessions_in_separate_threads_are_isolated() {
     let config = match LiveTestConfig::from_env() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!(
-                "[live-test] Skipping two_sessions_in_separate_threads_are_isolated: {e}"
-            );
+            eprintln!("[live-test] Skipping two_sessions_in_separate_threads_are_isolated: {e}");
             return;
         }
     };
@@ -59,14 +57,22 @@ async fn two_sessions_in_separate_threads_are_isolated() {
     // ── Post a broadcast reply into Session A's thread ────────────────────────
     let marker_a = format!("broadcast-session-A-{run_id:.8}");
     client
-        .post_thread_message(&config.channel_id, &anchor_a_ts, &format!("[live-test] {marker_a}"))
+        .post_thread_message(
+            &config.channel_id,
+            &anchor_a_ts,
+            &format!("[live-test] {marker_a}"),
+        )
         .await
         .expect("post reply into session A thread");
 
     // ── Post a broadcast reply into Session B's thread ────────────────────────
     let marker_b = format!("broadcast-session-B-{run_id:.8}");
     client
-        .post_thread_message(&config.channel_id, &anchor_b_ts, &format!("[live-test] {marker_b}"))
+        .post_thread_message(
+            &config.channel_id,
+            &anchor_b_ts,
+            &format!("[live-test] {marker_b}"),
+        )
         .await
         .expect("post reply into session B thread");
 
@@ -112,7 +118,10 @@ async fn two_sessions_in_separate_threads_are_isolated() {
 
     // ── Cleanup both anchors (which removes associated thread replies) ─────────
     client
-        .cleanup_test_messages(&config.channel_id, &[anchor_a_ts.as_str(), anchor_b_ts.as_str()])
+        .cleanup_test_messages(
+            &config.channel_id,
+            &[anchor_a_ts.as_str(), anchor_b_ts.as_str()],
+        )
         .await
         .expect("cleanup session anchors should succeed");
 }

@@ -68,7 +68,11 @@ default_nudge_message = "continue"
 }
 
 /// Build an `AppState` with the given `server_mode`.
-async fn make_app_state(workspace_root: &str, user: &str, server_mode: ServerMode) -> Arc<AppState> {
+async fn make_app_state(
+    workspace_root: &str,
+    user: &str,
+    server_mode: ServerMode,
+) -> Arc<AppState> {
     let config = make_config(workspace_root, user);
     let database = Arc::new(db::connect_memory().await.expect("db connect"));
     let approvals: PendingApprovals = Arc::new(Mutex::new(HashMap::new()));
@@ -159,16 +163,17 @@ async fn sessions_command_returns_session_list_posted_to_slack() {
     );
     // The response should mention the session ID or status.
     assert!(
-        result.contains(&created.id[..8]) || result.contains("active") || result.contains("session"),
+        result.contains(&created.id[..8])
+            || result.contains("active")
+            || result.contains("session"),
         "sessions response must reference sessions or their status; got: {result}"
     );
 
     // Post the command response to live Slack to document the round-trip.
     let slack_client = LiveSlackClient::new(&live_config.bot_token);
     let run_id = Uuid::new_v4();
-    let live_text = format!(
-        "[live-test] S-T2-012 sessions command response (run {run_id:.8}):\n{result}"
-    );
+    let live_text =
+        format!("[live-test] S-T2-012 sessions command response (run {run_id:.8}):\n{result}");
     let ts = slack_client
         .post_test_message(&live_config.channel_id, &live_text)
         .await

@@ -19,10 +19,10 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, missing_docs, dead_code)]
 
 mod live {
-    pub(crate) mod live_helpers;
-    mod live_message_tests;
-    mod live_interaction_tests;
-    mod live_threading_tests;
     mod live_command_tests;
+    pub(crate) mod live_helpers;
+    mod live_interaction_tests;
+    mod live_message_tests;
     mod live_modal_tests;
+    mod live_threading_tests;
 }

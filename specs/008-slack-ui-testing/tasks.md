@@ -403,7 +403,7 @@
 
 ### Tasks
 
-**9.1** Create `tests/visual/scenarios/modal-top-level.spec.ts`
+- [X] **9.1** Create `tests/visual/scenarios/modal-top-level.spec.ts`
 - Post prompt as top-level message
 - Click Refine button
 - Screenshot: modal appears with title, text input, submit button
@@ -412,7 +412,7 @@
 - Scenario: S-T3-005
 - FRs: FR-027, FR-028
 
-**9.2** Create `tests/visual/scenarios/modal-in-thread.spec.ts`
+- [X] **9.2** Create `tests/visual/scenarios/modal-in-thread.spec.ts`
 - Post prompt inside a thread
 - Navigate into thread
 - Click Refine button
@@ -423,7 +423,7 @@
 - Scenario: S-T3-006
 - FRs: FR-027, FR-028, FR-030, FR-022
 
-**9.3** Create `tests/visual/scenarios/thread-reply-fallback.spec.ts`
+- [X] **9.3** Create `tests/visual/scenarios/thread-reply-fallback.spec.ts`
 - Given modal-in-thread failure confirmed
 - Trigger fallback: server posts prompt in thread
 - Screenshot: fallback prompt visible
@@ -434,7 +434,7 @@
 - Scenario: S-T3-007
 - FRs: FR-023, FR-028
 
-**9.4** Add wait-resume-instruct modal-in-thread test
+- [X] **9.4** Add wait-resume-instruct modal-in-thread test (`tests/visual/scenarios/modal-wait-instruct-thread.spec.ts`)
 - Same A/B pattern as Refine but for Resume with Instructions button
 - Scenario: S-T3-011
 - FRs: FR-022, FR-028

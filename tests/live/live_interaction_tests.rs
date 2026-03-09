@@ -30,16 +30,21 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
-use slack_morphism::prelude::{SlackActionId, SlackActionType, SlackInteractionActionInfoInit, SlackTriggerId};
+use slack_morphism::prelude::{
+    SlackActionId, SlackActionType, SlackInteractionActionInfoInit, SlackTriggerId,
+};
 use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::driver::mcp_driver::McpDriver;
-use agent_intercom::mcp::handler::{AppState, ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse};
+use agent_intercom::mcp::handler::{
+    AppState, ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
+};
 use agent_intercom::mode::ServerMode;
 use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
 use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
+use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 use agent_intercom::models::stall::StallAlert;
 use agent_intercom::persistence::approval_repo::ApprovalRepo;
 use agent_intercom::persistence::db;
@@ -47,7 +52,6 @@ use agent_intercom::persistence::prompt_repo::PromptRepo;
 use agent_intercom::persistence::session_repo::SessionRepo;
 use agent_intercom::persistence::stall_repo::StallAlertRepo;
 use agent_intercom::slack::{blocks, handlers};
-use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 
 use super::live_helpers::{assert_blocks_contain, LiveSlackClient, LiveTestConfig};
 
@@ -126,7 +130,10 @@ async fn make_app_state(
 }
 
 /// Create a synthetic button action info.
-fn make_action(action_id: &str, value: &str) -> slack_morphism::prelude::SlackInteractionActionInfo {
+fn make_action(
+    action_id: &str,
+    value: &str,
+) -> slack_morphism::prelude::SlackInteractionActionInfo {
     slack_morphism::prelude::SlackInteractionActionInfo::from(SlackInteractionActionInfoInit {
         action_type: SlackActionType("button".into()),
         action_id: SlackActionId(action_id.into()),
@@ -218,7 +225,14 @@ async fn approval_accept_updates_db_record() {
     let prompts: PendingPrompts = Arc::new(Mutex::new(HashMap::new()));
     let waits: PendingWaits = Arc::new(Mutex::new(HashMap::new()));
 
-    let state = make_app_state(root, user, Arc::clone(&approvals), Arc::clone(&prompts), Arc::clone(&waits)).await;
+    let state = make_app_state(
+        root,
+        user,
+        Arc::clone(&approvals),
+        Arc::clone(&prompts),
+        Arc::clone(&waits),
+    )
+    .await;
 
     // Set up DB records.
     let session = create_session(&state.db, user, root).await;
@@ -321,7 +335,14 @@ async fn prompt_continue_updates_db_record() {
     let prompts: PendingPrompts = Arc::new(Mutex::new(HashMap::new()));
     let waits: PendingWaits = Arc::new(Mutex::new(HashMap::new()));
 
-    let state = make_app_state(root, user, Arc::clone(&approvals), Arc::clone(&prompts), Arc::clone(&waits)).await;
+    let state = make_app_state(
+        root,
+        user,
+        Arc::clone(&approvals),
+        Arc::clone(&prompts),
+        Arc::clone(&waits),
+    )
+    .await;
 
     let session = create_session(&state.db, user, root).await;
     let prompt = create_prompt(&state.db, &session.id).await;
@@ -349,15 +370,9 @@ async fn prompt_continue_updates_db_record() {
 
     // Dispatch synthetic continue action.
     let action = make_action("prompt_continue", &prompt.id);
-    let result = handlers::prompt::handle_prompt_action(
-        &action,
-        user,
-        &no_trigger(),
-        None,
-        None,
-        &state,
-    )
-    .await;
+    let result =
+        handlers::prompt::handle_prompt_action(&action, user, &no_trigger(), None, None, &state)
+            .await;
 
     assert!(
         result.is_ok(),
@@ -419,7 +434,14 @@ async fn stall_nudge_increments_db_counter() {
     let prompts: PendingPrompts = Arc::new(Mutex::new(HashMap::new()));
     let waits: PendingWaits = Arc::new(Mutex::new(HashMap::new()));
 
-    let state = make_app_state(root, user, Arc::clone(&approvals), Arc::clone(&prompts), Arc::clone(&waits)).await;
+    let state = make_app_state(
+        root,
+        user,
+        Arc::clone(&approvals),
+        Arc::clone(&prompts),
+        Arc::clone(&waits),
+    )
+    .await;
 
     let session = create_session(&state.db, user, root).await;
     let alert = create_stall_alert(&state.db, &session.id).await;
@@ -487,9 +509,7 @@ async fn button_replacement_via_update_message_api() {
     let config = match LiveTestConfig::from_env() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!(
-                "[live-test] Skipping button_replacement_via_update_message_api: {e}"
-            );
+            eprintln!("[live-test] Skipping button_replacement_via_update_message_api: {e}");
             return;
         }
     };

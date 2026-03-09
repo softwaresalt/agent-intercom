@@ -136,10 +136,10 @@ async fn post_approval_blocks_and_verify_structure() {
     let diff = "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1,3 @@\n+use anyhow::Result;\n fn foo() {}\n+fn bar() -> Result<()> { Ok(()) }";
     let file_path = "src/lib.rs";
 
-    let mut all_blocks = blocks::build_approval_blocks(&title, None, diff, file_path, RiskLevel::Low);
+    let mut all_blocks =
+        blocks::build_approval_blocks(&title, None, diff, file_path, RiskLevel::Low);
     all_blocks.push(blocks::approval_buttons(&run_id.to_string()));
-    let blocks_json =
-        serde_json::to_value(&all_blocks).expect("serialize approval blocks");
+    let blocks_json = serde_json::to_value(&all_blocks).expect("serialize approval blocks");
 
     let text = format!("[live-test] approval request (run {run_id:.8})");
     let ts = client
@@ -220,9 +220,12 @@ async fn post_threaded_reply_and_verify_in_replies() {
         replies.len()
     );
 
-    let reply_present = replies
-        .iter()
-        .any(|m| m["text"].as_str().unwrap_or_default().contains(&reply_marker));
+    let reply_present = replies.iter().any(|m| {
+        m["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&reply_marker)
+    });
 
     assert!(
         reply_present,
@@ -232,7 +235,12 @@ async fn post_threaded_reply_and_verify_in_replies() {
     // The reply must carry thread_ts matching the parent.
     let reply_msg = replies
         .iter()
-        .find(|m| m["text"].as_str().unwrap_or_default().contains(&reply_marker))
+        .find(|m| {
+            m["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(&reply_marker)
+        })
         .expect("reply message must be found");
 
     assert_eq!(
@@ -291,13 +299,8 @@ async fn rapid_message_burst_all_succeed() {
     );
 
     // All timestamps must be unique (distinct messages, not duplicates).
-    let unique: std::collections::HashSet<&str> =
-        timestamps.iter().map(String::as_str).collect();
-    assert_eq!(
-        unique.len(),
-        5,
-        "each burst message must have a unique ts"
-    );
+    let unique: std::collections::HashSet<&str> = timestamps.iter().map(String::as_str).collect();
+    assert_eq!(unique.len(), 5, "each burst message must have a unique ts");
 
     // Cleanup all burst messages.
     let ts_refs: Vec<&str> = timestamps.iter().map(String::as_str).collect();
