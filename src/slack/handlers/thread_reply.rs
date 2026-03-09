@@ -22,17 +22,21 @@
 //!   to drop all entries for a terminated session (F-20).
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
+use slack_morphism::prelude::{SlackChannelId, SlackTs};
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, warn};
+
+use crate::slack::blocks;
+use crate::slack::client::{SlackMessage, SlackService};
 
 /// Default time limit for a pending thread-reply fallback.
 ///
 /// If the operator does not reply within this window the spawned task exits
 /// and the pending map entry is removed.
-pub(crate) const FALLBACK_REPLY_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(300);
+pub(crate) const FALLBACK_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Thread-safe map type for pending thread-reply oneshot senders.
 ///
@@ -81,6 +85,16 @@ pub async fn register_thread_reply_fallback(
 ) {
     let key = fallback_map_key(channel_id, &thread_ts);
     let mut guard = pending.lock().await;
+    if guard.contains_key(&key) {
+        // LC-04: a duplicate registration for the same key is dropped to
+        // preserve the original entry (e.g., mobile double-tap guard).
+        warn!(
+            channel_id,
+            thread_ts,
+            "thread-reply fallback: duplicate registration for existing key — dropping new sender (LC-04)"
+        );
+        return; // `tx` is dropped here, making `rx` resolve to `Err`
+    }
     guard.insert(key, (session_id, authorized_user_id, tx));
 }
 
@@ -170,4 +184,129 @@ pub async fn route_thread_reply(
 pub async fn cleanup_session_fallbacks(session_id: &str, pending: &PendingThreadReplies) {
     let mut guard = pending.lock().await;
     guard.retain(|_key, entry| entry.0.as_str() != session_id);
+}
+
+/// Register, post, and spawn the thread-reply fallback path for any handler type.
+///
+/// Encapsulates the common fallback activation logic shared across `prompt.rs`,
+/// `wait.rs`, and `approval.rs` (TQ-008), eliminating ~80 lines of triplication.
+///
+/// ## Sequence
+///
+/// 1. Registers the pending entry in `pending` (with duplicate guard — LC-04).
+/// 2. Optionally replaces interactive buttons with an ⏳ status (FR-022) if
+///    `button_msg_ts` is `Some`.
+/// 3. Posts `fallback_text` to the Slack thread as an instruction for the operator.
+/// 4. **Zombie-guard (Fix C — CS-05):** only spawns the waiter task if the post
+///    succeeded. If posting fails, removes the pending entry and returns `Err`.
+/// 5. Spawns a [`tokio::time::timeout`]-wrapped waiter that calls `resolve` with
+///    the operator's reply text when it arrives.
+///
+/// # Arguments
+///
+/// * `chan_id` — Slack channel ID (for registration key and fallback message).
+/// * `thread_ts` — Thread root timestamp (for registration key and reply routing).
+/// * `session_id` — Session that owns this fallback (used for cleanup tracking).
+/// * `authorized_user_id` — Only this Slack user's reply will be accepted.
+/// * `fallback_text` — Instruction to post in the thread (visible to the operator).
+/// * `button_msg_ts` — If `Some`, replace the button message with ⏳ status (FR-022).
+/// * `slack` — Slack client for posting messages.
+/// * `pending` — Shared pending map.
+/// * `log_context` — Identifier for tracing log fields (e.g., `"prompt_id=abc"`).
+/// * `resolve` — Async callback called with the operator's reply text on success.
+///
+/// # Errors
+///
+/// Returns `Err(reason)` if posting the fallback instruction message fails
+/// (zombie-guard applied: pending entry removed, waiter task not spawned).
+#[allow(clippy::too_many_arguments)] // 10 args needed to encapsulate 3 callers' fallback state
+pub async fn activate_thread_reply_fallback<F, Fut>(
+    chan_id: &str,
+    thread_ts: &str,
+    session_id: String,
+    authorized_user_id: String,
+    fallback_text: &str,
+    button_msg_ts: Option<SlackTs>,
+    slack: &SlackService,
+    pending: PendingThreadReplies,
+    log_context: &str,
+    resolve: F,
+) -> Result<(), String>
+where
+    F: FnOnce(String) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let (tx, rx) = oneshot::channel::<String>();
+    register_thread_reply_fallback(
+        chan_id,
+        thread_ts.to_owned(),
+        session_id,
+        authorized_user_id,
+        tx,
+        Arc::clone(&pending),
+    )
+    .await;
+
+    // FR-022: Replace buttons with "awaiting thread reply" status immediately.
+    if let Some(ts) = button_msg_ts {
+        let replacement = vec![blocks::text_section(
+            "\u{23f3} *Awaiting thread reply\u{2026}* (modal unavailable \u{2014} please reply in this thread)",
+        )];
+        if let Err(err) = slack
+            .update_message(SlackChannelId(chan_id.to_owned()), ts, replacement)
+            .await
+        {
+            warn!(
+                log_context,
+                %err,
+                "thread-reply fallback: failed to replace buttons (FR-022) — non-fatal"
+            );
+        }
+    }
+
+    // Post fallback instruction in the thread so the operator knows to reply.
+    let fallback_msg = SlackMessage {
+        channel: SlackChannelId(chan_id.to_owned()),
+        text: Some(fallback_text.to_owned()),
+        blocks: None,
+        thread_ts: Some(SlackTs(thread_ts.to_owned())),
+    };
+
+    // Fix C (CS-05/TQ-004): only spawn the waiter if the post succeeded.
+    // If the operator never sees a prompt, there is nobody to reply.
+    if let Err(post_err) = slack.enqueue(fallback_msg).await {
+        warn!(
+            log_context,
+            %post_err,
+            "thread-reply fallback: failed to post fallback message — removing pending entry and aborting (F-16)"
+        );
+        pending
+            .lock()
+            .await
+            .remove(&fallback_map_key(chan_id, thread_ts));
+        return Err(format!("failed to post fallback message: {post_err}"));
+    }
+
+    // Spawn a task to wait for the operator's reply and call `resolve`.
+    let log_ctx = log_context.to_owned();
+    tokio::spawn(async move {
+        match tokio::time::timeout(FALLBACK_REPLY_TIMEOUT, rx).await {
+            Ok(Ok(reply_text)) => resolve(reply_text).await,
+            Ok(Err(_)) => {
+                warn!(
+                    context = log_ctx,
+                    "thread-reply fallback: sender dropped — task exiting (F-16)"
+                );
+            }
+            Err(_elapsed) => {
+                warn!(
+                    context = log_ctx,
+                    timeout_secs = FALLBACK_REPLY_TIMEOUT.as_secs(),
+                    "thread-reply fallback: timed out — task exiting without resolution (F-16)"
+                );
+            }
+        }
+    });
+
+    Ok(())
 }

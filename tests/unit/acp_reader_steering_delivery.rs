@@ -288,6 +288,33 @@ async fn empty_queue_is_no_op() {
     );
 }
 
+// ── S008: deliver_queued_messages returns correct delivered count ──────────────
+
+/// S008 — With 3 messages where the second fails, `deliver_queued_messages`
+/// must return 2 (only successfully delivered messages counted).
+#[tokio::test]
+async fn deliver_queued_messages_returns_correct_delivered_count() {
+    let db = make_db().await;
+    let repo = SteeringRepo::new(Arc::clone(&db));
+    // Responses in FIFO order: first succeeds, second fails, third succeeds.
+    let driver = MockDriver::with_responses([true, false, true]);
+
+    for text in &["alpha", "beta", "gamma"] {
+        let m = sample_msg("sess-s008", text);
+        repo.insert(&m).await.expect("insert");
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+
+    let queued = repo.fetch_unconsumed("sess-s008").await.expect("fetch");
+    assert_eq!(queued.len(), 3, "expected 3 unconsumed messages initially");
+
+    let delivered = deliver_queued_messages("sess-s008", &queued, &driver, &repo).await;
+    assert_eq!(
+        delivered, 2,
+        "only 2 messages were successfully delivered (second failed)"
+    );
+}
+
 // ── T006: mark_consumed failure after successful send (S007) ──────────────────
 
 /// T006 — When `send_prompt` succeeds but `mark_consumed` encounters a DB

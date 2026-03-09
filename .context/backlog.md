@@ -38,6 +38,14 @@ Batch of targeted correctness fixes found during adversarial review, plus a mobi
 - **F-16** *(Conditional — if modals are unavailable or broken on iOS)*: Design and implement a thread-reply-based input fallback. When the server sends a prompt requiring operator text input (MCP `transmit`/`standby`, ACP `PromptForwarded`/`ClearanceRequested`), post a Slack message in the session thread that instructs the operator to reply in-thread with their response. Detect the reply via the `message` event handler (scoped to the correct thread `ts`), capture the text, and route it back to the waiting tool call. The modal pathway remains the default for desktop; the reply pathway activates when the client surface is detected as mobile or when the modal callback times out without a submission.
 - **F-17** *(Conditional — if modals are unavailable or broken on iOS)*: Audit all existing block-kit interactive components (approve/reject buttons, "Refine" prompt buttons, steer inputs) and add a plain-text thread-reply equivalent for each so that every operator interaction that currently requires a modal is reachable from the Slack mobile app.
 
+**Post-Review Technical Debt (Phase 8 — in progress)**
+
+- **TQ-008**: Extract duplicated fallback logic (`spawn_thread_reply_fallback` helper) — `T057` in `specs/007-acp-correctness-mobile/tasks.md`
+- **TQ-009**: Push_event integration tests for negative paths — `T058`
+- **LC-05**: `StreamActivity` emitted for failed deliveries in `deliver_queued_messages` — `T059`
+- **LC-04**: Silent overwrite on duplicate `register_thread_reply_fallback` call — `T060`
+- **CS-06**: Hardcoded SQL status strings in `count_active_acp` — `T061`
+
 ---
 
 ## 008 — Slack UI Automated Testing

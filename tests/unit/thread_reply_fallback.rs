@@ -10,8 +10,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 
 /// Convenience alias matching the production type after Fix B (3-tuple value).
-type PendingThreadReplies =
-    Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
+type PendingThreadReplies = Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
 
 // ── T039 / S029 ───────────────────────────────────────────────────────────────
 
@@ -56,9 +55,7 @@ async fn test_s029_fallback_message_registration() {
 /// must be delivered through the registered oneshot channel.
 #[tokio::test]
 async fn test_s030_reply_routes_to_oneshot() {
-    use agent_intercom::slack::handlers::thread_reply::{
-        fallback_map_key, route_thread_reply,
-    };
+    use agent_intercom::slack::handlers::thread_reply::{fallback_map_key, route_thread_reply};
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
     let channel_id = "C12345";
@@ -94,9 +91,7 @@ async fn test_s030_reply_routes_to_oneshot() {
 /// subsequent replies are not forwarded again (only first captured).
 #[tokio::test]
 async fn test_s031_entry_removed_after_capture() {
-    use agent_intercom::slack::handlers::thread_reply::{
-        fallback_map_key, route_thread_reply,
-    };
+    use agent_intercom::slack::handlers::thread_reply::{fallback_map_key, route_thread_reply};
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
     let channel_id = "C12345";
@@ -105,10 +100,10 @@ async fn test_s031_entry_removed_after_capture() {
 
     let (tx, _rx) = oneshot::channel::<String>();
     let key = fallback_map_key(channel_id, &thread_ts);
-    pending
-        .lock()
-        .await
-        .insert(key.clone(), ("session-001".to_owned(), authorized_user.clone(), tx));
+    pending.lock().await.insert(
+        key.clone(),
+        ("session-001".to_owned(), authorized_user.clone(), tx),
+    );
 
     let _ = route_thread_reply(
         channel_id,
@@ -134,9 +129,7 @@ async fn test_s031_entry_removed_after_capture() {
 /// rather than panicking or erroring.
 #[tokio::test]
 async fn test_s032_only_first_reply_captured() {
-    use agent_intercom::slack::handlers::thread_reply::{
-        fallback_map_key, route_thread_reply,
-    };
+    use agent_intercom::slack::handlers::thread_reply::{fallback_map_key, route_thread_reply};
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
     let channel_id = "C12345";
@@ -190,9 +183,7 @@ async fn test_s032_only_first_reply_captured() {
 /// reply.
 #[tokio::test]
 async fn test_s033_unauthorized_user_rejected() {
-    use agent_intercom::slack::handlers::thread_reply::{
-        fallback_map_key, route_thread_reply,
-    };
+    use agent_intercom::slack::handlers::thread_reply::{fallback_map_key, route_thread_reply};
 
     let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
     let channel_id = "C12345";
@@ -202,10 +193,10 @@ async fn test_s033_unauthorized_user_rejected() {
 
     let (tx, rx) = oneshot::channel::<String>();
     let key = fallback_map_key(channel_id, &thread_ts);
-    pending
-        .lock()
-        .await
-        .insert(key.clone(), ("session-001".to_owned(), authorized_user.clone(), tx));
+    pending.lock().await.insert(
+        key.clone(),
+        ("session-001".to_owned(), authorized_user.clone(), tx),
+    );
 
     // Unauthorized user sends reply — should be silently ignored.
     let result = route_thread_reply(
@@ -319,6 +310,143 @@ async fn test_s034_composite_key_prevents_cross_channel_collision() {
     .await;
     assert!(res_b.is_ok_and(|v| v), "channel B reply should be captured");
     assert_eq!(rx_b.await.unwrap(), "reply for B");
+}
+
+// ── T060 / S036 — duplicate registration preserves original ───────────────────
+
+/// S036 — Registering a fallback for a key that already exists must drop the
+/// second sender and preserve the original entry (LC-04).
+///
+/// Verification:
+/// 1. `rx_second` resolves to `Err` (second `tx` was dropped).
+/// 2. The map still has exactly 1 entry.
+/// 3. The original `tx`/`rx` pair is still usable (routable via `route_thread_reply`).
+#[tokio::test]
+async fn test_s036_duplicate_registration_preserves_original() {
+    use agent_intercom::slack::handlers::thread_reply::{
+        register_thread_reply_fallback, route_thread_reply,
+    };
+
+    let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let channel_id = "C99";
+    let thread_ts = "9999.0001".to_owned();
+
+    // First registration.
+    let (tx_first, rx_first) = oneshot::channel::<String>();
+    register_thread_reply_fallback(
+        channel_id,
+        thread_ts.clone(),
+        "session-s036".to_owned(),
+        "U_FIRST".to_owned(),
+        tx_first,
+        Arc::clone(&pending),
+    )
+    .await;
+
+    // Second registration for same key — must be rejected (LC-04).
+    let (tx_second, rx_second) = oneshot::channel::<String>();
+    register_thread_reply_fallback(
+        channel_id,
+        thread_ts.clone(),
+        "session-s036".to_owned(),
+        "U_SECOND".to_owned(),
+        tx_second,
+        Arc::clone(&pending),
+    )
+    .await;
+
+    // Map must still have exactly 1 entry.
+    assert_eq!(
+        pending.lock().await.len(),
+        1,
+        "map must have exactly 1 entry after duplicate registration"
+    );
+
+    // Second tx must have been dropped → rx_second resolves to Err.
+    assert!(
+        rx_second.await.is_err(),
+        "second rx must resolve to Err because second tx was dropped (LC-04)"
+    );
+
+    // Original entry must still be routable — route_thread_reply finds U_FIRST.
+    let route_result = route_thread_reply(
+        channel_id,
+        &thread_ts,
+        "U_FIRST",
+        "original reply",
+        Arc::clone(&pending),
+    )
+    .await;
+    assert!(
+        route_result.is_ok_and(|v| v),
+        "original entry must still be routable after duplicate was rejected"
+    );
+    assert_eq!(
+        rx_first.await.ok().as_deref(),
+        Some("original reply"),
+        "original rx must receive the reply"
+    );
+}
+
+// ── T058 / S037 — sender drop allows rx to detect cleanup ─────────────────────
+
+/// S037 — When the registered sender is dropped (e.g., by
+/// `cleanup_session_fallbacks`), the `rx` end must resolve to `Err`.
+///
+/// This verifies the "sender dropped → task exits" observer path.
+#[tokio::test]
+async fn test_s037_sender_drop_allows_rx_to_detect_cleanup() {
+    use agent_intercom::slack::handlers::thread_reply::register_thread_reply_fallback;
+
+    let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+    let channel_id = "C_DROP";
+    let thread_ts = "1111.0001".to_owned();
+
+    let (tx, rx) = oneshot::channel::<String>();
+    register_thread_reply_fallback(
+        channel_id,
+        thread_ts.clone(),
+        "session-s037".to_owned(),
+        "U_OP".to_owned(),
+        tx,
+        Arc::clone(&pending),
+    )
+    .await;
+
+    // Simulate cleanup by removing the entry (which drops the stored tx).
+    pending.lock().await.clear();
+
+    // rx must now resolve to Err because the sender was dropped.
+    assert!(
+        rx.await.is_err(),
+        "rx must receive Err when sender is dropped via cleanup"
+    );
+}
+
+// ── T058 / S038 — route_thread_reply no match returns false ───────────────────
+
+/// S038 — Calling `route_thread_reply` for a `channel/thread_ts` with no pending
+/// entry must return `Ok(false)` — not an error, and not `true`.
+#[tokio::test]
+async fn test_s038_route_thread_reply_no_match_returns_false() {
+    use agent_intercom::slack::handlers::thread_reply::route_thread_reply;
+
+    let pending: PendingThreadReplies = Arc::new(Mutex::new(HashMap::new()));
+
+    let result = route_thread_reply(
+        "C_NONEXISTENT",
+        "0000.0000",
+        "U_ANY",
+        "some reply",
+        Arc::clone(&pending),
+    )
+    .await;
+
+    assert!(result.is_ok(), "missing entry must not return Err");
+    assert!(
+        !result.unwrap(),
+        "missing entry must return Ok(false), not Ok(true)"
+    );
 }
 
 // ── T045 / S035 — cleanup_session_fallbacks ───────────────────────────────────

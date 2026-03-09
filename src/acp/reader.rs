@@ -435,7 +435,8 @@ pub async fn deliver_queued_messages(
     messages: &[SteeringMessage],
     driver: &dyn AgentDriver,
     steering_repo: &SteeringRepo,
-) {
+) -> usize {
+    let mut delivered: usize = 0;
     for msg in messages {
         match driver.send_prompt(session_id, &msg.message).await {
             Ok(()) => {
@@ -448,6 +449,7 @@ pub async fn deliver_queued_messages(
                         "acp reader: failed to mark queued message consumed"
                     );
                 }
+                delivered += 1;
             }
             Err(err) => {
                 warn!(
@@ -459,6 +461,7 @@ pub async fn deliver_queued_messages(
             }
         }
     }
+    delivered
 }
 
 /// Set connectivity to Online, deliver queued messages, and notify Slack.
@@ -502,11 +505,12 @@ async fn flush_queued_messages(
 
     // Deliver each queued message via the driver (F-06 fix: only marks consumed
     // on success — see `deliver_queued_messages`).
-    deliver_queued_messages(session_id, &queued, ctx.driver.as_ref(), &steering_repo).await;
+    let delivered =
+        deliver_queued_messages(session_id, &queued, ctx.driver.as_ref(), &steering_repo).await;
 
-    // Emit StreamActivity for each delivered message so the stall detector
-    // knows the session is active during the flush.
-    for _ in &queued {
+    // Emit StreamActivity only for successfully delivered messages so the stall
+    // detector knows the session is active during the flush (LC-05).
+    for _ in 0..delivered {
         let _ = event_tx
             .send(AgentEvent::StreamActivity {
                 session_id: session_id.to_owned(),

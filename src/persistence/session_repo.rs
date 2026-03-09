@@ -386,11 +386,11 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_active(&self) -> Result<Vec<Session>> {
-        let rows: Vec<SessionRow> = sqlx::query_as(
-            "SELECT * FROM session WHERE status = 'active' ORDER BY updated_at DESC",
-        )
-        .fetch_all(self.db.as_ref())
-        .await?;
+        let rows: Vec<SessionRow> =
+            sqlx::query_as("SELECT * FROM session WHERE status = ?1 ORDER BY updated_at DESC")
+                .bind(SessionStatus::Active.as_str())
+                .fetch_all(self.db.as_ref())
+                .await?;
 
         rows.into_iter().map(SessionRow::into_session).collect()
     }
@@ -459,7 +459,8 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn count_active(&self) -> Result<i64> {
-        let row = sqlx::query("SELECT COUNT(*) AS cnt FROM session WHERE status = 'active'")
+        let row = sqlx::query("SELECT COUNT(*) AS cnt FROM session WHERE status = ?1")
+            .bind(SessionStatus::Active.as_str())
             .fetch_one(self.db.as_ref())
             .await?;
 
@@ -483,9 +484,12 @@ impl SessionRepo {
     pub async fn count_active_acp(&self) -> Result<i64> {
         let row = sqlx::query(
             "SELECT COUNT(*) AS cnt FROM session \
-             WHERE (status = 'active' OR status = 'created' OR status = 'paused') \
+             WHERE (status = ?1 OR status = ?2 OR status = ?3) \
              AND protocol_mode = 'acp'",
         )
+        .bind(SessionStatus::Active.as_str())
+        .bind(SessionStatus::Created.as_str())
+        .bind(SessionStatus::Paused.as_str())
         .fetch_one(self.db.as_ref())
         .await?;
 
@@ -500,9 +504,10 @@ impl SessionRepo {
     /// Returns `AppError::Db` if the query fails.
     pub async fn get_most_recent_interrupted(&self) -> Result<Option<Session>> {
         let row: Option<SessionRow> = sqlx::query_as(
-            "SELECT * FROM session WHERE status = 'interrupted' \
+            "SELECT * FROM session WHERE status = ?1 \
              ORDER BY updated_at DESC LIMIT 1",
         )
+        .bind(SessionStatus::Interrupted.as_str())
         .fetch_optional(self.db.as_ref())
         .await?;
 
@@ -515,10 +520,10 @@ impl SessionRepo {
     ///
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_interrupted(&self) -> Result<Vec<Session>> {
-        let rows: Vec<SessionRow> =
-            sqlx::query_as("SELECT * FROM session WHERE status = 'interrupted'")
-                .fetch_all(self.db.as_ref())
-                .await?;
+        let rows: Vec<SessionRow> = sqlx::query_as("SELECT * FROM session WHERE status = ?1")
+            .bind(SessionStatus::Interrupted.as_str())
+            .fetch_all(self.db.as_ref())
+            .await?;
 
         rows.into_iter().map(SessionRow::into_session).collect()
     }
@@ -530,7 +535,9 @@ impl SessionRepo {
     /// Returns `AppError::Db` if the query fails.
     pub async fn list_active_or_paused(&self) -> Result<Vec<Session>> {
         let rows: Vec<SessionRow> =
-            sqlx::query_as("SELECT * FROM session WHERE status IN ('active', 'paused')")
+            sqlx::query_as("SELECT * FROM session WHERE (status = ?1 OR status = ?2)")
+                .bind(SessionStatus::Active.as_str())
+                .bind(SessionStatus::Paused.as_str())
                 .fetch_all(self.db.as_ref())
                 .await?;
 
@@ -549,7 +556,8 @@ impl SessionRepo {
     /// Returns `AppError::Db` if the query fails.
     pub async fn load_active_session_timestamps(&self) -> Result<Vec<(String, Option<String>)>> {
         let rows: Vec<(String, Option<String>)> =
-            sqlx::query_as("SELECT id, last_activity_at FROM session WHERE status = 'active'")
+            sqlx::query_as("SELECT id, last_activity_at FROM session WHERE status = ?1")
+                .bind(SessionStatus::Active.as_str())
                 .fetch_all(self.db.as_ref())
                 .await?;
 
@@ -603,10 +611,11 @@ impl SessionRepo {
     /// Returns `AppError::Db` if the query fails.
     pub async fn find_interrupted_by_channel(&self, channel_id: &str) -> Result<Vec<Session>> {
         let rows: Vec<SessionRow> = sqlx::query_as(
-            "SELECT * FROM session WHERE channel_id = ?1 AND status = 'interrupted' \
+            "SELECT * FROM session WHERE channel_id = ?1 AND status = ?2 \
              ORDER BY updated_at DESC",
         )
         .bind(channel_id)
+        .bind(SessionStatus::Interrupted.as_str())
         .fetch_all(self.db.as_ref())
         .await?;
 
