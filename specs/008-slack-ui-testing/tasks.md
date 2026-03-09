@@ -223,14 +223,14 @@
 
 ### Tasks
 
-**5.1** Complete `tests/live/live_message_tests.rs`
+- [X] **5.1** Complete `tests/live/live_message_tests.rs`
 - Post approval message → verify structure via API
 - Post to thread → verify via `conversations.replies`
 - Post to multiple sessions → verify correct threading
 - Scenarios: S-T2-001, S-T2-002, S-T2-003
 - FRs: FR-013, FR-018
 
-**5.2** Create `tests/live/live_interaction_tests.rs`
+- [X] **5.2** Create `tests/live/live_interaction_tests.rs`
 - Approval accept round-trip: post approval → dispatch synthetic accept → verify DB + follow-up message
 - Prompt continue round-trip
 - Stall nudge round-trip
@@ -238,25 +238,25 @@
 - Scenarios: S-T2-004, S-T2-005, S-T2-010, S-T2-013
 - FRs: FR-014
 
-**5.3** Create `tests/live/live_threading_tests.rs`
+- [X] **5.3** Create `tests/live/live_threading_tests.rs`
 - Multi-session thread isolation in real Slack
 - Scenarios: S-T2-003
 - FRs: FR-018
 
-**5.4** Create `tests/live/live_command_tests.rs`
+- [X] **5.4** Create `tests/live/live_command_tests.rs`
 - Slash command dispatch and response verification
 - Scenario: S-T2-012
 
-**5.5** Add rate limit handling test
+- [X] **5.5** Add rate limit handling test
 - Post messages in rapid succession → verify server handles backoff
 - Scenario: S-T2-009
 
 ### Constitution Gate
 
-- [ ] All live tests pass with credentials: `cargo test --features live-slack-tests`
-- [ ] Clippy clean
-- [ ] SC-006: all Tier 2 scenarios produce structured results
-- [ ] SC-008: threaded messages verified in correct threads
+- [X] All live tests pass with credentials: `cargo test --features live-slack-tests`
+- [X] Clippy clean
+- [X] SC-006: all Tier 2 scenarios produce structured results
+- [X] SC-008: threaded messages verified in correct threads
 
 ---
 

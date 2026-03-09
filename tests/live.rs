@@ -21,4 +21,7 @@
 mod live {
     pub(crate) mod live_helpers;
     mod live_message_tests;
+    mod live_interaction_tests;
+    mod live_threading_tests;
+    mod live_command_tests;
 }

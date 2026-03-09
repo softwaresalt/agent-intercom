@@ -247,6 +247,184 @@ impl LiveSlackClient {
         }
         Ok(())
     }
+
+    /// Post a message with Block Kit blocks to `channel_id`.
+    ///
+    /// Returns the Slack timestamp (`ts`) for the posted message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the HTTP request fails or Slack responds
+    /// with `"ok": false`.
+    pub async fn post_with_blocks(
+        &self,
+        channel_id: &str,
+        text: &str,
+        blocks: serde_json::Value,
+    ) -> Result<String, String> {
+        let body = json!({ "channel": channel_id, "text": text, "blocks": blocks });
+
+        let resp: Value = self
+            .http
+            .post(format!("{SLACK_API_BASE}/chat.postMessage"))
+            .header("Authorization", self.auth_header())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("chat.postMessage (blocks) request failed: {e}"))?
+            .json::<Value>()
+            .await
+            .map_err(|e| format!("chat.postMessage (blocks) parse failed: {e}"))?;
+
+        if resp["ok"].as_bool() != Some(true) {
+            return Err(format!(
+                "chat.postMessage (blocks) error: {}",
+                resp["error"].as_str().unwrap_or("unknown")
+            ));
+        }
+
+        resp["ts"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "chat.postMessage (blocks): missing ts in response".to_owned())
+    }
+
+    /// Post a plain-text reply in the thread anchored by `thread_ts`.
+    ///
+    /// Returns the Slack timestamp of the new reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the HTTP request fails or Slack responds
+    /// with `"ok": false`.
+    pub async fn post_thread_message(
+        &self,
+        channel_id: &str,
+        thread_ts: &str,
+        text: &str,
+    ) -> Result<String, String> {
+        let body = json!({
+            "channel": channel_id,
+            "thread_ts": thread_ts,
+            "text": text,
+        });
+
+        let resp: Value = self
+            .http
+            .post(format!("{SLACK_API_BASE}/chat.postMessage"))
+            .header("Authorization", self.auth_header())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("chat.postMessage (thread) request failed: {e}"))?
+            .json::<Value>()
+            .await
+            .map_err(|e| format!("chat.postMessage (thread) parse failed: {e}"))?;
+
+        if resp["ok"].as_bool() != Some(true) {
+            return Err(format!(
+                "chat.postMessage (thread) error: {}",
+                resp["error"].as_str().unwrap_or("unknown")
+            ));
+        }
+
+        resp["ts"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "chat.postMessage (thread): missing ts in response".to_owned())
+    }
+
+    /// Post Block Kit blocks as a reply in the thread anchored by `thread_ts`.
+    ///
+    /// Returns the Slack timestamp of the new reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the HTTP request fails or Slack responds
+    /// with `"ok": false`.
+    pub async fn post_thread_blocks(
+        &self,
+        channel_id: &str,
+        thread_ts: &str,
+        text: &str,
+        blocks: serde_json::Value,
+    ) -> Result<String, String> {
+        let body = json!({
+            "channel": channel_id,
+            "thread_ts": thread_ts,
+            "text": text,
+            "blocks": blocks,
+        });
+
+        let resp: Value = self
+            .http
+            .post(format!("{SLACK_API_BASE}/chat.postMessage"))
+            .header("Authorization", self.auth_header())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("chat.postMessage (thread blocks) request failed: {e}"))?
+            .json::<Value>()
+            .await
+            .map_err(|e| format!("chat.postMessage (thread blocks) parse failed: {e}"))?;
+
+        if resp["ok"].as_bool() != Some(true) {
+            return Err(format!(
+                "chat.postMessage (thread blocks) error: {}",
+                resp["error"].as_str().unwrap_or("unknown")
+            ));
+        }
+
+        resp["ts"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "chat.postMessage (thread blocks): missing ts in response".to_owned())
+    }
+
+    /// Update an existing message's content.
+    ///
+    /// Replaces the message at `ts` in `channel_id` with the given `text` and
+    /// optional `blocks`. When `blocks` is `Some`, the Block Kit payload
+    /// replaces the original blocks; when `None`, only `text` is updated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the HTTP request fails or Slack responds
+    /// with `"ok": false`.
+    pub async fn update_message(
+        &self,
+        channel_id: &str,
+        ts: &str,
+        text: &str,
+        blocks: Option<serde_json::Value>,
+    ) -> Result<(), String> {
+        let mut body = json!({ "channel": channel_id, "ts": ts, "text": text });
+
+        if let Some(blks) = blocks {
+            body["blocks"] = blks;
+        }
+
+        let resp: Value = self
+            .http
+            .post(format!("{SLACK_API_BASE}/chat.update"))
+            .header("Authorization", self.auth_header())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("chat.update request failed: {e}"))?
+            .json::<Value>()
+            .await
+            .map_err(|e| format!("chat.update parse failed: {e}"))?;
+
+        if resp["ok"].as_bool() != Some(true) {
+            return Err(format!(
+                "chat.update error: {}",
+                resp["error"].as_str().unwrap_or("unknown")
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 // ── Assertion helpers ─────────────────────────────────────────────────────────

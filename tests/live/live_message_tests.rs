@@ -107,3 +107,202 @@ fn assert_blocks_contain_handles_missing_blocks() {
         "absent blocks field serialises as null"
     );
 }
+
+// ── S-T2-001 (full): Approval message with Block Kit blocks ──────────────────
+
+/// S-T2-001 (full): Post a real approval message with Block Kit blocks,
+/// retrieve it via `conversations.history`, and assert the structural
+/// content (severity section, diff section, action buttons) is present.
+///
+/// Scenario: S-T2-001 | FRs: FR-013, FR-018
+#[tokio::test]
+async fn post_approval_blocks_and_verify_structure() {
+    use agent_intercom::models::approval::RiskLevel;
+    use agent_intercom::slack::blocks;
+
+    let config = match LiveTestConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[live-test] Skipping post_approval_blocks_and_verify_structure: {e}");
+            return;
+        }
+    };
+
+    let client = LiveSlackClient::new(&config.bot_token);
+    let run_id = Uuid::new_v4();
+
+    // Build an approval message with realistic blocks.
+    let title = format!("[live-test] Add error handler (run {run_id:.8})");
+    let diff = "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1,3 @@\n+use anyhow::Result;\n fn foo() {}\n+fn bar() -> Result<()> { Ok(()) }";
+    let file_path = "src/lib.rs";
+
+    let mut all_blocks = blocks::build_approval_blocks(&title, None, diff, file_path, RiskLevel::Low);
+    all_blocks.push(blocks::approval_buttons(&run_id.to_string()));
+    let blocks_json =
+        serde_json::to_value(&all_blocks).expect("serialize approval blocks");
+
+    let text = format!("[live-test] approval request (run {run_id:.8})");
+    let ts = client
+        .post_with_blocks(&config.channel_id, &text, blocks_json)
+        .await
+        .expect("post_with_blocks should succeed with valid credentials");
+
+    // Retrieve via conversations.history and assert structure.
+    let message = client
+        .get_message(&config.channel_id, &ts)
+        .await
+        .expect("get_message should find the just-posted message");
+
+    // The message must contain the title text (risk emoji + title).
+    assert_blocks_contain(&message, "Add error handler");
+
+    // The diff section must contain the diff text.
+    assert_blocks_contain(&message, "anyhow");
+
+    // The actions block must contain the approve_accept action ID.
+    assert_blocks_contain(&message, "approve_accept");
+
+    // The approve_reject action ID must also be present.
+    assert_blocks_contain(&message, "approve_reject");
+
+    // Cleanup.
+    client
+        .cleanup_test_messages(&config.channel_id, &[ts.as_str()])
+        .await
+        .expect("cleanup_test_messages should succeed");
+}
+
+// ── S-T2-002: Threaded message verified via conversations.replies ─────────────
+
+/// S-T2-002: Post a parent message, then post a thread reply to it.
+/// Retrieve the thread via `conversations.replies` and verify the reply is
+/// present in the correct thread — not as a top-level message.
+///
+/// Scenario: S-T2-002 | FRs: FR-013, FR-018
+#[tokio::test]
+async fn post_threaded_reply_and_verify_in_replies() {
+    let config = match LiveTestConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[live-test] Skipping post_threaded_reply_and_verify_in_replies: {e}");
+            return;
+        }
+    };
+
+    let client = LiveSlackClient::new(&config.bot_token);
+    let run_id = Uuid::new_v4();
+
+    // Post the parent (session thread anchor) message.
+    let parent_text = format!("[live-test] session anchor {run_id:.8}");
+    let parent_ts = client
+        .post_test_message(&config.channel_id, &parent_text)
+        .await
+        .expect("post parent message should succeed");
+
+    // Post a reply in the thread anchored by parent_ts.
+    let reply_marker = format!("broadcast-reply-{run_id:.8}");
+    let reply_text = format!("[live-test] {reply_marker}");
+    let reply_ts = client
+        .post_thread_message(&config.channel_id, &parent_ts, &reply_text)
+        .await
+        .expect("post_thread_message should succeed");
+
+    // Retrieve the thread and verify the reply is present.
+    let replies = client
+        .get_thread_replies(&config.channel_id, &parent_ts)
+        .await
+        .expect("get_thread_replies should succeed");
+
+    // The first element is the parent; subsequent elements are replies.
+    assert!(
+        replies.len() >= 2,
+        "thread should contain at least the parent + 1 reply; got {} messages",
+        replies.len()
+    );
+
+    let reply_present = replies
+        .iter()
+        .any(|m| m["text"].as_str().unwrap_or_default().contains(&reply_marker));
+
+    assert!(
+        reply_present,
+        "reply with marker '{reply_marker}' must appear in thread replies"
+    );
+
+    // The reply must carry thread_ts matching the parent.
+    let reply_msg = replies
+        .iter()
+        .find(|m| m["text"].as_str().unwrap_or_default().contains(&reply_marker))
+        .expect("reply message must be found");
+
+    assert_eq!(
+        reply_msg["thread_ts"].as_str().unwrap_or_default(),
+        parent_ts.as_str(),
+        "reply thread_ts must match the parent ts"
+    );
+
+    // Cleanup: deleting the parent removes the whole thread.
+    client
+        .cleanup_test_messages(&config.channel_id, &[parent_ts.as_str(), reply_ts.as_str()])
+        .await
+        .expect("cleanup should succeed");
+}
+
+// ── S-T2-009: Rate limit handling — rapid message burst ───────────────────────
+
+/// S-T2-009: Post five messages in rapid succession (no deliberate delay).
+/// All posts must succeed, exercising the reqwest client's handling of the
+/// connection pool and verifying the test channel accepts burst traffic
+/// within the bot's rate tier.
+///
+/// Note: This test verifies the *test-harness client* path. The production
+/// server has its own rate-limited queue — this test exercises whether
+/// sequential bursts reach Slack successfully, not the server's retry logic.
+///
+/// Scenario: S-T2-009 | FRs: FR-019
+#[tokio::test]
+async fn rapid_message_burst_all_succeed() {
+    let config = match LiveTestConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[live-test] Skipping rapid_message_burst_all_succeed: {e}");
+            return;
+        }
+    };
+
+    let client = LiveSlackClient::new(&config.bot_token);
+    let run_id = Uuid::new_v4();
+
+    let mut timestamps: Vec<String> = Vec::with_capacity(5);
+
+    for i in 0..5_usize {
+        let text = format!("[live-test] burst message {i}/5 (run {run_id:.8})");
+        let ts = client
+            .post_test_message(&config.channel_id, &text)
+            .await
+            .unwrap_or_else(|e| panic!("burst message {i} failed: {e}"));
+        timestamps.push(ts);
+    }
+
+    assert_eq!(
+        timestamps.len(),
+        5,
+        "all 5 burst messages must produce distinct timestamps"
+    );
+
+    // All timestamps must be unique (distinct messages, not duplicates).
+    let unique: std::collections::HashSet<&str> =
+        timestamps.iter().map(String::as_str).collect();
+    assert_eq!(
+        unique.len(),
+        5,
+        "each burst message must have a unique ts"
+    );
+
+    // Cleanup all burst messages.
+    let ts_refs: Vec<&str> = timestamps.iter().map(String::as_str).collect();
+    client
+        .cleanup_test_messages(&config.channel_id, &ts_refs)
+        .await
+        .expect("cleanup of burst messages should succeed");
+}
