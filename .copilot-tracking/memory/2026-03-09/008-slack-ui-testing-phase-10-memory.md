@@ -118,6 +118,41 @@ Phase 10 is the final phase of 008-slack-ui-testing. The feature is complete.
 
 ### Cargo Test Counts (Phase 10 run)
 
+---
+
+## Final Adversarial Review Remediation
+
+### Combined Review Report
+
+- Review report: `.copilot-tracking/pr/review/008-slack-ui-testing/final-adversarial-review.md`
+- Applied remediation commit: `8a14dc9` — `fix(008-slack-ui-testing): address adversarial review findings`
+
+### Findings Applied
+
+| Finding | Files | Change |
+|---|---|---|
+| FR-001 | `specs/008-slack-ui-testing/quickstart.md` | Corrected Tier 2 and Tier 3 env var names to match code and `.env.example` |
+| FR-002 | `tests/visual/scenarios/*.spec.ts` | Converted false-green artifact skips into explicit assertions after diagnostic screenshot capture |
+| FR-003 | `tests/visual/scenarios/thread-reply-fallback.spec.ts` | Removed skip-on-missing-fallback behavior for configured environments |
+| FR-004 | `tests/live/live_helpers.rs` | Made message cleanup best-effort with aggregated error reporting |
+
+### Findings Deferred
+
+| Finding | Reason |
+|---|---|
+| FR-005 | `dispatch_command` remains public because the current external `tests/` harness depends on it |
+| FR-006 | Cleanup guards across all live tests are a broader refactor and were recorded as follow-up work |
+| FR-007 | macOS-specific `Meta+K` support is low severity and outside the current Windows validation environment |
+
+### Verification After Remediation
+
+- `cargo check` ✅
+- `cargo clippy --all-targets -- -D warnings -D clippy::pedantic` ✅
+- `cargo fmt --all -- --check` ✅
+- `cargo test` ✅
+- `tsc --noEmit` ✅
+- `playwright test --list` ✅
+
 - lib inline: 37 tests
 - contract.rs: 250 tests
 - integration.rs: 295 tests
