@@ -1,0 +1,15 @@
+{
+  "name": "agent-intercom-visual-tests",
+  "version": "1.0.0",
+  "description": "Tier 3 browser-automated visual tests for agent-intercom Slack UI",
+  "private": true,
+  "scripts": {
+    "test": "npx playwright test",
+    "test:setup": "npx playwright test --project=setup",
+    "report": "npx playwright show-report reports"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "dotenv": "^16.4.5"
+  }
+}

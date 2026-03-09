@@ -50,3 +50,10 @@ data/*.db-journal
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Playwright Tier 3 visual test artifacts (tests/visual/)
+tests/visual/node_modules/
+tests/visual/auth/*.json
+tests/visual/screenshots/*.png
+tests/visual/reports/
+tests/visual/.env
