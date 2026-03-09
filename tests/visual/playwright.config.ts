@@ -37,7 +37,11 @@ export default defineConfig({
     /* Chromium-only — Slack web client is tested against Chromium. */
     ...devices['Desktop Chrome'],
     headless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
-    screenshot: 'only-on-failure',
+    /*
+     * Always capture screenshots so every test step is included in the HTML
+     * report and the gallery (S-T3-012, FR-029).
+     */
+    screenshot: 'on',
     video: 'off',
     trace: 'off',
     baseURL: process.env.SLACK_WORKSPACE_URL,
@@ -58,4 +62,5 @@ export default defineConfig({
   ],
 
   globalSetup: './helpers/slack-auth.ts',
+  globalTeardown: './helpers/generate-gallery.ts',
 });

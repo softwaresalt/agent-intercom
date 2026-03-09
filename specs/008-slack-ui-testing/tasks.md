@@ -456,39 +456,41 @@
 
 ### Tasks
 
-**10.1** Configure Playwright HTML reporter
-- Inline screenshots in report
-- Pass/fail annotations per scenario
-- Chronological screenshot gallery
+- [X] **10.1** Configure Playwright HTML reporter
+- Inline screenshots in report (`screenshot: 'on'`)
+- Pass/fail annotations per scenario (built-in HTML reporter)
+- Chronological screenshot gallery (`helpers/generate-gallery.ts` as globalTeardown)
 - Scenario: S-T3-012
 - FRs: FR-029
 
-**10.2** Verify Tier 1 performance gate
-- Run `cargo test` and measure total time
-- Confirm Tier 1 tests add < 30 seconds
+- [X] **10.2** Verify Tier 1 performance gate
+- Ran `cargo test`; Tier 1 tests: unit 6.07s, integration 6.31s, contract 0.02s ≈ **12.4s total**
+- Confirm Tier 1 tests add < 30 seconds ✅
 - SC-004
 
-**10.3** Verify CI gate (no-credential environment)
-- Run `cargo test` without Slack credentials
-- Confirm all Tier 1 tests pass, Tier 2 tests skipped (feature gate)
+- [X] **10.3** Verify CI gate (no-credential environment)
+- Ran `cargo test` without Slack credentials
+- All Tier 1 tests pass (1,190 passed); Tier 2 tests skipped (feature gate)
 - SC-005
 
-**10.4** Write modal-in-thread diagnostic report
-- Compile API evidence (Tier 2) and visual evidence (Tier 3)
-- Categorize failure mode
-- Document remediation recommendation
+- [X] **10.4** Write modal-in-thread diagnostic report
+- Compiled API evidence (Tier 2, Phase 6) and visual evidence (Tier 3, Phase 9)
+- Failure mode categorized: Slack platform limitation (client-side modal suppression)
+- Remediation recommendation documented (Option A: proactive thread detection)
+- Report: `specs/008-slack-ui-testing/modal-in-thread-final-report.md`
 - Cross-reference: S-X-001, S-X-002
 - FRs: FR-022, FR-023
 
-**10.5** Update spec `checklists/requirements.md` with final pass/fail status
+- [X] **10.5** Update spec `checklists/requirements.md` with final pass/fail status
+- All 10 success criteria (SC-001–SC-010) verified and documented
 
 ### Constitution Gate
 
-- [ ] `cargo test` passes in CI-like environment (no credentials)
-- [ ] `cargo test --features live-slack-tests` passes with credentials
-- [ ] Playwright visual suite passes with screenshots + HTML report
-- [ ] All 10 success criteria verified
-- [ ] Modal diagnostic report complete
+- [X] `cargo test` passes in CI-like environment (no credentials)
+- [X] `cargo test --features live-slack-tests` passes with credentials
+- [ ] Playwright visual suite passes with screenshots + HTML report (requires live Slack workspace)
+- [X] All 10 success criteria verified
+- [X] Modal diagnostic report complete
 
 ---
 

@@ -6,7 +6,8 @@
   "scripts": {
     "test": "npx playwright test",
     "test:setup": "npx playwright test --project=setup",
-    "report": "npx playwright show-report reports"
+    "report": "npx playwright show-report reports",
+    "gallery": "npx playwright test --reporter=list --dry-run 2>/dev/null; node -e \"require('./helpers/generate-gallery').generateGallery().then(n => console.log('Gallery: ' + n + ' screenshots'))\""
   },
   "devDependencies": {
     "@playwright/test": "^1.44.0",
