@@ -16,7 +16,7 @@ dotenv.config({ path: path.resolve(__dirname, '.env') });
  */
 export default defineConfig({
   testDir: './scenarios',
-  outputDir: './reports/test-results',
+  outputDir: './test-results',
 
   /* Run tests sequentially — Slack UI is stateful and cannot run in parallel safely. */
   workers: 1,

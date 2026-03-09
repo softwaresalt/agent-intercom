@@ -56,4 +56,5 @@ tests/visual/node_modules/
 tests/visual/auth/*.json
 tests/visual/screenshots/*.png
 tests/visual/reports/
+tests/visual/test-results/
 tests/visual/.env

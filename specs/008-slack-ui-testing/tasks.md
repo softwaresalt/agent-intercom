@@ -364,7 +364,7 @@
 
 ### Tasks
 
-**8.1** Create `tests/visual/scenarios/message-rendering.spec.ts`
+- [X] **8.1** Create `tests/visual/scenarios/message-rendering.spec.ts`
 - Navigate to test channel
 - Verify approval message rendering: emoji, diff block, buttons
 - Verify prompt message rendering: text, buttons
@@ -375,13 +375,13 @@
 - Scenarios: S-T3-002, S-T3-003, S-T3-004, S-T3-009, S-T3-010
 - FRs: FR-026
 
-**8.2** Create `tests/visual/scenarios/approval-flow.spec.ts`
+- [X] **8.2** Create `tests/visual/scenarios/approval-flow.spec.ts`
 - Click Accept button on approval message
 - Capture before/after screenshots showing button replacement
 - Scenario: S-T3-008
 - FRs: FR-027, FR-025
 
-**8.3** Create `tests/visual/scenarios/button-replacement.spec.ts`
+- [X] **8.3** Create `tests/visual/scenarios/button-replacement.spec.ts`
 - Click various buttons (Continue, Nudge, Resume) and capture transitions
 - Verify static status text replaces interactive buttons
 - Scenarios: S-T3-008
