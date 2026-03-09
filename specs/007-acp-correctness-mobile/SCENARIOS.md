@@ -45,7 +45,7 @@
 | S012 | Terminated session frees capacity slot | max_sessions = 2; 2 ACP sessions; 1 transitions to `terminated` | `/arc session-start <prompt>` | Session created successfully; capacity = 2/2 after create | New session created; terminated session not counted | happy-path |
 | S013 | Concurrent session starts at capacity boundary | max_sessions = 2; 1 ACP session active; 2 concurrent `/arc session-start` requests | Two simultaneous `handle_acp_session_start` calls | At most one succeeds; the other gets capacity-exceeded error | At most 2 ACP sessions exist (created + active) | concurrent |
 | S014 | max_sessions = 0 rejects all ACP starts | max_sessions = 0; no existing sessions | `/arc session-start <prompt>` | Error returned: capacity exceeded (0/0) | No session created | boundary |
-| S015 | Only active and created states counted | max_sessions = 3; 1 `active` + 1 `paused` + 1 `terminated` ACP session | `/arc session-start <prompt>` | Session created; only `active` session counted (paused/terminated excluded) | New session in `created`; capacity used = 2/3 | edge-case |
+| S015 | Active, created, and paused states counted (LC-06) | max_sessions = 3; 1 `active` + 1 `paused` + 1 `terminated` ACP session | `/arc session-start <prompt>` | Session created; `active`, `created`, and `paused` ACP sessions counted; only `terminated`/`interrupted` excluded | New session in `created`; capacity used = 3/3 | edge-case |
 
 ---
 

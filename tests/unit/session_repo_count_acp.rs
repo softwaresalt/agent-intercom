@@ -4,6 +4,7 @@
 //! - T009 (S010): `count_active_acp` counts both `active` and `created` ACP sessions
 //! - T010 (S011): `count_active_acp` excludes MCP sessions from count
 //! - T011 (S015): `count_active_acp` excludes `terminated` and `interrupted` ACP sessions
+//!   (paused sessions ARE counted — see T015/LC-06)
 //! - T014 (S014): with `max_sessions = 0`, count `>= max` always rejects all starts
 //! - T015 (LC-06): `count_active_acp` counts `paused` ACP sessions (live child process)
 

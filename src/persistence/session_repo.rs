@@ -485,11 +485,12 @@ impl SessionRepo {
         let row = sqlx::query(
             "SELECT COUNT(*) AS cnt FROM session \
              WHERE (status = ?1 OR status = ?2 OR status = ?3) \
-             AND protocol_mode = 'acp'",
+             AND protocol_mode = ?4",
         )
         .bind(SessionStatus::Active.as_str())
         .bind(SessionStatus::Created.as_str())
         .bind(SessionStatus::Paused.as_str())
+        .bind(ProtocolMode::Acp.as_str())
         .fetch_one(self.db.as_ref())
         .await?;
 

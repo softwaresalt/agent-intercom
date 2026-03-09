@@ -96,8 +96,11 @@ pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
 /// handler delivers the operator's reply text through the oneshot only when the reply
 /// comes from the stored authorized user. The `session_id` enables cleanup when the
 /// owning session terminates (`cleanup_session_fallbacks` — F-20).
-pub type PendingThreadReplies =
-    Arc<Mutex<HashMap<String, (String, String, oneshot::Sender<String>)>>>;
+///
+/// Canonical definition lives in [`crate::slack::handlers::thread_reply`]; re-exported
+/// here so callers that import `AppState` from this module get the type without a
+/// separate use-path.
+pub use crate::slack::handlers::thread_reply::PendingThreadReplies;
 
 /// Live child processes spawned by the `session-start` slash command,
 /// keyed by `session_id`. Keeping them here prevents `kill_on_drop` from

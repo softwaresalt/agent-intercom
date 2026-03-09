@@ -134,7 +134,7 @@ pub async fn handle_wait_action(
                         button_msg_ts,
                         slack,
                         Arc::clone(&state.pending_thread_replies),
-                        session_id,
+                        callback_id.as_str(),
                         move |reply_text| async move {
                             if let Err(err) = state_clone
                                 .driver

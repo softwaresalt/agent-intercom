@@ -127,6 +127,17 @@ impl SessionStatus {
     }
 }
 
+impl ProtocolMode {
+    /// Returns the `snake_case` string representation stored in the database.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mcp => "mcp",
+            Self::Acp => "acp",
+        }
+    }
+}
+
 impl Session {
     /// Construct a new session with defaults and generated identifier.
     #[must_use]

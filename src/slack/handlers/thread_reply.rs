@@ -280,6 +280,9 @@ where
             %post_err,
             "thread-reply fallback: failed to post fallback message — removing pending entry and aborting (F-16)"
         );
+        // Note: if the LC-04 duplicate guard fired above (register returned early
+        // without inserting the key), this `remove` is a harmless no-op — the key
+        // was never inserted in that path.
         pending
             .lock()
             .await
@@ -293,6 +296,9 @@ where
         match tokio::time::timeout(FALLBACK_REPLY_TIMEOUT, rx).await {
             Ok(Ok(reply_text)) => resolve(reply_text).await,
             Ok(Err(_)) => {
+                // Sender dropped — this is the expected path when the LC-04 duplicate
+                // guard fired and dropped `tx`, causing `rx` to resolve immediately to
+                // `Err`. The waiter exits cleanly without resolution.
                 warn!(
                     context = log_ctx,
                     "thread-reply fallback: sender dropped — task exiting (F-16)"
