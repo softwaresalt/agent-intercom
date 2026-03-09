@@ -106,7 +106,16 @@ pub async fn handle_command(
 }
 
 /// Dispatch a parsed command to the correct handler.
-async fn dispatch_command(
+///
+/// Routes `command` (the word after `/intercom`) to the appropriate sub-handler,
+/// passing `args`, the acting `user_id`, and the originating `channel_id`.
+///
+/// # Errors
+///
+/// Returns `AppError` if the underlying sub-handler fails (e.g., database error,
+/// missing session, path validation failure). Mode-mismatch responses are returned
+/// as `Ok(String)` with an informational message rather than as errors.
+pub async fn dispatch_command(
     command: &str,
     args: &[&str],
     user_id: &str,
