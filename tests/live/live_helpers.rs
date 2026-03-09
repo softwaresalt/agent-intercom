@@ -381,6 +381,41 @@ impl LiveSlackClient {
             .ok_or_else(|| "chat.postMessage (thread blocks): missing ts in response".to_owned())
     }
 
+    /// Call `views.open` with the given `trigger_id` and `view` JSON.
+    ///
+    /// Used by modal-diagnostic tests to document the API-level response when
+    /// `views.open` is invoked for a top-level vs. threaded button context.
+    /// In live diagnostic runs the `trigger_id` will be synthetic (invalid),
+    /// so callers should inspect the returned `Value` rather than panicking on
+    /// `"ok": false`.
+    ///
+    /// Returns the raw Slack API response JSON so the caller can log and assert
+    /// on the `ok` flag and `error` field.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the HTTP request itself fails (network
+    /// error, TLS error). A Slack-side `"ok": false` is returned as `Ok(Value)`
+    /// so the caller can inspect and document the specific error code.
+    pub async fn open_modal_with_trigger(
+        &self,
+        trigger_id: &str,
+        view: serde_json::Value,
+    ) -> Result<Value, String> {
+        let body = json!({ "trigger_id": trigger_id, "view": view });
+
+        self.http
+            .post(format!("{SLACK_API_BASE}/views.open"))
+            .header("Authorization", self.auth_header())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("views.open request failed: {e}"))?
+            .json::<Value>()
+            .await
+            .map_err(|e| format!("views.open response parse failed: {e}"))
+    }
+
     /// Update an existing message's content.
     ///
     /// Replaces the message at `ts` in `channel_id` with the given `text` and

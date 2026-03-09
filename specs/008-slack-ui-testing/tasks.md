@@ -268,32 +268,32 @@
 
 ### Tasks
 
-**6.1** Create `tests/live/live_modal_tests.rs`
+- [X] **6.1** Create `tests/live/live_modal_tests.rs`
 - Test modal open for top-level button → document API result
 - Test modal open for threaded button → document API result
 - Compare results: success/error, trigger_id scope, timing
 - Scenarios: S-T2-006, S-T2-007
 - FRs: FR-015, FR-016, FR-022
 
-**6.2** Add thread-reply fallback end-to-end test
+- [X] **6.2** Add thread-reply fallback end-to-end test
 - Simulate modal failure → fallback activates → thread reply resolves prompt
 - Scenario: S-T2-008
 - FRs: FR-017, FR-023
 
-**6.3** Test wait-resume-instruct modal in thread
+- [X] **6.3** Test wait-resume-instruct modal in thread
 - Same pattern as prompt refine: threaded vs top-level
 - Scenario: S-T2-011
 - FRs: FR-015
 
-**6.4** Write diagnostic report section in `SCENARIOS.md` or standalone file
+- [X] **6.4** Write diagnostic report section in `SCENARIOS.md` or standalone file
 - Categorize failure mode based on API evidence
 - Scenarios: S-X-001
 
 ### Constitution Gate
 
-- [ ] Modal diagnostic tests pass
-- [ ] API-level evidence documented for modal-in-thread behavior
-- [ ] Fallback coverage verified for all 3 modal paths (SC-003 API portion)
+- [X] Modal diagnostic tests pass
+- [X] API-level evidence documented for modal-in-thread behavior
+- [X] Fallback coverage verified for all 3 modal paths (SC-003 API portion)
 
 ---
 

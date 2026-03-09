@@ -24,4 +24,5 @@ mod live {
     mod live_interaction_tests;
     mod live_threading_tests;
     mod live_command_tests;
+    mod live_modal_tests;
 }
