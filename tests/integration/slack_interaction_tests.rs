@@ -517,6 +517,57 @@ async fn simulated_wait_resume_resolves_oneshot() {
 
 // ── Authorization guard ───────────────────────────────────────────────────────
 
+/// S-T1-016 — Authorized user attempting an approval action must succeed.
+///
+/// Verifies the positive arm of the authorization guard: when the acting user
+/// is listed in `authorized_user_ids`, the action is allowed to proceed,
+/// the oneshot resolves, and no error is returned.
+#[tokio::test]
+async fn authorized_user_approval_action_proceeds() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let authorized = "U_AUTHORIZED";
+
+    let (approvals, prompts, waits) = make_maps();
+    let state = app_state_with_maps(root, authorized, approvals, prompts, waits).await;
+
+    let session = create_session(&state.db, authorized, root).await;
+    let approval = create_approval(&state.db, &session.id).await;
+    let request_id = approval.id.clone();
+
+    let (tx, rx) = oneshot::channel::<ApprovalResponse>();
+    state
+        .pending_approvals
+        .lock()
+        .await
+        .insert(request_id.clone(), tx);
+
+    // Dispatch from the authorized user — guard must allow this.
+    let action = make_action("approve_accept", &request_id);
+    let result = handlers::approval::handle_approval_action(
+        &action,
+        authorized, // ← authorized
+        &no_trigger(),
+        None,
+        None,
+        &state,
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "authorized user action must return Ok: {result:?}"
+    );
+
+    // Oneshot must resolve — the action proceeded.
+    let response = tokio::time::timeout(Duration::from_millis(500), rx)
+        .await
+        .expect("oneshot must resolve")
+        .expect("oneshot must not be dropped");
+
+    assert_eq!(response.status, "approved", "status must be 'approved'");
+}
+
 /// Unauthorized user attempting an approval action must be rejected.
 ///
 /// The approval handler checks `authorized_user_ids` before acting.
@@ -625,5 +676,136 @@ async fn double_submission_second_call_returns_not_found() {
     assert!(
         second.is_ok(),
         "second dispatch must return Ok (handler swallows driver NotFound)"
+    );
+}
+
+// ── S-T1-019: Unknown action_id ───────────────────────────────────────────────
+
+/// S-T1-019 — An unknown `action_id` on the approval handler must be rejected
+/// with a descriptive error rather than panicking or silently succeeding.
+///
+/// Only `"approve_accept"` and `"approve_reject"` are valid. Any other
+/// `action_id` must return `Err` containing `"unknown approval action_id"`.
+#[tokio::test]
+async fn unknown_action_id_handled_gracefully() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST_OWNER";
+
+    let (approvals, prompts, waits) = make_maps();
+    let state = app_state_with_maps(root, user, approvals, prompts, waits).await;
+
+    let session = create_session(&state.db, user, root).await;
+    let approval = create_approval(&state.db, &session.id).await;
+    let request_id = approval.id.clone();
+
+    // Do NOT register a oneshot — the unknown action must fail before reaching that.
+    let action = make_action("approve_unknown_action", &request_id);
+    let result = handlers::approval::handle_approval_action(
+        &action,
+        user,
+        &no_trigger(),
+        None,
+        None,
+        &state,
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "unknown action_id must return Err, got Ok"
+    );
+    let err_msg = result.unwrap_err();
+    assert!(
+        err_msg.contains("unknown approval action_id"),
+        "error message must describe the unknown action_id, got: {err_msg}"
+    );
+}
+
+// ── S-T1-020: Stale session reference ────────────────────────────────────────
+
+/// S-T1-020 — A button action referencing a session ID that no longer exists
+/// in the database must be handled gracefully without panic.
+///
+/// The wait handler's ownership check is skipped when the session is not
+/// found, the driver call returns `NotFound` (no pending map entry), which is
+/// swallowed as a warning. The handler must return `Ok(())`.
+#[tokio::test]
+async fn stale_session_reference_handled_gracefully() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST_OWNER";
+
+    let (approvals, prompts, waits) = make_maps();
+    let state = app_state_with_maps(root, user, approvals, prompts, waits).await;
+
+    // Use a session_id that was never inserted into the database.
+    let nonexistent_session_id = "session-does-not-exist-00000000";
+
+    // No pending wait registered — driver will return NotFound and handler swallows it.
+    let action = make_action("wait_resume", nonexistent_session_id);
+    let result = handlers::wait::handle_wait_action(
+        &action,
+        user,
+        &no_trigger(),
+        None,
+        None,
+        &state,
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "stale session reference must return Ok (driver NotFound is swallowed): {result:?}"
+    );
+}
+
+// ── S-T1-027: Consumed oneshot channel ───────────────────────────────────────
+
+/// S-T1-027 — When the agent's oneshot receiver has already been dropped
+/// (e.g., due to timeout), a subsequent button action for the same prompt
+/// must be handled gracefully without panic.
+///
+/// The prompt handler records the decision in the DB, attempts to resolve the
+/// oneshot via the driver, discovers the receiver is gone, logs a warning, and
+/// returns `Ok(())`. No panic is acceptable.
+#[tokio::test]
+async fn consumed_oneshot_channel_handled_gracefully() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST_OWNER";
+
+    let (approvals, prompts, waits) = make_maps();
+    let state = app_state_with_maps(root, user, approvals, prompts, waits).await;
+
+    let session = create_session(&state.db, user, root).await;
+    let prompt = create_prompt(&state.db, &session.id).await;
+    let prompt_id = prompt.id.clone();
+
+    // Register the sender in the pending map but immediately drop the receiver,
+    // simulating a timeout on the agent side.
+    let (tx, rx) = oneshot::channel::<PromptResponse>();
+    state
+        .pending_prompts
+        .lock()
+        .await
+        .insert(prompt_id.clone(), tx);
+    drop(rx); // ← receiver dropped; next send will fail silently
+
+    let action = make_action("prompt_continue", &prompt_id);
+    let result = handlers::prompt::handle_prompt_action(
+        &action,
+        user,
+        &no_trigger(),
+        None,
+        None,
+        &state,
+    )
+    .await;
+
+    // The handler must not panic. The driver swallows the send error with warn!.
+    assert!(
+        result.is_ok(),
+        "consumed oneshot must be handled gracefully (Ok returned): {result:?}"
     );
 }

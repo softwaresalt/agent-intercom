@@ -140,41 +140,41 @@
 ### Tasks
 
 **3.1** Add authorization guard tests to `slack_interaction_tests.rs`
-- Test unauthorized user → action rejected, no state change
-- Test authorized user → action proceeds
+- [X] Test unauthorized user → action rejected, no state change
+- [X] Test authorized user → action proceeds
 - Scenarios: S-T1-015, S-T1-016
 - FRs: FR-003
 
 **3.2** Add double-submission prevention test
-- Dispatch same action twice → first resolves, second silently ignored
+- [X] Dispatch same action twice → first resolves, second silently ignored
 - Scenario: S-T1-014
 - FRs: FR-004
 
 **3.3** Create `tests/integration/slack_fallback_tests.rs`
-- Test thread-reply fallback: register pending, send reply → oneshot resolved
-- Test orphaned thread reply: no pending → ignored gracefully
+- [X] Test thread-reply fallback: register pending, send reply → oneshot resolved
+- [X] Test orphaned thread reply: no pending → ignored gracefully
 - Scenarios: S-T1-017, S-T1-018
 - FRs: FR-010, FR-011
 
 **3.4** Add error path tests to `slack_interaction_tests.rs`
-- Unknown action_id → graceful handling
-- Stale session reference → graceful error
-- Consumed oneshot channel → graceful handling
+- [X] Unknown action_id → graceful handling
+- [X] Stale session reference → graceful error
+- [X] Consumed oneshot channel → graceful handling
 - Scenarios: S-T1-019, S-T1-020, S-T1-027
 - FRs: FR-010, FR-012
 
 **3.5** Create `tests/integration/slack_threading_tests.rs`
-- Two sessions in same channel with different thread_ts
-- Button action in Session A → only Session A affected
+- [X] Two sessions in same channel with different thread_ts
+- [X] Button action in Session A → only Session A affected
 - Scenario: S-T1-024
 - FRs: FR-006
 
 ### Constitution Gate
 
-- [ ] All error path tests pass: `cargo test -- slack_fallback slack_threading`
-- [ ] Clippy clean
-- [ ] No panics in any error path test
-- [ ] SC-002 Tier 1 portion complete: all 6 interaction types have simulated tests
+- [X] All error path tests pass: `cargo test -- slack_fallback slack_threading`
+- [X] Clippy clean
+- [X] No panics in any error path test
+- [X] SC-002 Tier 1 portion complete: all 6 interaction types have simulated tests
 
 ---
 
