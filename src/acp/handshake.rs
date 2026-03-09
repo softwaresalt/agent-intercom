@@ -30,20 +30,30 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout};
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::{AppError, Result};
 
 /// ACP protocol version supported by this client.
 const PROTOCOL_VERSION: u32 = 1;
 
-/// Correlation ID used for the `initialize` request.
-const INIT_ID: &str = "intercom-init-1";
-
-/// Correlation ID used for the `session/new` request.
-const SESSION_NEW_ID: &str = "intercom-sess-1";
-
-/// Correlation ID used for the `session/prompt` request.
-const PROMPT_ID: &str = "intercom-prompt-1";
+/// Generate a unique ACP correlation ID for a given message purpose.
+///
+/// Returns a string in the form `intercom-{purpose}-{uuid}` where `{uuid}` is
+/// a fresh `UUIDv4`.  Each call produces a globally unique value so that
+/// concurrent ACP sessions never share the same correlation ID (F-13).
+///
+/// # Examples
+///
+/// ```
+/// use agent_intercom::acp::handshake::generate_correlation_id;
+/// let id = generate_correlation_id("init");
+/// assert!(id.starts_with("intercom-init-"));
+/// ```
+#[must_use]
+pub fn generate_correlation_id(purpose: &str) -> String {
+    format!("intercom-{purpose}-{}", Uuid::new_v4())
+}
 
 /// Send an ACP `initialize` JSON-RPC request to the agent over its stdin.
 ///
@@ -52,7 +62,7 @@ const PROMPT_ID: &str = "intercom-prompt-1";
 /// {
 ///   "jsonrpc": "2.0",
 ///   "method": "initialize",
-///   "id": "intercom-init-1",
+///   "id": "intercom-init-<uuid>",
 ///   "params": {
 ///     "protocolVersion": 1,
 ///     "processId": 12345,
@@ -62,6 +72,9 @@ const PROMPT_ID: &str = "intercom-prompt-1";
 /// }
 /// ```
 ///
+/// Each call generates a fresh `UUIDv4` correlation ID (F-13) so that
+/// concurrent sessions never share the same `initialize` ID.
+///
 /// # Errors
 ///
 /// Returns `AppError::Acp` if serialisation fails or the write to stdin fails.
@@ -70,14 +83,15 @@ pub async fn send_initialize(
     session_id: &str,
     workspace_path: &Path,
     workspace_name: &str,
-) -> Result<()> {
+) -> Result<String> {
+    let init_id = generate_correlation_id("init");
     let process_id = std::process::id();
     let uri = path_to_file_uri(workspace_path);
 
     let msg: Value = json!({
         "jsonrpc": "2.0",
         "method": "initialize",
-        "id": INIT_ID,
+        "id": init_id,
         "params": {
             "protocolVersion": PROTOCOL_VERSION,
             "processId": process_id,
@@ -97,8 +111,8 @@ pub async fn send_initialize(
         ))
     })?;
 
-    debug!(session_id, %uri, "handshake: initialize sent");
-    Ok(())
+    debug!(session_id, %uri, correlation_id = %init_id, "handshake: initialize sent");
+    Ok(init_id)
 }
 
 /// Wait for the agent to respond with a JSON-RPC result for the `initialize`
@@ -109,6 +123,9 @@ pub async fn send_initialize(
 /// matching `id` and a `result` field is seen, or when `timeout` elapses.
 /// JSON-RPC error responses with a matching `id` are treated as handshake
 /// failures.
+///
+/// The `init_id` parameter must match the correlation ID returned by
+/// [`send_initialize`] (F-13 — each session uses a unique ID).
 ///
 /// # Errors
 ///
@@ -121,9 +138,10 @@ pub async fn send_initialize(
 pub async fn wait_for_initialize_result(
     stdout: &mut BufReader<ChildStdout>,
     session_id: &str,
+    init_id: &str,
     timeout: Duration,
 ) -> Result<Value> {
-    wait_for_result(stdout, session_id, INIT_ID, "initialize", timeout).await
+    wait_for_result(stdout, session_id, init_id, "initialize", timeout).await
 }
 
 /// Send the `initialized` JSON-RPC notification to the agent.
@@ -153,6 +171,9 @@ pub async fn send_initialized(stdin: &mut ChildStdin, session_id: &str) -> Resul
 /// Create an ACP session via `session/new` and return the agent-assigned
 /// session ID.
 ///
+/// Each call generates a fresh `UUIDv4` correlation ID (F-13) so that
+/// concurrent handshake sequences never share the same `session/new` ID.
+///
 /// # Errors
 ///
 /// - `AppError::Acp("session/new rejected: …")` — agent returned a JSON-RPC
@@ -167,13 +188,14 @@ pub async fn send_session_new(
     workspace_path: &Path,
     timeout: Duration,
 ) -> Result<String> {
+    let session_new_id = generate_correlation_id("sess");
     let raw = workspace_path.to_string_lossy();
     let cwd = strip_unc_prefix(&raw).replace('\\', "/");
 
     let msg: Value = json!({
         "jsonrpc": "2.0",
         "method": "session/new",
-        "id": SESSION_NEW_ID,
+        "id": session_new_id,
         "params": {
             "cwd": cwd,
             "mcpServers": []
@@ -186,10 +208,10 @@ pub async fn send_session_new(
         ))
     })?;
 
-    debug!(session_id, "handshake: session/new sent");
+    debug!(session_id, correlation_id = %session_new_id, "handshake: session/new sent");
 
     let result =
-        wait_for_result(stdout, session_id, SESSION_NEW_ID, "session/new", timeout).await?;
+        wait_for_result(stdout, session_id, &session_new_id, "session/new", timeout).await?;
 
     let agent_session_id = result
         .get("sessionId")
@@ -215,6 +237,8 @@ pub async fn send_session_new(
 /// session to receive the prompt. The prompt is delivered via the ACP stream
 /// protocol rather than as a CLI argument (FR-030).
 ///
+/// Each call generates a fresh `UUIDv4` correlation ID (F-13).
+///
 /// # Errors
 ///
 /// - `AppError::Acp("prompt must not be empty")` — `prompt` is blank.
@@ -229,10 +253,12 @@ pub async fn send_prompt(
         return Err(AppError::Acp("prompt must not be empty".into()));
     }
 
+    let prompt_id = generate_correlation_id("prompt");
+
     let msg: Value = json!({
         "jsonrpc": "2.0",
         "method": "session/prompt",
-        "id": PROMPT_ID,
+        "id": prompt_id,
         "params": {
             "sessionId": agent_session_id,
             "prompt": [
@@ -249,7 +275,9 @@ pub async fn send_prompt(
 
     debug!(
         session_id,
-        agent_session_id, "handshake: session/prompt sent"
+        agent_session_id,
+        correlation_id = %prompt_id,
+        "handshake: session/prompt sent"
     );
     Ok(())
 }

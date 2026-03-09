@@ -1,13 +1,13 @@
-//! Unit tests for workspace-to-channel mapping configuration (Phase 6, T042–T043).
+//! Unit tests for workspace-to-channel mapping configuration.
 //!
 //! Covers:
 //! - S027: `[[workspace]]` TOML entries parse into `Vec<WorkspaceMapping>`
 //! - S028: `workspace_id` resolves to the configured `channel_id`
 //! - S029: Unknown `workspace_id` returns `None` (no fallback)
-//! - S030: Bare `channel_id` parameter is used as-is (backward compat)
-//! - S031: `workspace_id` takes precedence over `channel_id`
 //! - S032: Empty `workspace_id` is rejected at parse time
 //! - S033: Duplicate `workspace_id` values are rejected at parse time
+//! - F-10: `channel_id` fallback parameter removed — `workspace_id` is the only
+//!   routing mechanism
 
 use agent_intercom::config::GlobalConfig;
 
@@ -173,7 +173,8 @@ fn workspace_id_resolves_to_channel() {
     let toml = with_mapping(&base, "my-repo", "C_MAPPED", None);
 
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
-    let result = config.resolve_channel_id(Some("my-repo"), None);
+    // F-10: resolve_channel_id takes workspace_id only — no channel_id fallback.
+    let result = config.resolve_channel_id(Some("my-repo"));
 
     assert_eq!(
         result,
@@ -184,8 +185,10 @@ fn workspace_id_resolves_to_channel() {
 
 // ── S029: unknown workspace_id returns None ───────────────────────────────────
 
-/// An unknown `workspace_id` returns `None` — no silent fallback to the
-/// raw `channel_id` parameter.
+/// An unknown `workspace_id` returns `None` — no silent fallback.
+///
+/// F-10: the `channel_id` parameter has been removed; unknown workspace IDs
+/// never fall back to any bare `channel_id` value.
 #[test]
 fn unknown_workspace_id_returns_none() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -193,59 +196,48 @@ fn unknown_workspace_id_returns_none() {
     let toml = with_mapping(&base, "known-repo", "C_KNOWN", None);
 
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
-    let result = config.resolve_channel_id(Some("unknown-repo"), Some("C_FALLBACK"));
+    // F-10: 1-arg API — no channel_id param to fall back to.
+    let result = config.resolve_channel_id(Some("unknown-repo"));
 
     assert_eq!(
         result, None,
-        "unknown workspace_id must return None, not fall back to channel_id"
+        "unknown workspace_id must return None (F-10: no channel_id fallback)"
     );
 }
 
-// ── S030: channel_id param used when no workspace_id ─────────────────────────
+// ── F-10: no workspace_id → no channel ───────────────────────────────────────
 
-/// When `workspace_id` is absent, the raw `channel_id` query parameter is
-/// returned unchanged for backward compatibility.
+/// When `workspace_id` is absent, the result is `None`.
+///
+/// F-10 removes the legacy `?channel_id=` routing fallback.  Clients must
+/// supply a `workspace_id` to obtain channel routing.
 #[test]
-fn channel_id_param_falls_back_when_no_workspace() {
+fn no_workspace_id_returns_none() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let toml = base_toml(tmp.path().to_str().expect("utf8"));
 
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
-    let result = config.resolve_channel_id(None, Some("C_DIRECT"));
-
-    assert_eq!(
-        result,
-        Some("C_DIRECT"),
-        "bare channel_id should be returned as-is when workspace_id is absent"
-    );
+    // F-10: no workspace_id → None (no channel_id fallback).
+    assert_eq!(config.resolve_channel_id(None), None);
 }
 
-/// Both params absent → None.
+// ── F-10: workspace_id is the sole routing mechanism ──────────────────────────
+
+/// When `workspace_id` is supplied and found, it resolves to the mapped
+/// channel regardless of any other parameters (F-10).
 #[test]
-fn both_params_absent_returns_none() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let toml = base_toml(tmp.path().to_str().expect("utf8"));
-
-    let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
-    assert_eq!(config.resolve_channel_id(None, None), None);
-}
-
-// ── S031: workspace_id takes precedence ──────────────────────────────────────
-
-/// When both `workspace_id` and `channel_id` are supplied, `workspace_id`
-/// wins and `channel_id` is ignored.
-#[test]
-fn workspace_id_takes_precedence_over_channel_id() {
+fn workspace_id_is_sole_routing_mechanism() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let base = base_toml(tmp.path().to_str().expect("utf8"));
     let toml = with_mapping(&base, "my-repo", "C_WORKSPACE", None);
 
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
-    let result = config.resolve_channel_id(Some("my-repo"), Some("C_IGNORED"));
+    // F-10: 1-arg API — workspace_id is the only routing input.
+    let result = config.resolve_channel_id(Some("my-repo"));
 
     assert_eq!(
         result,
         Some("C_WORKSPACE"),
-        "workspace_id must take precedence over channel_id"
+        "workspace_id must be the only routing mechanism (F-10)"
     );
 }

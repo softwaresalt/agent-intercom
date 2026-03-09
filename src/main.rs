@@ -276,6 +276,7 @@ async fn run(args: Cli) -> Result<()> {
         pending_prompts,
         pending_waits,
         pending_modal_contexts: Arc::default(),
+        pending_thread_replies: Arc::default(),
         stall_detectors: Some(StallDetectors::default()),
         ipc_auth_token,
         policy_cache,
@@ -885,6 +886,14 @@ async fn handle_session_terminated(state: &Arc<AppState>, session_id: &str, reas
     if let Some(ref acp_driver) = state.acp_driver {
         acp_driver.deregister_session(session_id).await;
     }
+
+    // F-20: clean up any pending thread-reply fallback entries for this session.
+    // Dropping the senders causes the spawned waiter tasks to exit cleanly.
+    agent_intercom::slack::handlers::thread_reply::cleanup_session_fallbacks(
+        session_id,
+        &state.pending_thread_replies,
+    )
+    .await;
 
     // Notify the operator via Slack (when available).
     let Some(ref slack) = state.slack else { return };

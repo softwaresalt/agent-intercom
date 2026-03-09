@@ -32,6 +32,10 @@
       "approve": true,
       "matchCommandLine": true
     },
+    "^gh(\\s[^;|&`]*)?$": {
+      "approve": true,
+      "matchCommandLine": true
+    },
     "^git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$": {
       "approve": true,
       "matchCommandLine": true

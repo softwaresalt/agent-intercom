@@ -63,6 +63,7 @@ async fn spawn_http_server() -> (String, CancellationToken) {
             pending_prompts: Arc::clone(&state.pending_prompts),
             pending_waits: Arc::clone(&state.pending_waits),
             pending_modal_contexts: Default::default(),
+            pending_thread_replies: Default::default(),
             stall_detectors: None,
             ipc_auth_token: None,
             policy_cache: Arc::default(),

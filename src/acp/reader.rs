@@ -41,6 +41,7 @@ use crate::acp::codec::AcpCodec;
 use crate::driver::{AgentDriver, AgentEvent};
 use crate::models::progress::ProgressItem;
 use crate::models::session::ConnectivityStatus;
+use crate::models::steering::SteeringMessage;
 use crate::persistence::db::Database;
 use crate::persistence::session_repo::SessionRepo;
 use crate::persistence::steering_repo::SteeringRepo;
@@ -413,6 +414,56 @@ where
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
+/// Deliver queued steering messages to the agent via the driver.
+///
+/// For each message in `messages`:
+/// - Calls `driver.send_prompt` to deliver the message.
+/// - On success, marks the message as consumed in `steering_repo`.
+/// - On error, logs a warning and continues to the next message so that
+///   temporary delivery failures do not block subsequent messages.
+///
+/// This function is the core delivery loop for the reconnect flush
+/// (T089/T090 — S001–S004, S006–S007, F-06).
+///
+/// # Note
+///
+/// This function is intentionally `pub` to allow direct unit testing of the
+/// delivery loop in isolation without exercising the full reader pipeline
+/// (T001–T006 in `tests/unit/acp_reader_steering_delivery.rs`).
+pub async fn deliver_queued_messages(
+    session_id: &str,
+    messages: &[SteeringMessage],
+    driver: &dyn AgentDriver,
+    steering_repo: &SteeringRepo,
+) -> usize {
+    let mut delivered: usize = 0;
+    for msg in messages {
+        match driver.send_prompt(session_id, &msg.message).await {
+            Ok(()) => {
+                // Only mark consumed when delivery succeeds (F-06 fix).
+                if let Err(err) = steering_repo.mark_consumed(&msg.id).await {
+                    warn!(
+                        session_id,
+                        %err,
+                        message_id = %msg.id,
+                        "acp reader: failed to mark queued message consumed"
+                    );
+                }
+                delivered += 1;
+            }
+            Err(err) => {
+                warn!(
+                    session_id,
+                    %err,
+                    message_id = %msg.id,
+                    "acp reader: failed to deliver queued message, continuing"
+                );
+            }
+        }
+    }
+    delivered
+}
+
 /// Set connectivity to Online, deliver queued messages, and notify Slack.
 ///
 /// This is the reconnect flush logic (T089/T090 — S059, S060, S062).
@@ -452,18 +503,14 @@ async fn flush_queued_messages(
         count, "acp reader: delivering queued messages on reconnect"
     );
 
-    // Deliver each queued message via the driver.
-    for msg in &queued {
-        if let Err(err) = ctx.driver.send_prompt(session_id, &msg.message).await {
-            warn!(session_id, %err, message_id = %msg.id,
-                "acp reader: failed to deliver queued message, continuing");
-        }
-        if let Err(err) = steering_repo.mark_consumed(&msg.id).await {
-            warn!(session_id, %err, message_id = %msg.id,
-                "acp reader: failed to mark queued message consumed");
-        }
-        // Emit StreamActivity for each delivered message so the stall detector
-        // knows the session is active during the flush.
+    // Deliver each queued message via the driver (F-06 fix: only marks consumed
+    // on success — see `deliver_queued_messages`).
+    let delivered =
+        deliver_queued_messages(session_id, &queued, ctx.driver.as_ref(), &steering_repo).await;
+
+    // Emit StreamActivity only for successfully delivered messages so the stall
+    // detector knows the session is active during the flush (LC-05).
+    for _ in 0..delivered {
         let _ = event_tx
             .send(AgentEvent::StreamActivity {
                 session_id: session_id.to_owned(),

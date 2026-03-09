@@ -4,6 +4,7 @@ mod unit {
     mod acp_codec_tests;
     mod acp_event_wiring;
     mod acp_handshake_tests;
+    mod acp_reader_steering_delivery;
     mod acp_session_tests;
     mod approval_repo_tests;
     mod ask_approval_tests;
@@ -17,6 +18,7 @@ mod unit {
     mod command_exec_tests;
     mod command_tests;
     mod config_tests;
+    mod correlation_id_uniqueness;
     mod credential_loading_tests;
     mod diff_tests;
     mod driver_trait_tests;
@@ -31,13 +33,17 @@ mod unit {
     mod policy_tests;
     mod prompt_repo_tests;
     mod session_model_tests;
+    mod session_repo_count_acp;
     mod session_repo_tests;
     mod session_routing_tests;
+    mod session_status;
     mod slack_client_tests;
+    mod sse_workspace_only_routing;
     mod stall_consumer_tests;
     mod stall_detector_tests;
     mod stall_repo_tests;
     mod steering_repo_tests;
+    mod thread_reply_fallback;
     mod version_tests;
     mod workspace_mapping_tests;
 }

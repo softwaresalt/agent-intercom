@@ -25,18 +25,26 @@ Batch of targeted correctness fixes found during adversarial review, plus a mobi
 
 **ACP Correctness Fixes**
 
-- **F-06**: `src/acp/reader.rs:346–355` — Queued steering messages marked consumed even when `send_prompt` fails. Only mark consumed after successful send; keep failed deliveries for retry.
-- **F-07**: `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes `created`-state sessions and counts all protocols against `acp.max_sessions`. Fix: count `created` sessions, add `count_active_by_protocol`.
+- ~~**F-06**: `src/acp/reader.rs:346–355` — Queued steering messages marked consumed even when `send_prompt` fails. Only mark consumed after successful send; keep failed deliveries for retry.~~ ✅ Complete — 007-acp-correctness-mobile
+- ~~**F-07**: `src/slack/commands.rs:405–412` — Max concurrent ACP sessions race condition. `count_active()` excludes `created`-state sessions and counts all protocols against `acp.max_sessions`. Fix: count `created` sessions, add `count_active_by_protocol`.~~ ✅ Complete — 007-acp-correctness-mobile
 - **F-08**: `src/slack/commands.rs:415–425` — ACP session start resolves workspace from static `state.config` instead of hot-reloaded `state.workspace_mappings`. Violates FR-014.
 - **F-09**: `src/driver/acp_driver.rs:130–134` — `deregister_session` doesn't clean up `pending_clearances` or `pending_prompts_acp`. Orphaned entries accumulate as memory leaks once F-01/F-02 are fixed.
-- **F-10**: `src/mcp/sse.rs:421–446` — No deprecation warning when both `workspace_id` and `channel_id` query params are provided (FR-013 violation).
-- **F-13**: `src/acp/handshake.rs:40–47` — Static handshake correlation ID `"intercom-prompt-1"` collides with `AcpDriver::PROMPT_COUNTER` starting at 1. Start counter at 1000 or use UUIDs.
+- ~~**F-10**: `src/mcp/sse.rs:421–446` — No deprecation warning when both `workspace_id` and `channel_id` query params are provided (FR-013 violation).~~ ✅ Complete — 007-acp-correctness-mobile (`channel_id` removed entirely; `workspace_id` is sole routing mechanism)
+- ~~**F-13**: `src/acp/handshake.rs:40–47` — Static handshake correlation ID `"intercom-prompt-1"` collides with `AcpDriver::PROMPT_COUNTER` starting at 1. Start counter at 1000 or use UUIDs.~~ ✅ Complete — 007-acp-correctness-mobile
 
 **Mobile Input Accessibility**
 
 - **F-15** *(Research)*: Investigate Slack modal / `actions` block behavior on iOS. Determine whether `modal` view pushes (triggered via `block_actions` button callbacks) are supported in the Slack iOS app, and whether `plain_text_input` elements inside modals render and accept input. Document findings: (a) modals fully work, (b) modals open but input is broken, or (c) modals are silently swallowed on mobile. Consult Slack API changelog, Block Kit documentation, and community reports.
 - **F-16** *(Conditional — if modals are unavailable or broken on iOS)*: Design and implement a thread-reply-based input fallback. When the server sends a prompt requiring operator text input (MCP `transmit`/`standby`, ACP `PromptForwarded`/`ClearanceRequested`), post a Slack message in the session thread that instructs the operator to reply in-thread with their response. Detect the reply via the `message` event handler (scoped to the correct thread `ts`), capture the text, and route it back to the waiting tool call. The modal pathway remains the default for desktop; the reply pathway activates when the client surface is detected as mobile or when the modal callback times out without a submission.
 - **F-17** *(Conditional — if modals are unavailable or broken on iOS)*: Audit all existing block-kit interactive components (approve/reject buttons, "Refine" prompt buttons, steer inputs) and add a plain-text thread-reply equivalent for each so that every operator interaction that currently requires a modal is reachable from the Slack mobile app.
+
+**Post-Review Technical Debt (Phase 8 — in progress)**
+
+- **TQ-008**: Extract duplicated fallback logic (`spawn_thread_reply_fallback` helper) — `T057` in `specs/007-acp-correctness-mobile/tasks.md`
+- **TQ-009**: Push_event integration tests for negative paths — `T058`
+- **LC-05**: `StreamActivity` emitted for failed deliveries in `deliver_queued_messages` — `T059`
+- **LC-04**: Silent overwrite on duplicate `register_thread_reply_fallback` call — `T060`
+- **CS-06**: Hardcoded SQL status strings in `count_active_acp` — `T061`
 
 ---
 

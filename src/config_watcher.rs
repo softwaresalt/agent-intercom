@@ -207,27 +207,23 @@ impl ConfigWatcher {
         Arc::clone(&self.mappings)
     }
 
-    /// Resolve the effective Slack channel from `workspace_id` / `channel_id`
-    /// using the current (possibly hot-reloaded) mapping table.
+    /// Resolve the effective Slack channel from `workspace_id` using the
+    /// current (possibly hot-reloaded) mapping table.
+    ///
+    /// F-10: `workspace_id` is the only routing parameter.  The legacy
+    /// `channel_id` fallback has been removed.
     ///
     /// See [`GlobalConfig::resolve_channel_id`] for the full resolution rules.
     #[must_use]
-    pub fn resolve_channel_id(
-        &self,
-        workspace_id: Option<&str>,
-        channel_id: Option<&str>,
-    ) -> Option<String> {
+    pub fn resolve_channel_id(&self, workspace_id: Option<&str>) -> Option<String> {
+        let ws_id = workspace_id?;
         let guard = self.mappings.read().unwrap_or_else(|e| {
             warn!("workspace_mappings lock was poisoned, recovering with inner value");
             e.into_inner()
         });
-        if let Some(ws_id) = workspace_id {
-            guard
-                .iter()
-                .find(|m| m.workspace_id == ws_id)
-                .map(|m| m.channel_id.clone())
-        } else {
-            channel_id.map(str::to_owned)
-        }
+        guard
+            .iter()
+            .find(|m| m.workspace_id == ws_id)
+            .map(|m| m.channel_id.clone())
     }
 }

@@ -66,8 +66,9 @@ pub async fn handle_prompt_action(
 
     // ── T068c / FR-031: Verify session ownership ─────────
     // Look up the prompt record to find its session, then confirm the
-    // acting user is the session owner.
-    {
+    // acting user is the session owner. Also capture session_id here for
+    // thread-reply fallback registration (F-20 cleanup on termination).
+    let prompt_session_id: String = {
         let prompt_repo = PromptRepo::new(Arc::clone(&state.db));
         if let Ok(Some(record)) = prompt_repo.get_by_id(prompt_id).await {
             let session_repo = SessionRepo::new(Arc::clone(&state.db));
@@ -82,8 +83,11 @@ pub async fn handle_prompt_action(
                     return Err(err.to_string());
                 }
             }
+            record.session_id
+        } else {
+            String::new()
         }
-    }
+    };
 
     // ── Determine decision from action_id ────────────────
     let (decision, instruction) = if action_id == "prompt_continue" {
@@ -111,10 +115,67 @@ pub async fn handle_prompt_action(
                 "Type your revised instructions\u{2026}",
             );
             if let Err(err) = slack.open_modal(trigger_id.clone(), modal).await {
-                warn!(%err, prompt_id, "failed to open refine modal");
+                warn!(%err, prompt_id, "failed to open refine modal; activating thread-reply fallback (F-16)");
                 // Clean up cached context on failure.
                 let mut ctx = state.pending_modal_contexts.lock().await;
                 ctx.remove(&callback_id);
+                // F-16/F-17: register thread-reply fallback when modal is unavailable.
+                // Use the parent thread_ts (root of the Slack thread) as the map key so
+                // that incoming replies, which report thread_ts = root, find the entry.
+                // Falls back to origin.ts when the button message IS the thread root.
+                let thread_ts_opt = message.map(|m| {
+                    m.origin
+                        .thread_ts
+                        .as_ref()
+                        .map_or_else(|| m.origin.ts.0.clone(), |ts| ts.0.clone())
+                });
+                let chan_id_opt = channel.map(|c| c.id.to_string());
+                if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
+                    let button_msg_ts = message.map(|m| m.origin.ts.clone());
+                    let state_clone = Arc::clone(state);
+                    let prompt_id_owned = prompt_id.to_owned();
+                    crate::slack::handlers::thread_reply::activate_thread_reply_fallback(
+                        chan_id.as_str(),
+                        thread_ts.as_str(),
+                        prompt_session_id.clone(),
+                        user_id.to_owned(),
+                        "Modal unavailable \u{2014} please reply in this thread with your revised instructions.",
+                        button_msg_ts,
+                        slack,
+                        Arc::clone(&state.pending_thread_replies),
+                        prompt_id,
+                        move |reply_text| async move {
+                            let repo = PromptRepo::new(Arc::clone(&state_clone.db));
+                            if let Err(db_err) = repo
+                                .update_decision(
+                                    &prompt_id_owned,
+                                    PromptDecision::Refine,
+                                    Some(reply_text.clone()),
+                                )
+                                .await
+                            {
+                                warn!(
+                                    prompt_id = prompt_id_owned,
+                                    %db_err,
+                                    "thread-reply fallback: failed to update prompt decision in DB"
+                                );
+                            }
+                            if let Err(driver_err) = state_clone
+                                .driver
+                                .resolve_prompt(&prompt_id_owned, "refine", Some(reply_text))
+                                .await
+                            {
+                                warn!(
+                                    prompt_id = prompt_id_owned,
+                                    %driver_err,
+                                    "thread-reply fallback: failed to resolve prompt via driver"
+                                );
+                            }
+                        },
+                    )
+                    .await?;
+                    return Ok(());
+                }
                 return Err(format!("failed to open refine modal: {err}"));
             }
         }

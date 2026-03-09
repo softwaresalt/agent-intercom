@@ -50,6 +50,10 @@
       "approve": true,
       "matchCommandLine": true
     },
-    "Out-Null": true
+    "Out-Null": true,
+    "^gh(\\s[^;|&`]*)?$": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   }
 }

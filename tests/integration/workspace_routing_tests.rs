@@ -143,8 +143,8 @@ fn concurrent_sessions_in_different_workspaces() {
     let toml = two_workspace_toml("workspace-a", "C_ALPHA", "workspace-b", "C_BETA", root);
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
 
-    let ch_a = config.resolve_channel_id(Some("workspace-a"), None);
-    let ch_b = config.resolve_channel_id(Some("workspace-b"), None);
+    let ch_a = config.resolve_channel_id(Some("workspace-a"));
+    let ch_b = config.resolve_channel_id(Some("workspace-b"));
 
     assert_eq!(ch_a, Some("C_ALPHA"), "workspace-a must route to C_ALPHA");
     assert_eq!(ch_b, Some("C_BETA"), "workspace-b must route to C_BETA");
@@ -164,14 +164,11 @@ fn workspace_resolution_is_independent() {
     let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
 
     // Resolve alpha — beta should remain unchanged.
-    assert_eq!(config.resolve_channel_id(Some("alpha"), None), Some("CA"));
-    assert_eq!(config.resolve_channel_id(Some("beta"), None), Some("CB"));
+    assert_eq!(config.resolve_channel_id(Some("alpha")), Some("CA"));
+    assert_eq!(config.resolve_channel_id(Some("beta")), Some("CB"));
 
     // Unknown workspace returns None regardless of which other workspaces exist.
-    assert_eq!(
-        config.resolve_channel_id(Some("gamma"), Some("C_IGNORED")),
-        None
-    );
+    assert_eq!(config.resolve_channel_id(Some("gamma")), None);
 }
 
 // ── T064 / S048 ───────────────────────────────────────────────────────────────

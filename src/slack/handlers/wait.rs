@@ -34,6 +34,7 @@ use crate::slack::handlers::check_session_ownership;
 /// # Errors
 ///
 /// Returns an error string if processing fails.
+#[allow(clippy::too_many_lines)] // Modal caching + F-16/F-17 fallback logic cannot be shortened further.
 pub async fn handle_wait_action(
     action: &SlackInteractionActionInfo,
     user_id: &str,
@@ -105,10 +106,52 @@ pub async fn handle_wait_action(
                 "Type your instructions for the agent\u{2026}",
             );
             if let Err(err) = slack.open_modal(trigger_id.clone(), modal).await {
-                warn!(%err, session_id, "failed to open instruction modal");
+                warn!(%err, session_id, "failed to open instruction modal; activating thread-reply fallback (F-16)");
                 // Clean up cached context on failure.
                 let mut ctx = state.pending_modal_contexts.lock().await;
                 ctx.remove(&callback_id);
+                // F-16/F-17: register thread-reply fallback when modal is unavailable.
+                // Use the parent thread_ts (root of the Slack thread) as the map key so
+                // that incoming replies, which report thread_ts = root, find the entry.
+                // Falls back to origin.ts when the button message IS the thread root.
+                let thread_ts_opt = message.map(|m| {
+                    m.origin
+                        .thread_ts
+                        .as_ref()
+                        .map_or_else(|| m.origin.ts.0.clone(), |ts| ts.0.clone())
+                });
+                let chan_id_opt = channel.map(|c| c.id.to_string());
+                if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
+                    let button_msg_ts = message.map(|m| m.origin.ts.clone());
+                    let state_clone = Arc::clone(state);
+                    let session_id_owned = session_id.to_owned();
+                    crate::slack::handlers::thread_reply::activate_thread_reply_fallback(
+                        chan_id.as_str(),
+                        thread_ts.as_str(),
+                        session_id.to_owned(),
+                        user_id.to_owned(),
+                        "Modal unavailable \u{2014} please reply in this thread with your instructions.",
+                        button_msg_ts,
+                        slack,
+                        Arc::clone(&state.pending_thread_replies),
+                        callback_id.as_str(),
+                        move |reply_text| async move {
+                            if let Err(err) = state_clone
+                                .driver
+                                .resolve_wait(&session_id_owned, Some(reply_text))
+                                .await
+                            {
+                                warn!(
+                                    session_id = session_id_owned,
+                                    %err,
+                                    "thread-reply fallback: failed to resolve wait via driver"
+                                );
+                            }
+                        },
+                    )
+                    .await?;
+                    return Ok(());
+                }
                 return Err(format!("failed to open instruction modal: {err}"));
             }
         }

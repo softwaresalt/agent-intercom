@@ -24,6 +24,7 @@ use crate::slack::{client::SlackMessage, handlers};
 /// # Errors
 ///
 /// Returns `Ok(())` on success or if the event is silently ignored.
+#[allow(clippy::too_many_lines)] // F-16/F-17 fallback check + steering dispatch cannot be shortened further.
 pub async fn handle_push_event(
     callback: SlackPushEventCallback,
     _client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
@@ -107,8 +108,48 @@ pub async fn handle_push_event(
             info!(
                 user = user_str,
                 channel = channel_str,
-                "push event: thread message → steering"
+                "push event: thread message → checking modal fallback then steering"
             );
+
+            // F-16/F-17: Check for a pending thread-reply fallback first.
+            // If a modal failed to open, a oneshot sender was registered for this
+            // (channel_id, thread_ts) pair. Route the reply there and skip steering.
+            match crate::slack::handlers::thread_reply::route_thread_reply(
+                &channel_str,
+                thread_ts.0.as_str(),
+                &user_str,
+                text,
+                Arc::clone(&app.pending_thread_replies),
+            )
+            .await
+            {
+                Ok(true) => {
+                    // Reply captured by fallback — acknowledge and return.
+                    info!(
+                        user = user_str,
+                        channel = channel_str,
+                        "push event: thread reply captured by modal fallback (F-16/F-17)"
+                    );
+                    post_ack(&app, &channel_str, Some(thread_ts)).await;
+                    return Ok(());
+                }
+                Ok(false) => {
+                    // No pending fallback — fall through to normal steering.
+                }
+                Err(err) => {
+                    warn!(
+                        %err,
+                        channel = channel_str,
+                        "push event: thread-reply fallback routing error; skipping steering \
+                         (message targeted a pending fallback entry — TQ-004)"
+                    );
+                    // TQ-004: the text was a reply to a pending fallback prompt.
+                    // Even though delivery failed (receiver dropped or timed out),
+                    // do NOT route the operator's text into steering — it was not
+                    // a steering command.
+                    return Ok(());
+                }
+            }
 
             match handlers::steer::store_from_slack(
                 text,
