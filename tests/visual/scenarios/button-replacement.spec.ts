@@ -75,7 +75,7 @@ async function runButtonReplacementTest(
 
   if (!buttonVisible) {
     await captureStep(page, scenarioId, stepOffset + 1, `no-${label}-button-present`);
-    test.skip();
+    expect(buttonVisible, `A message with a ${label} button must be present in the configured test channel`).toBe(true);
     return;
   }
 
@@ -226,7 +226,7 @@ test.describe('S-T3-008 Static text: resolved status replaces action block', () 
 
     if (!anyButtonVisible) {
       await captureStep(page, 'S-T3-008', 41, 'no-interactive-button-found');
-      test.skip();
+      expect(anyButtonVisible, 'At least one interactive button (Continue, Nudge, or Resume) must be present in the configured test channel').toBe(true);
       return;
     }
 

@@ -33,7 +33,7 @@
  * FRs: FR-022, FR-028
  */
 
-import { test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   navigateToChannel,
   scrollToLatestMessage,
@@ -117,7 +117,7 @@ test.describe('S-T3-011 A-side: Resume with Instructions modal in top-level mess
         '[S-T3-011 A] No "Resume with Instructions" button found in the channel. ' +
           'Ensure a wait-for-instruction message exists in the test channel.',
       );
-      test.skip();
+      expect(btnVisible, 'A wait-for-instruction message with "Resume with Instructions" button must be present in the configured test channel').toBe(true);
       return;
     }
 
@@ -216,7 +216,7 @@ test.describe('S-T3-011 B-side: Resume with Instructions modal in threaded messa
 
       if (!badgeVisible) {
         await captureStep(page, 'S-T3-011', 11, 'no-thread-found-in-channel');
-        test.skip();
+        expect(badgeVisible, 'At least one threaded message must be present in the configured test channel for the B-side modal suppression test').toBe(true);
         return;
       }
 
@@ -230,7 +230,7 @@ test.describe('S-T3-011 B-side: Resume with Instructions modal in threaded messa
 
     if (!threadPanelVisible) {
       await captureStep(page, 'S-T3-011', 12, 'thread-panel-did-not-open');
-      test.skip();
+      expect(threadPanelVisible, 'Thread panel must open after clicking the reply badge').toBe(true);
       return;
     }
 
@@ -249,7 +249,7 @@ test.describe('S-T3-011 B-side: Resume with Instructions modal in threaded messa
           'Ensure SLACK_THREAD_TS points to a thread with a wait-for-instruction message.',
       );
       await closeThreadPanel(page);
-      test.skip();
+      expect(btnInThreadVisible, '"Resume with Instructions" button must be present inside the thread; ensure SLACK_THREAD_TS points to a thread with a wait-for-instruction message').toBe(true);
       return;
     }
 
@@ -339,7 +339,8 @@ test.describe('S-T3-011 A/B summary: wait-resume-instruct modal-in-thread diagno
 
     if (!topLevelBtnVisible) {
       console.log('[S-T3-011 A/B summary] No top-level Resume with Instructions button visible.');
-      test.skip();
+      await captureStep(page, 'S-T3-011', 30, 'ab-summary-no-top-level-button');
+      expect(topLevelBtnVisible, 'A top-level "Resume with Instructions" button must be present in the configured test channel for the A/B summary').toBe(true);
       return;
     }
 
@@ -374,6 +375,7 @@ test.describe('S-T3-011 A/B summary: wait-resume-instruct modal-in-thread diagno
     if (!badgeVisible) {
       console.log('[S-T3-011 A/B summary] No thread found for B-side test.');
       await captureStep(page, 'S-T3-011', 32, 'ab-summary-no-thread-for-b-side');
+      expect(badgeVisible, 'At least one threaded message must be present in the configured test channel for the B-side of the A/B summary').toBe(true);
       return;
     }
 
@@ -389,6 +391,8 @@ test.describe('S-T3-011 A/B summary: wait-resume-instruct modal-in-thread diagno
     if (!threadBtnVisible) {
       console.log('[S-T3-011 A/B summary] No Resume with Instructions button found in thread.');
       await closeThreadPanel(page);
+      await captureStep(page, 'S-T3-011', 32, 'ab-summary-no-button-in-thread');
+      expect(threadBtnVisible, '"Resume with Instructions" button must be present inside the thread for the B-side of the A/B summary').toBe(true);
       return;
     }
 

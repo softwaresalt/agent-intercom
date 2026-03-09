@@ -98,7 +98,7 @@ test.describe('S-T3-005: Top-level Refine modal renders and submits', () => {
     if (!refineBtnVisible) {
       // No prompt message with a Refine button found in the channel.
       await captureStep(page, 'S-T3-005', 2, 'no-refine-button-found');
-      test.skip();
+      expect(refineBtnVisible, 'A prompt message with a Refine button must be present in the configured test channel').toBe(true);
       return;
     }
 
@@ -211,7 +211,8 @@ test.describe('S-T3-005: Top-level Refine modal renders and submits', () => {
     const refineBtnVisible = await isVisibleWithin(refineBtn, 10_000);
 
     if (!refineBtnVisible) {
-      test.skip();
+      await captureStep(page, 'S-T3-005', 20, 'no-refine-button-structure-test');
+      expect(refineBtnVisible, 'A prompt message with a Refine button must be present in the configured test channel').toBe(true);
       return;
     }
 

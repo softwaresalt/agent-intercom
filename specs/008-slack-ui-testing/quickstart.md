@@ -25,9 +25,7 @@ Set environment variables:
 
 ```powershell
 $env:SLACK_TEST_BOT_TOKEN = "xoxb-..."
-$env:SLACK_TEST_APP_TOKEN = "xapp-..."
 $env:SLACK_TEST_CHANNEL_ID = "C_TEST_CHANNEL"
-$env:SLACK_TEST_USER_ID = "U_TEST_USER"
 ```
 
 ### Run
@@ -54,11 +52,14 @@ npx playwright install chromium
 
 ### Configuration
 
+Copy `tests/visual/.env.example` to `tests/visual/.env` and fill in the values,
+or export the variables directly:
+
 ```powershell
-$env:SLACK_TEST_WORKSPACE_URL = "https://myworkspace.slack.com"
-$env:SLACK_TEST_EMAIL = "test@example.com"
-$env:SLACK_TEST_PASSWORD = "..."
-$env:SLACK_TEST_CHANNEL_NAME = "intercom-test"
+$env:SLACK_WORKSPACE_URL = "https://myworkspace.slack.com"
+$env:SLACK_EMAIL = "test@example.com"
+$env:SLACK_PASSWORD = "..."
+$env:SLACK_TEST_CHANNEL = "agent-intercom-test"
 ```
 
 ### First Run (authenticates and persists session)

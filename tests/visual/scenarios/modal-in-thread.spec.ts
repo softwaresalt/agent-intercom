@@ -26,7 +26,7 @@
  * FRs: FR-022, FR-027, FR-028, FR-030
  */
 
-import { test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   navigateToChannel,
   scrollToLatestMessage,
@@ -129,7 +129,7 @@ test.describe('S-T3-006: Modal-in-thread — click Refine inside a thread, docum
 
       if (!badgeVisible) {
         await captureStep(page, 'S-T3-006', 2, 'no-thread-found-in-channel');
-        test.skip();
+        expect(badgeVisible, 'At least one threaded message must be present in the configured test channel to run the in-thread modal diagnosis').toBe(true);
         return;
       }
 
@@ -146,7 +146,7 @@ test.describe('S-T3-006: Modal-in-thread — click Refine inside a thread, docum
 
     if (!threadPanelVisible) {
       await captureStep(page, 'S-T3-006', 3, 'thread-panel-did-not-open');
-      test.skip();
+      expect(threadPanelVisible, 'Thread panel must open after clicking the reply badge').toBe(true);
       return;
     }
 
@@ -160,7 +160,7 @@ test.describe('S-T3-006: Modal-in-thread — click Refine inside a thread, docum
       await captureStep(page, 'S-T3-006', 4, 'no-refine-button-in-thread');
       console.log('[S-T3-006] No Refine button found inside the thread panel.');
       await closeThreadPanel(page);
-      test.skip();
+      expect(refineBtnVisible, 'A Refine button must be present inside the thread panel to diagnose modal suppression; ensure SLACK_THREAD_TS points to a thread with a prompt message').toBe(true);
       return;
     }
 
@@ -260,8 +260,9 @@ test.describe('S-T3-006: Modal-in-thread — click Refine inside a thread, docum
     const badgeVisible = await isVisibleWithin(replyBadge, 8_000);
 
     if (!badgeVisible) {
-      console.log('[S-T3-006 A/B] B-side: no thread found — skipping B-side documentation.');
-      test.skip();
+      console.log('[S-T3-006 A/B] B-side: no thread found — failing B-side documentation.');
+      await captureStep(page, 'S-T3-006', 29, 'ab-summary-no-thread-found');
+      expect(badgeVisible, 'At least one threaded message must be present in the configured test channel for B-side A/B documentation').toBe(true);
       return;
     }
 
@@ -274,9 +275,10 @@ test.describe('S-T3-006: Modal-in-thread — click Refine inside a thread, docum
     const hasRefineInThread = await isVisibleWithin(refineBtnInThread, 5_000);
 
     if (!hasRefineInThread) {
-      console.log('[S-T3-006 A/B] B-side: Refine button not found in thread — skipping.');
+      console.log('[S-T3-006 A/B] B-side: Refine button not found in thread — failing.');
       await closeThreadPanel(page);
-      test.skip();
+      await captureStep(page, 'S-T3-006', 29, 'ab-summary-no-refine-in-thread');
+      expect(hasRefineInThread, 'A Refine button must be present inside the thread for B-side A/B documentation; ensure SLACK_THREAD_TS points to a thread with a prompt message').toBe(true);
       return;
     }
 

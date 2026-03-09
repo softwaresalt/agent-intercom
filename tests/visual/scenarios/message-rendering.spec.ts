@@ -68,7 +68,7 @@ test.describe('S-T3-002: Approval message rendering', () => {
     if (!approvalVisible) {
       // Document that no approval message was found in the channel at this time.
       await captureStep(page, 'S-T3-002', 2, 'no-approval-message-present');
-      test.skip();
+      expect(approvalVisible, 'Approval message with Accept/Reject buttons must be present in the configured test channel').toBe(true);
       return;
     }
 
@@ -118,7 +118,7 @@ test.describe('S-T3-003: Prompt message rendering', () => {
 
     if (!promptVisible) {
       await captureStep(page, 'S-T3-003', 2, 'no-prompt-message-present');
-      test.skip();
+      expect(promptVisible, 'Prompt message with Continue/Refine/Stop buttons must be present in the configured test channel').toBe(true);
       return;
     }
 
@@ -163,7 +163,7 @@ test.describe('S-T3-004: Stall alert rendering', () => {
 
     if (!stallVisible) {
       await captureStep(page, 'S-T3-004', 2, 'no-stall-alert-present');
-      test.skip();
+      expect(stallVisible, 'Stall alert message with Nudge button must be present in the configured test channel').toBe(true);
       return;
     }
 
@@ -211,7 +211,7 @@ test.describe('S-T3-009: Session started notification rendering', () => {
 
     if (!listVisible) {
       await captureStep(page, 'S-T3-009', 2, 'message-list-not-visible');
-      test.skip();
+      expect(listVisible, 'Message list must be visible after navigating to the test channel').toBe(true);
       return;
     }
 
@@ -225,7 +225,7 @@ test.describe('S-T3-009: Session started notification rendering', () => {
 
     if (!sessionVisible) {
       await captureStep(page, 'S-T3-009', 2, 'no-session-started-message-present');
-      test.skip();
+      expect(sessionVisible, 'A "Session started" or "task:" message must be present in the configured test channel').toBe(true);
       return;
     }
 
@@ -271,7 +271,7 @@ test.describe('S-T3-010: Code snippet block rendering', () => {
       }
 
       await captureStep(page, 'S-T3-010', 2, 'no-code-block-present');
-      test.skip();
+      expect(codeVisible, 'A code block must be present in the configured test channel (checked main channel and thread panel)').toBe(true);
       return;
     }
 

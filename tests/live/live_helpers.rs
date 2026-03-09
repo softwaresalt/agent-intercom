@@ -210,42 +210,58 @@ impl LiveSlackClient {
 
     /// Delete messages identified by the given timestamps from `channel_id`.
     ///
-    /// Deletes each message individually via `chat.delete`. Failures on
-    /// individual messages do not abort the remaining deletions — the first
-    /// deletion failure is returned as the overall error.
+    /// Deletes each message individually via `chat.delete`. Every deletion is
+    /// attempted regardless of prior failures — the method is best-effort.
+    /// If one or more deletions fail, an aggregated error string listing all
+    /// failures is returned after all deletions have been attempted.
     ///
     /// # Errors
     ///
-    /// Returns an error string when any HTTP request fails or Slack responds
-    /// with `"ok": false` for any deletion.
+    /// Returns an aggregated error string when any HTTP request fails or Slack
+    /// responds with `"ok": false` for any deletion. Failures for individual
+    /// timestamps do not prevent the remaining timestamps from being deleted.
     pub async fn cleanup_test_messages(
         &self,
         channel_id: &str,
         timestamps: &[&str],
     ) -> Result<(), String> {
+        let mut errors: Vec<String> = Vec::new();
+
         for ts in timestamps {
             let body = json!({ "channel": channel_id, "ts": ts });
 
-            let resp: Value = self
-                .http
-                .post(format!("{SLACK_API_BASE}/chat.delete"))
-                .header("Authorization", self.auth_header())
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| format!("chat.delete request failed for ts={ts}: {e}"))?
-                .json::<Value>()
-                .await
-                .map_err(|e| format!("chat.delete parse failed for ts={ts}: {e}"))?;
+            let result: Result<Value, String> = async {
+                self.http
+                    .post(format!("{SLACK_API_BASE}/chat.delete"))
+                    .header("Authorization", self.auth_header())
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|e| format!("chat.delete request failed for ts={ts}: {e}"))?
+                    .json::<Value>()
+                    .await
+                    .map_err(|e| format!("chat.delete parse failed for ts={ts}: {e}"))
+            }
+            .await;
 
-            if resp["ok"].as_bool() != Some(true) {
-                return Err(format!(
-                    "chat.delete error for ts={ts}: {}",
-                    resp["error"].as_str().unwrap_or("unknown")
-                ));
+            match result {
+                Ok(resp) => {
+                    if resp["ok"].as_bool() != Some(true) {
+                        errors.push(format!(
+                            "chat.delete error for ts={ts}: {}",
+                            resp["error"].as_str().unwrap_or("unknown")
+                        ));
+                    }
+                }
+                Err(e) => errors.push(e),
             }
         }
-        Ok(())
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     /// Post a message with Block Kit blocks to `channel_id`.

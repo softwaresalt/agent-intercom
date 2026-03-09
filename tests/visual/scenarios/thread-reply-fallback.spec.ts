@@ -123,7 +123,7 @@ test.describe('S-T3-007: Thread-reply fallback flow — visual verification', ()
 
       if (!badgeVisible) {
         await captureStep(page, 'S-T3-007', 2, 'no-thread-found-in-channel');
-        test.skip();
+        expect(badgeVisible, 'At least one threaded message must be present in the configured test channel; set SLACK_THREAD_TS to target a specific thread').toBe(true);
         return;
       }
 
@@ -137,7 +137,7 @@ test.describe('S-T3-007: Thread-reply fallback flow — visual verification', ()
 
     if (!threadPanelVisible) {
       await captureStep(page, 'S-T3-007', 3, 'thread-panel-did-not-open');
-      test.skip();
+      expect(threadPanelVisible, 'Thread panel must open after clicking the reply badge or navigating via SLACK_THREAD_TS').toBe(true);
       return;
     }
 
@@ -160,17 +160,15 @@ test.describe('S-T3-007: Thread-reply fallback flow — visual verification', ()
     );
 
     if (!fallbackVisible) {
-      // The fallback prompt may not exist if no session has activated the fallback.
-      // Document the observation and skip — this is not a hard failure for a cold
-      // test environment.
+      // When env is configured, a missing fallback prompt is a test failure:
+      // the server must post the fallback text before this test runs.
       console.log(
         '[S-T3-007] Fallback prompt not found in thread. ' +
           `Expected text containing "${FALLBACK_PROMPT_MARKER}". ` +
-          'This is normal if no agent session has triggered the fallback. ' +
-          'Ensure SLACK_THREAD_TS points to a thread with an active fallback prompt.',
+          'Ensure SLACK_THREAD_TS points to a thread where the server has activated the fallback.',
       );
       await closeThreadPanel(page);
-      test.skip();
+      expect(fallbackVisible, `Fallback prompt containing "${FALLBACK_PROMPT_MARKER}" must be present in the thread; ensure the server has activated the fallback path before running this test`).toBe(true);
       return;
     }
 
@@ -187,7 +185,7 @@ test.describe('S-T3-007: Thread-reply fallback flow — visual verification', ()
     if (!composerVisible) {
       await captureStep(page, 'S-T3-007', 7, 'thread-composer-not-visible');
       await closeThreadPanel(page);
-      test.skip();
+      expect(composerVisible, 'Thread composer must be visible to send the fallback reply').toBe(true);
       return;
     }
 
@@ -282,7 +280,8 @@ test.describe('S-T3-007: Thread-reply fallback flow — visual verification', ()
       ).first();
 
       if (!(await isVisibleWithin(replyBadge, 8_000))) {
-        test.skip();
+        await captureStep(page, 'S-T3-007', 20, 'no-thread-found-in-channel-subtest');
+        expect(false, 'At least one threaded message must be present in the configured test channel; set SLACK_THREAD_TS to target a specific thread').toBe(true);
         return;
       }
 
@@ -291,7 +290,8 @@ test.describe('S-T3-007: Thread-reply fallback flow — visual verification', ()
 
     const threadPanel = page.locator(THREAD_SELECTORS.threadPanel).first();
     if (!(await isVisibleWithin(threadPanel, 10_000))) {
-      test.skip();
+      await captureStep(page, 'S-T3-007', 20, 'thread-panel-did-not-open-subtest');
+      expect(false, 'Thread panel must open after clicking the reply badge or navigating via SLACK_THREAD_TS').toBe(true);
       return;
     }
 
@@ -314,8 +314,12 @@ test.describe('S-T3-007: Thread-reply fallback flow — visual verification', ()
       console.log(`[S-T3-007] Fallback prompt text: "${msgText?.trim()}"`);
       expect(msgText?.toLowerCase()).toContain('reply in this thread');
     } else {
-      // No fallback prompt — acceptable if no session is active.
-      console.log('[S-T3-007] No fallback prompt found. Acceptable in a cold test environment.');
+      // When env is configured, missing fallback prompt is a test failure.
+      console.log(
+        '[S-T3-007] No fallback prompt found. ' +
+          'Ensure SLACK_THREAD_TS points to a thread where the server has activated the fallback.',
+      );
+      expect(fallbackVisible, `Fallback prompt containing "${FALLBACK_PROMPT_MARKER}" must be present in the thread when environment is configured`).toBe(true);
     }
 
     await closeThreadPanel(page);

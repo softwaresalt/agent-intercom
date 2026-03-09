@@ -64,9 +64,9 @@ test.describe('S-T3-008: Approval flow — Accept button click', () => {
     const approvalVisible = await isVisibleWithin(acceptBtn, 10_000);
 
     if (!approvalVisible) {
-      // No approval message found — document and skip.
+      // When env is configured, a missing approval message is a test failure.
       await captureStep(page, 'S-T3-008', 2, 'no-approval-message-found');
-      test.skip();
+      expect(approvalVisible, 'Approval message with Accept/Reject buttons must be present in the configured test channel').toBe(true);
       return;
     }
 
@@ -150,7 +150,7 @@ test.describe('S-T3-008-reject: Approval flow — Reject button click', () => {
 
     if (!approvalVisible) {
       await captureStep(page, 'S-T3-008', 9, 'no-approval-message-for-reject-test');
-      test.skip();
+      expect(approvalVisible, 'Approval message with Reject button must be present in the configured test channel').toBe(true);
       return;
     }
 
