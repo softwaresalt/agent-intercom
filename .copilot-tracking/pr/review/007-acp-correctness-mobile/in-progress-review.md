@@ -3,9 +3,9 @@
 
 ## Review Status
 
-* Phase: Phase 4 — Handoff Complete
-* Last Updated: 2026-03-08 23:30
-* Summary: All CRITICAL and HIGH findings fixed across two fix passes. 466 tests pass. Branch pushed at `a764786`. Ready for PR.
+* Phase: Phase 4 — Final Review Complete, PR Pushed
+* Last Updated: 2026-03-09 02:05
+* Summary: All findings resolved — including all 5 previously deferred MEDIUM/LOW items (Phase 8, commit `fa9c225`). 471 tests pass. PR open on GitHub.
 
 ## Branch and Metadata
 
@@ -14,9 +14,9 @@
 * Base Branch: `main`
 * Linked Work Items: Feature 007 spec — `specs/007-acp-correctness-mobile/spec.md`
 * Author: software.salt@gmail.com
-* Total Commits (above main): 21
-* Files Changed: 66 (+4635 insertions, −186 deletions, src/tests only: 40 files)
-* Final commit: `a764786`
+* Total Commits (above main): 22
+* Files Changed: 84 (+5441 insertions, −577 deletions, src/tests only: 58 files)
+* Final commit: `fa9c225`
 
 ## Phase 1 Actions Log
 
@@ -39,11 +39,11 @@
 | CS-02 / LC-05 (composite key) | MEDIUM | 2/3 | ✅ Fixed `a764786` | `thread_ts`-only key collides across channels |
 | LC-06 (count_active_acp) | MEDIUM | 1/3 | ✅ Fixed `a764786` | `count_active_acp` excludes `Paused` sessions |
 | LC-07 (duplicate type alias) | LOW | 1/3 | ✅ Fixed `a764786` | PendingThreadReplies 3-tuple sync in handler.rs |
-| CS-06 / TQ-007 | LOW | 2/3 | ⏸ Deferred | Hardcoded status strings in SQL |
-| TQ-008 | MEDIUM | 1/3 | ⏸ Deferred | Fallback logic triplicated across 3 handlers |
-| TQ-009 | MEDIUM | 1/3 | ⏸ Deferred | Missing push_event integration negative-path tests |
-| LC-05 (agent-5 StreamActivity) | MEDIUM | 1/3 | ⏸ Deferred | StreamActivity emitted for failed deliveries |
-| LC-04 (agent-5 overwrite) | MEDIUM | 1/3 | ⏸ Deferred | HashMap::insert silently overwrites on duplicate key |
+| CS-06 / TQ-007 | LOW | 2/3 | ✅ Fixed `fa9c225` | `SessionStatus::as_str()` — all 8 SQL status literals replaced with bound params (T061) |
+| TQ-008 | MEDIUM | 1/3 | ✅ Fixed `fa9c225` | `activate_thread_reply_fallback` helper extracted — 240 lines of triplication eliminated (T057) |
+| TQ-009 | MEDIUM | 1/3 | ✅ Fixed `fa9c225` | Unit tests S036–S038 added for duplicate registration, sender drop, no-match paths (T058) |
+| LC-05 (agent-5 StreamActivity) | MEDIUM | 1/3 | ✅ Fixed `fa9c225` | `deliver_queued_messages` returns `usize`; StreamActivity only for successes (T059) |
+| LC-04 (agent-5 overwrite) | MEDIUM | 1/3 | ✅ Fixed `fa9c225` | `register_thread_reply_fallback` guards duplicate key with warn + early return (T060) |
 
 ## Diff Mapping (src/ and tests/ only)
 
