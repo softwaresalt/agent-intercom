@@ -89,14 +89,14 @@
 
 ### Tasks
 
-**2.1** Create `tests/integration/slack_interaction_tests.rs`
+- [X] **2.1** Create `tests/integration/slack_interaction_tests.rs`
 - [X] Build mock `AppState` with in-memory DB and registered oneshot channels
 - [X] Test approval accept: dispatch synthetic action → verify oneshot resolved, DB updated
 - [X] Test approval reject: same pattern
 - Scenarios: S-T1-009, S-T1-010
 - FRs: FR-002, FR-009
 
-**2.2** Add prompt interaction tests to `slack_interaction_tests.rs`
+- [X] **2.2** Add prompt interaction tests to `slack_interaction_tests.rs`
 - [X] Test prompt continue: dispatch → verify oneshot resolved
 - [X] Test prompt stop: dispatch → verify oneshot resolved
 - [X] Test nudge: dispatch → verify stall resolved
@@ -104,13 +104,13 @@
 - Scenarios: S-T1-011, S-T1-025, S-T1-026
 - FRs: FR-002, FR-009
 
-**2.3** Create `tests/integration/slack_modal_flow_tests.rs`
+- [X] **2.3** Create `tests/integration/slack_modal_flow_tests.rs`
 - [X] Test prompt refine → modal open path (with `state.slack = None`, verify fallback activates)
 - [X] Test modal submission → prompt resolution with instruction text
 - Scenarios: S-T1-012, S-T1-013
 - FRs: FR-002, FR-009, FR-011
 
-**2.4** Create `tests/unit/command_routing_tests.rs`
+- [X] **2.4** Create `tests/unit/command_routing_tests.rs`
 - [X] Test `/acom` prefix routing for MCP mode
 - [X] Test `/arc` prefix routing for ACP mode
 - [X] Test mode gating: ACP-only command rejected in MCP mode
@@ -118,7 +118,7 @@
 - Scenarios: S-T1-021, S-T1-022, S-T1-023
 - FRs: FR-005
 
-**2.5** Register new test modules in `tests/integration/mod.rs`
+- [X] **2.5** Register new test modules in `tests/integration/mod.rs`
 - [X] Added `mod slack_interaction_tests;` and `mod slack_modal_flow_tests;`
 - [X] Added `mod command_routing_tests;` in `tests/unit.rs`
 
