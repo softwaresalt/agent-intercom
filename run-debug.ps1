@@ -8,5 +8,5 @@ $env:SLACK_TEAM_ID   = [System.Environment]::GetEnvironmentVariable("SLACK_TEAM_
 $env:SLACK_MEMBER_IDS = [System.Environment]::GetEnvironmentVariable("SLACK_MEMBER_IDS", "User")
 $env:RUST_LOG        = "info,agent_intercom::mcp::sse=debug"
 
-Write-Host "Starting agent-intercom (debug) on http://127.0.0.1:3000 ..."
-.\target\debug\agent-intercom.exe --config config.toml --transport sse --port 3000
+Write-Host "Starting agent-intercom (debug) on http://127.0.0.1:3005 ..."
+.\target\debug\agent-intercom.exe --config config.toml --transport sse --port 3005

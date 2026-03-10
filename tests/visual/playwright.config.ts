@@ -4,19 +4,23 @@ import * as path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
+const reportsDir = path.resolve(__dirname, 'reports');
+const testResultsDir = path.resolve(__dirname, 'test-results');
+const authStatePath = path.resolve(__dirname, 'auth', 'session.json');
+
 /**
  * Playwright configuration for agent-intercom Tier 3 visual tests.
  *
  * Environment variables (via .env or shell):
  *   SLACK_WORKSPACE_URL  — e.g. https://myteam.slack.com
  *   SLACK_EMAIL          — bot/test-account email address
- *   SLACK_PASSWORD       — bot/test-account password
+ *   SLACK_PASSWORD       — login password
  *   SLACK_TEST_CHANNEL   — channel name to navigate to during tests
  *   PLAYWRIGHT_TIMEOUT   — optional override for default action timeout (ms)
  */
 export default defineConfig({
   testDir: './scenarios',
-  outputDir: './test-results',
+  outputDir: testResultsDir,
 
   /* Run tests sequentially — Slack UI is stateful and cannot run in parallel safely. */
   workers: 1,
@@ -29,7 +33,7 @@ export default defineConfig({
   },
 
   reporter: [
-    ['html', { outputFolder: 'reports', open: 'never' }],
+    ['html', { outputFolder: reportsDir, open: 'never' }],
     ['list'],
   ],
 
@@ -45,7 +49,7 @@ export default defineConfig({
     video: 'off',
     trace: 'off',
     baseURL: process.env.SLACK_WORKSPACE_URL,
-    storageState: 'auth/session.json',
+    storageState: authStatePath,
   },
 
   projects: [
