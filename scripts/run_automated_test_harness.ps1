@@ -178,62 +178,86 @@ function Get-MissingVisualAuthVariables {
 }
 
 function Get-MissingVisualFixtureVariables {
-    $required = @(
-        "SLACK_TEST_CHANNEL",
-        "SLACK_TEST_BOT_TOKEN",
-        "SLACK_TEST_CHANNEL_ID"
-    )
-
     $missing = @()
-    foreach ($name in $required) {
+
+    foreach ($name in @("SLACK_TEST_CHANNEL", "SLACK_TEST_CHANNEL_ID")) {
         if ([string]::IsNullOrWhiteSpace((Get-VisualConfigValue -Name $name))) {
             $missing += $name
         }
     }
 
+    # Accept SLACK_BOT_TOKEN as a fallback for SLACK_TEST_BOT_TOKEN so the
+    # visual harness can use the server's working token without duplication.
+    $testToken = Get-VisualConfigValue -Name "SLACK_TEST_BOT_TOKEN"
+    $serverToken = Get-EffectiveEnvValue -Name "SLACK_BOT_TOKEN"
+    if ([string]::IsNullOrWhiteSpace($testToken) -and [string]::IsNullOrWhiteSpace($serverToken)) {
+        $missing += "SLACK_TEST_BOT_TOKEN (or SLACK_BOT_TOKEN)"
+    }
+
     return $missing
 }
 
+function Invoke-SlackAuthTest {
+    param([string]$Token)
+
+    return Invoke-RestMethod `
+        -Uri "https://slack.com/api/auth.test" `
+        -Method Post `
+        -Headers @{ Authorization = "Bearer $Token" } `
+        -Body @{} `
+        -TimeoutSec 10 `
+        -ErrorAction Stop
+}
+
 function Test-SlackFixtureToken {
-    $botToken = Get-VisualConfigValue -Name "SLACK_TEST_BOT_TOKEN"
-    if ([string]::IsNullOrWhiteSpace($botToken)) {
+    $candidates = [System.Collections.Generic.List[object]]::new()
+
+    $testToken = Get-VisualConfigValue -Name "SLACK_TEST_BOT_TOKEN"
+    if (-not [string]::IsNullOrWhiteSpace($testToken)) {
+        $candidates.Add([pscustomobject]@{ Name = "SLACK_TEST_BOT_TOKEN"; Value = $testToken })
+    }
+
+    $serverToken = Get-EffectiveEnvValue -Name "SLACK_BOT_TOKEN"
+    if (-not [string]::IsNullOrWhiteSpace($serverToken)) {
+        $candidates.Add([pscustomobject]@{ Name = "SLACK_BOT_TOKEN"; Value = $serverToken })
+    }
+
+    if ($candidates.Count -eq 0) {
         return [pscustomobject]@{
             IsValid = $false
             Status = "SKIP"
-            Details = "SLACK_TEST_BOT_TOKEN is not set."
+            Details = "Neither SLACK_TEST_BOT_TOKEN nor SLACK_BOT_TOKEN is set."
         }
     }
 
-    try {
-        $response = Invoke-RestMethod `
-            -Uri "https://slack.com/api/auth.test" `
-            -Method Post `
-            -Headers @{ Authorization = "Bearer $botToken" } `
-            -Body @{} `
-            -TimeoutSec 10 `
-            -ErrorAction Stop
+    foreach ($candidate in $candidates) {
+        try {
+            $response = Invoke-SlackAuthTest -Token $candidate.Value
 
-        if ($response.ok -eq $true) {
-            $teamName = if ($response.team) { $response.team } else { "unknown workspace" }
-            return [pscustomobject]@{
-                IsValid = $true
-                Status = "PASS"
-                Details = "Validated SLACK_TEST_BOT_TOKEN via Slack auth.test for $teamName."
+            if ($response.ok -eq $true) {
+                $teamName = if ($response.team) { $response.team } else { "unknown workspace" }
+                # Propagate the working token into the process env so Playwright
+                # child processes (npm run test:fixtures) inherit it.
+                $env:SLACK_TEST_BOT_TOKEN = $candidate.Value
+                return [pscustomobject]@{
+                    IsValid = $true
+                    Status = "PASS"
+                    Details = "Validated $($candidate.Name) via Slack auth.test for $teamName."
+                }
             }
-        }
 
-        $errorCode = if ($response.error) { $response.error } else { "unknown" }
-        return [pscustomobject]@{
-            IsValid = $false
-            Status = "FAIL"
-            Details = "Slack auth.test returned '$errorCode' for SLACK_TEST_BOT_TOKEN."
+            $errorCode = if ($response.error) { $response.error } else { "unknown" }
+            Write-Host "  $($candidate.Name) returned '$errorCode' - trying next candidate..." -ForegroundColor Yellow
+        } catch {
+            Write-Host "  $($candidate.Name) auth.test failed: $($_.Exception.Message) - trying next..." -ForegroundColor Yellow
         }
-    } catch {
-        return [pscustomobject]@{
-            IsValid = $false
-            Status = "FAIL"
-            Details = "Slack auth.test request failed for SLACK_TEST_BOT_TOKEN: $($_.Exception.Message)"
-        }
+    }
+
+    $names = ($candidates | ForEach-Object { $_.Name }) -join ", "
+    return [pscustomobject]@{
+        IsValid = $false
+        Status = "FAIL"
+        Details = "All bot token candidates failed Slack auth.test ($names)."
     }
 }
 
@@ -539,3 +563,4 @@ try {
         exit 1
     }
 }
+

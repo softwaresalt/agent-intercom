@@ -69,6 +69,18 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/** Returns the first defined value among the given env var names. */
+function requireOneOf(...names: string[]): string {
+  for (const name of names) {
+    const value = getEnv(name);
+    if (value) {
+      return value;
+    }
+  }
+
+  throw new Error(`None of [${names.join(', ')}] are set`);
+}
+
 function sectionBlock(text: string): SlackSectionBlock {
   return {
     type: 'section',
@@ -136,7 +148,7 @@ export function hasAutomatedVisualEnv(): boolean {
       getEnv('SLACK_EMAIL') &&
       getEnv('SLACK_PASSWORD') &&
       getEnv('SLACK_TEST_CHANNEL') &&
-      getEnv('SLACK_TEST_BOT_TOKEN') &&
+      (getEnv('SLACK_BOT_TOKEN') ?? getEnv('SLACK_TEST_BOT_TOKEN')) &&
       getEnv('SLACK_TEST_CHANNEL_ID'),
   );
 }
@@ -152,7 +164,7 @@ export class SlackFixtureClient {
 
   public static fromEnv(): SlackFixtureClient {
     return new SlackFixtureClient(
-      requireEnv('SLACK_TEST_BOT_TOKEN'),
+      requireOneOf('SLACK_BOT_TOKEN', 'SLACK_TEST_BOT_TOKEN'),
       requireEnv('SLACK_TEST_CHANNEL_ID'),
     );
   }
@@ -267,3 +279,4 @@ export class SlackFixtureClient {
     };
   }
 }
+
