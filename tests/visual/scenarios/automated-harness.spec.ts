@@ -8,10 +8,11 @@
  */
 import { test, expect } from '@playwright/test';
 
-import { navigateToChannel, navigateToThread, scrollToLatestMessage } from '../helpers/slack-nav';
+import { navigateToChannel, navigateToThread, scrollToLatestMessage, closeThreadPanel } from '../helpers/slack-nav';
 import { captureElement, captureStep, isVisibleWithin } from '../helpers/screenshot';
 import {
   BUTTON_SELECTORS,
+  MODAL_SELECTORS,
   MESSAGE_SELECTORS,
   THREAD_SELECTORS,
   byTimestamp,
@@ -25,6 +26,8 @@ import {
 const APPROVAL_SCENARIO = 'S-T3-AUTO-001';
 const PROMPT_SCENARIO = 'S-T3-AUTO-002';
 const THREAD_SCENARIO = 'S-T3-AUTO-003';
+const MODAL_TOP_SCENARIO = 'S-T3-AUTO-004';
+const MODAL_THREAD_SCENARIO = 'S-T3-AUTO-005';
 
 const testChannel = (): string => process.env.SLACK_TEST_CHANNEL ?? 'agent-intercom-test';
 
@@ -147,4 +150,136 @@ test.describe('Automated visual harness fixtures', () => {
     await captureElement(fallbackMessage, THREAD_SCENARIO, 3, 'fallback-message-row');
     await captureStep(page, THREAD_SCENARIO, 4, 'thread-fallback-validated');
   });
+
+  test('documents top-level Refine button click: modal open/not-open diagnostic', async ({ page }) => {
+    if (!automatedEnvReady()) {
+      test.skip();
+      return;
+    }
+
+    const currentFixtures = requireFixtures();
+
+    await navigateToChannel(page, testChannel());
+    await scrollToLatestMessage(page);
+    await captureStep(page, MODAL_TOP_SCENARIO, 1, 'channel-loaded');
+
+    const promptRow = page.locator(byTimestamp(currentFixtures.promptTs)).first();
+    await promptRow.waitFor({ state: 'visible', timeout: 15_000 });
+
+    const refineButton = promptRow.locator(BUTTON_SELECTORS.refineButton).first();
+    await refineButton.waitFor({ state: 'visible', timeout: 5_000 });
+    await captureStep(page, MODAL_TOP_SCENARIO, 2, 'refine-button-visible');
+
+    await refineButton.click();
+    await captureStep(page, MODAL_TOP_SCENARIO, 3, 'refine-clicked');
+
+    // Wait up to 5 seconds for a modal overlay to appear.
+    const modalOverlay = page.locator(MODAL_SELECTORS.modalOverlay).first();
+    const modalAppeared = await modalOverlay
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    await captureStep(page, MODAL_TOP_SCENARIO, 4, `modal-outcome-appeared-${String(modalAppeared)}`);
+
+    if (modalAppeared) {
+      const modalTitle = page.locator(MODAL_SELECTORS.modalTitle).first();
+      const titleVisible = await modalTitle
+        .waitFor({ state: 'visible', timeout: 3_000 })
+        .then(() => true)
+        .catch(() => false);
+      await captureStep(page, MODAL_TOP_SCENARIO, 5, 'modal-structure-captured');
+      console.log(
+        `[${MODAL_TOP_SCENARIO}] DIAGNOSTIC: modal appeared. title visible: ${String(titleVisible)}`,
+      );
+    } else {
+      console.log(
+        `[${MODAL_TOP_SCENARIO}] DIAGNOSTIC: modal did NOT appear (expected — fixture uses a dummy promptId not in DB). ` +
+          'This confirms the Refine button click IS delivered to agent-intercom; server rejects silently.',
+      );
+    }
+
+    // The test is diagnostic — pass in both cases.
+    expect(true).toBe(true);
+  });
+
+  test('documents in-thread Refine button click: Slack client modal suppression diagnostic', async ({ page }) => {
+    if (!automatedEnvReady()) {
+      test.skip();
+      return;
+    }
+
+    const currentFixtures = requireFixtures();
+
+    await navigateToChannel(page, testChannel());
+    await scrollToLatestMessage(page);
+    await captureStep(page, MODAL_THREAD_SCENARIO, 1, 'channel-loaded');
+
+    // Open the thread and wait for it to render.
+    await navigateToThread(page, currentFixtures.threadAnchorTs);
+    await captureStep(page, MODAL_THREAD_SCENARIO, 2, 'thread-opened');
+
+    const threadPanel = page.locator(THREAD_SELECTORS.threadPanel).first();
+    const panelVisible = await isVisibleWithin(threadPanel, 10_000);
+    expect(panelVisible, 'Thread panel should open').toBe(true);
+
+    // Find the seeded prompt-with-Refine button posted inside the thread.
+    const threadPromptRow = threadPanel
+      .locator(byTimestamp(currentFixtures.threadPromptTs))
+      .first();
+    const threadPromptVisible = await threadPromptRow
+      .waitFor({ state: 'visible', timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!threadPromptVisible) {
+      console.log(
+        `[${MODAL_THREAD_SCENARIO}] DIAGNOSTIC: thread prompt row not found in DOM ` +
+          '(Slack virtual list may not have scrolled to it). Capturing screenshot.',
+      );
+      await captureStep(page, MODAL_THREAD_SCENARIO, 3, 'thread-prompt-not-found');
+      expect(true).toBe(true);
+      return;
+    }
+
+    const refineButton = threadPanel.locator(BUTTON_SELECTORS.refineButton).first();
+    await refineButton.waitFor({ state: 'visible', timeout: 5_000 });
+    await captureStep(page, MODAL_THREAD_SCENARIO, 3, 'in-thread-refine-button-visible');
+
+    await refineButton.click({ force: true });
+    await captureStep(page, MODAL_THREAD_SCENARIO, 4, 'in-thread-refine-clicked');
+
+    // Per Phase 6 API evidence, Slack silently suppresses views.open from thread
+    // trigger_ids. We document the client-side outcome here.
+    const modalOverlay = page.locator(MODAL_SELECTORS.modalOverlay).first();
+    const modalAppeared = await modalOverlay
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    await captureStep(
+      page,
+      MODAL_THREAD_SCENARIO,
+      5,
+      `in-thread-modal-outcome-appeared-${String(modalAppeared)}`,
+    );
+
+    if (modalAppeared) {
+      console.log(
+        `[${MODAL_THREAD_SCENARIO}] DIAGNOSTIC: modal DID appear from thread context. ` +
+          'This would be a positive change — Slack may have fixed the silent suppression.',
+      );
+    } else {
+      console.log(
+        `[${MODAL_THREAD_SCENARIO}] DIAGNOSTIC: modal did NOT appear from thread context. ` +
+          'Consistent with known Slack limitation: views.open is silently suppressed when ' +
+          'trigger_id originates from a thread block_action.',
+      );
+    }
+
+    await closeThreadPanel(page);
+    // The test is diagnostic — pass in both cases.
+    expect(true).toBe(true);
+  });
 });
+

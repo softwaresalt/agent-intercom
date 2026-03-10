@@ -51,6 +51,7 @@ export type AutomatedVisualFixtures = {
   approvalTs: string;
   promptTs: string;
   threadAnchorTs: string;
+  threadPromptTs: string;
   fallbackTs: string;
   cleanupTs: string[];
 };
@@ -259,6 +260,14 @@ export class SlackFixtureClient {
       `[automated-visual] thread anchor ${runId}`,
     );
 
+
+    // Post a prompt-with-Refine button INSIDE the thread for the in-thread modal diagnostic.
+    const threadPromptId = `auto-thread-prompt-${runId}`;
+    const threadPromptTs = await this.postMessage(
+      `[automated-visual] thread prompt fixture ${runId}`,
+      buildPromptBlocks(threadPromptId, runId),
+      threadAnchorTs,
+    );
     const fallbackTs = await this.postMessage(
       `Automated thread fallback for run ${runId}`,
       [
@@ -274,9 +283,12 @@ export class SlackFixtureClient {
       approvalTs,
       promptTs,
       threadAnchorTs,
+      threadPromptTs,
       fallbackTs,
-      cleanupTs: [fallbackTs, threadAnchorTs, promptTs, approvalTs],
+      cleanupTs: [fallbackTs, threadPromptTs, threadAnchorTs, promptTs, approvalTs],
     };
   }
 }
+
+
 
