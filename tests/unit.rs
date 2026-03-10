@@ -44,6 +44,7 @@ mod unit {
     mod session_routing_tests;
     mod session_status;
     mod slack_client_tests;
+    mod slack_thread_mention_routing;
     mod sse_workspace_only_routing;
     mod stall_consumer_tests;
     mod stall_detector_tests;

@@ -99,6 +99,70 @@ pub async fn handle_prompt_action(
         if let Some(ref slack) = state.slack {
             let callback_id = format!("prompt_refine:{prompt_id}");
 
+            // F-16/F-17 proactive: Slack silently suppresses views.open when the
+            // triggering message lives inside a thread (origin.thread_ts is Some).
+            // Skip the doomed views.open call and activate the fallback immediately,
+            // telling the operator to use @agent-intercom instead of a modal.
+            let is_thread_context = message.is_some_and(|m| m.origin.thread_ts.is_some());
+            if is_thread_context {
+                let thread_ts_opt = message.map(|m| {
+                    m.origin
+                        .thread_ts
+                        .as_ref()
+                        .map_or_else(|| m.origin.ts.0.clone(), |ts| ts.0.clone())
+                });
+                let chan_id_opt = channel.map(|c| c.id.to_string());
+                if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
+                    let button_msg_ts = message.map(|m| m.origin.ts.clone());
+                    let state_clone = Arc::clone(state);
+                    let prompt_id_owned = prompt_id.to_owned();
+                    crate::slack::handlers::thread_reply::activate_thread_reply_fallback(
+                        chan_id.as_str(),
+                        thread_ts.as_str(),
+                        prompt_session_id.clone(),
+                        user_id.to_owned(),
+                        "Please tag `@agent-intercom` in this thread with your revised instructions.",
+                        button_msg_ts,
+                        slack,
+                        Arc::clone(&state.pending_thread_replies),
+                        prompt_id,
+                        move |reply_text| async move {
+                            let repo = PromptRepo::new(Arc::clone(&state_clone.db));
+                            if let Err(db_err) = repo
+                                .update_decision(
+                                    &prompt_id_owned,
+                                    PromptDecision::Refine,
+                                    Some(reply_text.clone()),
+                                )
+                                .await
+                            {
+                                warn!(
+                                    prompt_id = prompt_id_owned,
+                                    %db_err,
+                                    "thread-reply fallback: failed to update prompt decision in DB"
+                                );
+                            }
+                            if let Err(driver_err) = state_clone
+                                .driver
+                                .resolve_prompt(&prompt_id_owned, "refine", Some(reply_text))
+                                .await
+                            {
+                                warn!(
+                                    prompt_id = prompt_id_owned,
+                                    %driver_err,
+                                    "thread-reply fallback: failed to resolve prompt via driver"
+                                );
+                            }
+                        },
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                return Err(
+                    "thread context: missing channel or thread_ts for Refine fallback".to_owned(),
+                );
+            }
+
             // Cache the original message coordinates so the ViewSubmission
             // handler can update the message from "⏳ Processing…" to a
             // final status line (FR-022).
@@ -139,7 +203,7 @@ pub async fn handle_prompt_action(
                         thread_ts.as_str(),
                         prompt_session_id.clone(),
                         user_id.to_owned(),
-                        "Modal unavailable \u{2014} please reply in this thread with your revised instructions.",
+                        "Modal unavailable \u{2014} please tag `@agent-intercom` in this thread with your revised instructions.",
                         button_msg_ts,
                         slack,
                         Arc::clone(&state.pending_thread_replies),

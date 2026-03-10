@@ -54,6 +54,45 @@ pub async fn handle_push_event(
 
             info!(user_id, channel_id, "push event: app mention received");
 
+            // F-16/F-17: When the @-mention arrives inside a thread, check for a
+            // pending thread-reply fallback first (e.g., a Refine prompt whose modal
+            // could not be opened).  This mirrors the plain-message path at lines
+            // 114-152 and closes the routing gap for @-mention replies.
+            if let Some(ref ts) = thread_ts {
+                let stripped = handlers::steer::strip_mention(text).trim();
+                match crate::slack::handlers::thread_reply::route_thread_reply(
+                    &channel_id,
+                    ts.0.as_str(),
+                    &user_id,
+                    stripped,
+                    Arc::clone(&app.pending_thread_replies),
+                )
+                .await
+                {
+                    Ok(true) => {
+                        info!(
+                            user = user_id,
+                            channel = channel_id,
+                            "push event: @mention in thread captured by modal fallback (F-16/F-17)"
+                        );
+                        post_ack(&app, &channel_id, Some(ts)).await;
+                        return Ok(());
+                    }
+                    Ok(false) => {
+                        // No pending fallback — fall through to normal steering.
+                    }
+                    Err(err) => {
+                        warn!(
+                            %err,
+                            channel = channel_id,
+                            "push event: thread-reply fallback routing error on @mention; \
+                             skipping steering (TQ-004)"
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+
             handlers::steer::ingest_app_mention(text, &channel_id, &app).await;
             post_ack(&app, &channel_id, thread_ts.as_ref()).await;
         }
