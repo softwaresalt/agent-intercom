@@ -158,6 +158,45 @@ The offline test suite (Tier 1) runs as part of the project's CI pipeline alongs
 
 ---
 
+### User Story 9 — Automated @-Mention Thread Reply Validation (Priority: P1)
+
+The automated test harness validates the @-mention thread reply fix (commit `480aaab`) end-to-end
+using Playwright browser automation. When a Refine or Resume with Instructions button is clicked
+inside a Slack thread, the server now proactively skips `views.open` and instead posts an
+`@agent-intercom` mention prompt in the thread. The operator replies with `@agent-intercom
+<instructions>` and the server routes the stripped text to the pending prompt waiter. This entire
+path is exercised automatically — without manual operator clicks — by the Playwright harness using
+self-seeded fixture messages.
+
+**Why this priority**: The @-mention fix resolves the highest-severity UX blocker (silent modal
+suppression in threads, confirmed in Phase 9). Without automated coverage, regressions to the fix
+would be invisible until a manual HITL pass. The self-seeding fixture approach means this test runs
+without a prior HITL session — it seeds its own @-mention prompt message and verifies it visually.
+
+**Independent Test**: Requires the same env configuration as the existing automated harness
+(`SLACK_BOT_TOKEN`, `SLACK_WORKSPACE_URL`, `SLACK_TEST_CHANNEL`, `SLACK_TEST_CHANNEL_ID`).
+Runs as part of `npm run test:at-mention` or `npm run test:automated`. A `-Suite hitl` mode in
+`run_automated_test_harness.ps1` orchestrates the live end-to-end path when the server is running.
+
+**Acceptance Scenarios**:
+
+1. **Given** a seeded thread with an @-mention prompt (text contains `"mentioning @agent-intercom"`),
+   **When** the Playwright harness opens the thread panel,
+   **Then** the @-mention prompt text is visible in the thread, screenshots are captured, and the
+   test passes (S-T3-AUTO-006).
+2. **Given** a seeded in-thread prompt with a Refine button,
+   **When** the Playwright harness opens the thread panel,
+   **Then** the Refine button is visible inside the thread pane (S-T3-AUTO-007).
+3. **Given** a seeded @-mention fixture in the automated harness,
+   **When** the Playwright harness locates the @-mention prompt message,
+   **Then** the text contains `"@agent-intercom"` as a static fixture assertion (S-T3-AUTO-008).
+4. **Given** the `agent-intercom` server is running and reachable,
+   **When** the `-Suite hitl` automated harness runs,
+   **Then** the @-mention Playwright spec executes and reports PASS or SKIP (not FAIL) depending
+   on server availability (S-T3-HITL-001, S-T3-HITL-002).
+
+---
+
 ### Edge Cases
 
 - What happens when a Slack interaction payload references a session ID that no longer exists in the database?
@@ -222,6 +261,12 @@ The offline test suite (Tier 1) runs as part of the project's CI pipeline alongs
 - **FR-031**: The visual test suite MUST be runnable on-demand (not part of standard `cargo test`) and gated behind environment configuration that provides test workspace credentials and browser automation runtime availability.
 - **FR-032**: The visual test suite MUST handle Slack web client authentication, including session persistence across test runs to avoid repeated login overhead.
 
+- **FR-033**: When a block_action event originates from a Slack thread context (the `trigger_id` is associated with a threaded message), the server MUST skip `views.open` entirely and instead invoke the thread-reply fallback path, posting an @-mention prompt directly in the thread.
+- **FR-034**: The @-mention fallback message posted in the thread MUST include the bot's Slack @-mention so the operator knows to use it in their reply. The message MUST instruct the operator to reply using the mention syntax (e.g., `"🤖 Please type your instructions as a reply mentioning @agent-intercom"`).
+- **FR-035**: When an `AppMention` event arrives for a message that is a thread reply (the event has a `thread_ts` field), the server MUST check `pending_thread_replies` before routing to steering. If a pending entry exists for the `(channel_id, thread_ts)` pair and the sender is the authorized user, the server MUST strip the `<@BOTID>` mention prefix and deliver the remaining text to the pending waiter's oneshot channel.
+- **FR-036**: The mention stripping operation MUST produce text that exactly equals the operator's input with only the leading `<@BOTID>` and any surrounding whitespace removed — no further modification of the instruction text is permitted.
+- **FR-037**: The automated test harness MUST provide a `-Suite hitl` mode in `scripts/run_automated_test_harness.ps1` that orchestrates the @-mention thread reply flow end-to-end using Playwright browser automation, verifying the flow without manual operator intervention.
+
 ### Key Entities
 
 - **Test Scenario**: A named, self-contained test case that exercises a specific Slack UI interaction path. Attributes: scenario ID, tier (1, 2, or 3), description, preconditions, simulated/live/visual actions, expected outcomes.
@@ -257,3 +302,4 @@ The offline test suite (Tier 1) runs as part of the project's CI pipeline alongs
 - **SC-008**: Tier 2 tests verify that messages posted to threaded conversations actually appear in the correct thread when queried via the Slack API.
 - **SC-009**: The Tier 3 (visual) test suite captures screenshots for every interaction scenario and produces a browsable HTML report with scenario labels, pass/fail annotations, and chronologically ordered screenshot evidence.
 - **SC-010**: Tier 3 screenshots visually confirm that Block Kit messages render correctly in the Slack web client — buttons are visible and labeled, code blocks are monospaced, emoji indicators display correctly, and severity formatting is distinguishable.
+- **SC-011**: The automated harness validates the @-mention thread reply fix end-to-end: the seeded @-mention prompt fixture is visually confirmed in the Playwright browser (S-T3-AUTO-006, S-T3-AUTO-008), the Refine button is visible in the seeded thread prompt (S-T3-AUTO-007), and the `-Suite hitl` orchestration script executes without error (PASS or SKIP per server availability).

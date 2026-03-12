@@ -38,7 +38,7 @@
 #>
 
 param(
-    [ValidateSet("all", "api", "visual")]
+    [ValidateSet("all", "api", "visual", "hitl")]
     [string]$Suite = "all",
 
     [switch]$IncludeLiveSlack,
@@ -387,6 +387,7 @@ try {
 
     $runApi = $Suite -in @("all", "api")
     $runVisual = $Suite -in @("all", "visual")
+    $runHitl = $Suite -in @("all", "hitl")
 
     if ($runApi) {
         Invoke-ExternalStep `
@@ -527,12 +528,80 @@ try {
                             -Phase "Playwright seeded fixture suite" `
                             -Command { Invoke-InVisualProject { npm run test:fixtures } } `
                             -SuccessDetails "npm run test:fixtures (report: tests\visual\reports)"
+
+                        Invoke-ExternalStep `
+                            -Phase "Playwright @-mention thread fix suite" `
+                            -Command { Invoke-InVisualProject { npm run test:at-mention } } `
+                            -SuccessDetails "npm run test:at-mention (report: tests\visual\reports)"
                     } else {
                         Add-PhaseResult `
                             -Phase "Playwright seeded fixture suite" `
                             -Status "SKIP" `
                             -Details "Skipped because Slack fixture token preflight did not pass."
                     }
+                }
+            }
+        }
+    }
+
+    if ($runHitl) {
+        Write-PhaseHeader "HITL automated suite (Phase 11 — @-mention thread fix)"
+
+        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+            $script:HadFailures = $true
+            Add-PhaseResult `
+                -Phase "HITL at-mention suite" `
+                -Status "FAIL" `
+                -Details "npm is not available on PATH."
+        } elseif (-not (Test-Path "tests\visual\node_modules")) {
+            Add-PhaseResult `
+                -Phase "HITL at-mention suite" `
+                -Status "SKIP" `
+                -Details "tests\visual\node_modules missing. Run with -BootstrapVisualDeps first."
+        } else {
+            # Phase 1: check whether agent-intercom is reachable (optional — SKIP not FAIL).
+            $mcpUrl = Get-McpServerUrl
+            $healthUrl = Get-HealthUrl -ServerUrl $mcpUrl
+            $serverReachable = Wait-ForHealth -HealthUrl $healthUrl -Attempts 3
+
+            if (-not $serverReachable) {
+                Add-PhaseResult `
+                    -Phase "HITL server health check" `
+                    -Status "SKIP" `
+                    -Details "agent-intercom not reachable at $healthUrl. Start the server to enable full HITL validation."
+            } else {
+                Add-PhaseResult `
+                    -Phase "HITL server health check" `
+                    -Status "PASS" `
+                    -Details "agent-intercom healthy at $healthUrl"
+            }
+
+            # Phase 2: run the @-mention Playwright spec (self-seeding; works with or without server).
+            $missingHitlAuth = Get-MissingVisualAuthVariables
+            $missingHitlFixtures = Get-MissingVisualFixtureVariables
+
+            if ($missingHitlAuth.Count -gt 0) {
+                Add-PhaseResult `
+                    -Phase "HITL at-mention suite" `
+                    -Status "SKIP" `
+                    -Details ("Missing visual auth config: " + ($missingHitlAuth -join ", "))
+            } elseif ($missingHitlFixtures.Count -gt 0) {
+                Add-PhaseResult `
+                    -Phase "HITL at-mention suite" `
+                    -Status "SKIP" `
+                    -Details ("Missing fixture token config: " + ($missingHitlFixtures -join ", "))
+            } else {
+                $tokenCheck = Test-SlackFixtureToken
+                if ($tokenCheck.IsValid) {
+                    Invoke-ExternalStep `
+                        -Phase "HITL at-mention suite" `
+                        -Command { Invoke-InVisualProject { npm run test:at-mention } } `
+                        -SuccessDetails "npm run test:at-mention — @-mention thread fix validated"
+                } else {
+                    Add-PhaseResult `
+                        -Phase "HITL at-mention suite" `
+                        -Status "SKIP" `
+                        -Details "Slack fixture token not valid: $($tokenCheck.Details)"
                 }
             }
         }

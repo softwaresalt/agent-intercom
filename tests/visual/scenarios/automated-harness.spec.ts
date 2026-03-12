@@ -20,7 +20,9 @@ import {
 import {
   SlackFixtureClient,
   hasAutomatedVisualEnv,
+  hasAtMentionEnv,
   type AutomatedVisualFixtures,
+  type AtMentionFixtures,
 } from '../helpers/slack-fixtures';
 
 const APPROVAL_SCENARIO = 'S-T3-AUTO-001';
@@ -281,5 +283,84 @@ test.describe('Automated visual harness fixtures', () => {
     // The test is diagnostic — pass in both cases.
     expect(true).toBe(true);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-T3-AUTO-008: @-mention thread reply fix — static fixture validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AT_MENTION_AUTO_SCENARIO = 'S-T3-AUTO-008';
+
+let atMentionFixtureClient: SlackFixtureClient | null = null;
+let atMentionFixtures: AtMentionFixtures | null = null;
+
+test.describe('S-T3-AUTO-008: @-mention thread reply fix — static fixture validation', () => {
+  test.beforeAll(async () => {
+    if (!hasAtMentionEnv()) {
+      return;
+    }
+    atMentionFixtureClient = SlackFixtureClient.fromEnv();
+    atMentionFixtures = await atMentionFixtureClient.seedAtMentionThreadFixture();
+  });
+
+  test.afterAll(async () => {
+    if (atMentionFixtureClient && atMentionFixtures) {
+      await atMentionFixtureClient.deleteMessages(atMentionFixtures.cleanupTs);
+    }
+  });
+
+  test(
+    '@-mention prompt message contains @agent-intercom bot mention marker',
+    async ({ page }) => {
+      if (!hasAtMentionEnv()) {
+        test.skip();
+        return;
+      }
+
+      if (!atMentionFixtures) {
+        throw new Error('S-T3-AUTO-008: @-mention fixtures were not seeded');
+      }
+
+      await navigateToChannel(page, testChannel());
+      await scrollToLatestMessage(page);
+      await captureStep(page, AT_MENTION_AUTO_SCENARIO, 1, 'channel-loaded');
+
+      await navigateToThread(page, atMentionFixtures.anchorTs);
+      await captureStep(page, AT_MENTION_AUTO_SCENARIO, 2, 'thread-opened');
+
+      const threadPanel = page.locator(THREAD_SELECTORS.threadPanel).first();
+      const panelVisible = await isVisibleWithin(threadPanel, 10_000);
+      expect(panelVisible, 'Thread panel must open').toBe(true);
+
+      // Locate the @-mention prompt text in the thread.
+      const atMentionMsg = threadPanel
+        .locator(`${MESSAGE_SELECTORS.messageText}:has-text("@agent-intercom")`)
+        .first();
+
+      const msgVisible = await isVisibleWithin(atMentionMsg, 15_000);
+
+      await captureStep(
+        page,
+        AT_MENTION_AUTO_SCENARIO,
+        3,
+        msgVisible ? 'at-mention-prompt-found' : 'at-mention-prompt-absent',
+      );
+
+      expect(
+        msgVisible,
+        'S-T3-AUTO-008: seeded @-mention prompt must be visible in thread',
+      ).toBe(true);
+
+      const text = await atMentionMsg.textContent();
+      expect(text?.toLowerCase()).toContain('@agent-intercom');
+
+      await captureElement(atMentionMsg, AT_MENTION_AUTO_SCENARIO, 4, 'at-mention-closeup');
+      await captureStep(page, AT_MENTION_AUTO_SCENARIO, 5, 'at-mention-text-validated');
+
+      console.log(
+        `[${AT_MENTION_AUTO_SCENARIO}] @-mention marker confirmed in seeded fixture text.`,
+      );
+    },
+  );
 });
 

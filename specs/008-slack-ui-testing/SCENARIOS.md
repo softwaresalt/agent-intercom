@@ -667,7 +667,74 @@ verify the thread-reply fallback (analogous to S-T3-007).
 
 ---
 
-## Scenario Traceability Matrix
+---
+
+## Phase 11 — @-Mention Thread Reply Fix Automated Validation
+
+### S-T3-AUTO-006: @-mention prompt text visible in seeded thread
+
+**Given** a seeded thread anchor message with a prompt-with-Refine button posted as a
+thread reply, and a seeded @-mention fallback prompt posted as a second thread reply,
+**When** the Playwright browser opens the thread panel,
+**Then** the @-mention prompt message is visible in the thread panel, the message text
+contains the phrase `"mentioning @agent-intercom"`, and screenshots are captured at each step.
+
+**File**: `tests/visual/scenarios/at-mention-thread-reply.spec.ts`  
+**Traces to**: FR-033, FR-034, SC-011
+
+---
+
+### S-T3-AUTO-007: In-thread prompt has Refine button visible
+
+**Given** a seeded thread prompt fixture with a Refine button posted inside a thread,
+**When** the Playwright browser opens that thread panel,
+**Then** the Refine button is visible in the thread panel (confirming the prompt Block Kit
+structure renders correctly inside a thread pane), and a screenshot is captured.
+
+**File**: `tests/visual/scenarios/at-mention-thread-reply.spec.ts`  
+**Traces to**: FR-027, FR-033, SC-010
+
+---
+
+### S-T3-AUTO-008: @-mention prompt text contains bot mention pattern (static fixture)
+
+**Given** a seeded @-mention thread fixture that posts the bot-mention fallback text,
+**When** the Playwright browser opens the thread and locates the fallback message,
+**Then** the message text contains `"@agent-intercom"` (the bot mention marker), and the
+test passes as a static fixture validation that does not require a live server.
+
+**File**: `tests/visual/scenarios/automated-harness.spec.ts`  
+**Traces to**: FR-034, SC-011
+
+---
+
+### S-T3-HITL-001: Automated HITL — full forward_prompt cycle
+
+**Given** the `agent-intercom` server is running and reachable at the configured health URL,
+**When** the automated HITL harness posts a `forward_prompt` MCP call (or navigates to a
+channel with an existing prompt message) and the Playwright browser clicks the Refine button
+from inside a thread,
+**Then** the @-mention fallback prompt appears in the thread within 15 seconds, and
+screenshots confirm the complete operator-facing flow without manual intervention.
+
+**File**: `scripts/run_automated_test_harness.ps1` (Suite: hitl)  
+**Traces to**: FR-035, FR-036, FR-037, SC-011
+
+---
+
+### S-T3-HITL-002: Automated HITL — wait_for_instruction via thread reply
+
+**Given** the `agent-intercom` server is running and a wait_for_instruction prompt has
+been posted to the test channel in a thread,
+**When** the automated HITL harness identifies the Resume with Instructions button in the
+thread pane and clicks it,
+**Then** the @-mention fallback prompt appears in the thread, and a test reply is typed
+into the thread composer (visual confirmation step only; actual send is optional).
+
+**File**: `scripts/run_automated_test_harness.ps1` (Suite: hitl)  
+**Traces to**: FR-035, FR-036, FR-037, SC-011
+
+---
 
 | Scenario | FR Coverage | SC Coverage |
 |---|---|---|
@@ -696,6 +763,9 @@ verify the thread-reply fallback (analogous to S-T3-007).
 | S-T3-012 | FR-029 | SC-009 |
 | S-X-001 | FR-022 | SC-003 |
 | S-X-002 | FR-023 | SC-003 |
+| S-T3-AUTO-001 – S-T3-AUTO-005 | FR-026, FR-027, FR-028 | SC-009, SC-010 |
+| S-T3-AUTO-006 – S-T3-AUTO-008 | FR-033, FR-034, FR-035 | SC-011 |
+| S-T3-HITL-001 – S-T3-HITL-002 | FR-035, FR-036, FR-037 | SC-011 |
 
 ### Uncovered FRs
 

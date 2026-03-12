@@ -17,7 +17,7 @@
 //!    `ingest_app_mention` steering is unaffected.
 //!
 //! The TDD "red" state: before Phase 1 (`strip_mention` visibility change) and
-//! Phase 2 (AppMention arm update), the `push_events.rs` handler never reaches
+//! Phase 2 (`AppMention` arm update), the `push_events.rs` handler never reaches
 //! `route_thread_reply` for `AppMention` events.  These tests establish the
 //! *expected* behaviour and serve as a regression guard once the fix lands.
 
@@ -34,7 +34,7 @@ type PendingThreadReplies = Arc<Mutex<HashMap<String, (String, String, oneshot::
 /// An @-mention reply whose mention prefix has been stripped must be captured
 /// by `route_thread_reply` when a pending fallback entry exists.
 ///
-/// This test documents the wiring that `push_events.rs` AppMention arm invokes
+/// This test documents the wiring that `push_events.rs` `AppMention` arm invokes
 /// after Phase 2.  The mention prefix `<@UBOTID> ` is stripped by
 /// `handlers::steer::strip_mention` before the text reaches `route_thread_reply`.
 #[tokio::test]

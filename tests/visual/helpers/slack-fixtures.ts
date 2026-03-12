@@ -56,6 +56,19 @@ export type AutomatedVisualFixtures = {
   cleanupTs: string[];
 };
 
+/** Fixtures for the @-mention thread reply fix visual validation (Phase 11). */
+export type AtMentionFixtures = {
+  runId: string;
+  /** Top-level anchor message that the thread is attached to. */
+  anchorTs: string;
+  /** Prompt-with-Refine button posted as a thread reply to the anchor. */
+  promptTs: string;
+  /** The @-mention fallback prompt posted as a second thread reply. */
+  atMentionPromptTs: string;
+  /** All timestamps to delete on cleanup. */
+  cleanupTs: string[];
+};
+
 function getEnv(name: string): string | undefined {
   const value = process.env[name];
   return value && value.trim().length > 0 ? value.trim() : undefined;
@@ -152,6 +165,11 @@ export function hasAutomatedVisualEnv(): boolean {
       (getEnv('SLACK_BOT_TOKEN') ?? getEnv('SLACK_TEST_BOT_TOKEN')) &&
       getEnv('SLACK_TEST_CHANNEL_ID'),
   );
+}
+
+/** Same check as `hasAutomatedVisualEnv` — the @-mention fixture needs identical env. */
+export function hasAtMentionEnv(): boolean {
+  return hasAutomatedVisualEnv();
 }
 
 /**
@@ -286,6 +304,48 @@ export class SlackFixtureClient {
       threadPromptTs,
       fallbackTs,
       cleanupTs: [fallbackTs, threadPromptTs, threadAnchorTs, promptTs, approvalTs],
+    };
+  }
+
+  /**
+   * Seed the @-mention thread reply fix fixture (Phase 11 — S-T3-AUTO-006/007/008).
+   *
+   * Posts three messages:
+   *   1. A top-level anchor message to create a thread.
+   *   2. A prompt-with-Refine button as a thread reply (in-thread Block Kit prompt).
+   *   3. The @-mention fallback text as a second thread reply.
+   *
+   * The Playwright spec then opens the thread panel and verifies that the
+   * @-mention prompt text is visible and contains `"@agent-intercom"`.
+   */
+  public async seedAtMentionThreadFixture(): Promise<AtMentionFixtures> {
+    const runId = randomUUID().split('-')[0];
+    const promptId = `at-mention-prompt-${runId}`;
+
+    // 1. Top-level anchor — opens the thread.
+    const anchorTs = await this.postMessage(
+      `[automated-visual] @-mention thread anchor ${runId}`,
+    );
+
+    // 2. Prompt with Refine button posted inside the thread.
+    const promptTs = await this.postMessage(
+      `[automated-visual] in-thread prompt fixture ${runId}`,
+      buildPromptBlocks(promptId, runId),
+      anchorTs,
+    );
+
+    // 3. The @-mention fallback text the server posts after proactive thread detection.
+    const atMentionText =
+      `🤖 Please type your instructions as a reply mentioning @agent-intercom ` +
+      `[run ${runId}]`;
+    const atMentionPromptTs = await this.postMessage(atMentionText, undefined, anchorTs);
+
+    return {
+      runId,
+      anchorTs,
+      promptTs,
+      atMentionPromptTs,
+      cleanupTs: [atMentionPromptTs, promptTs, anchorTs],
     };
   }
 }

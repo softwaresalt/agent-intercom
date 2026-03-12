@@ -30,6 +30,7 @@ mod integration {
     mod stall_escalation_tests;
 
     mod acp_event_integration;
+    mod at_mention_routing_integration_tests;
     mod disconnect_tests;
     mod inbox_flow_tests;
     mod ipc_server_tests;

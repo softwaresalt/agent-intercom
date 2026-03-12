@@ -494,6 +494,86 @@
 
 ---
 
+---
+
+## Phase 11: @-Mention Thread Reply Fix — Automated Visual Validation & HITL Automation
+
+**Goal**: Automate end-to-end validation of the @-mention thread reply fix (commit `480aaab`) using the existing Playwright harness, add a self-seeding integration test, and automate the HITL feedback loop so button clicks and thread replies are exercised without manual operator intervention.
+
+**Depends on**: Phase 10 (automated harness infrastructure), Phase 9 (thread visual scaffolding).
+
+**Background**: Commit `480aaab` resolved the modal-in-thread silent failure by proactively skipping `views.open` when a button is clicked from a thread context and instead posting an `@agent-intercom` mention prompt directly in the thread. The operator then types `@agent-intercom <instructions>` as a thread reply; the server strips the mention prefix and routes the stripped text to the pending `forward_prompt` or `wait_for_instruction` waiter. Unit tests (MR-001 through MR-004 in `tests/unit/slack_thread_mention_routing.rs`) verify the routing logic in isolation. This phase adds Tier 2 integration coverage and Tier 3 visual coverage for the complete end-to-end path, and extends the automated harness to run HITL-style interactions automatically.
+
+### Tasks
+
+- [X] **11.1** Update `spec.md` with @-mention fix documentation
+  - Add User Story 5: "Automated @-Mention Thread Reply Validation"
+  - Add FRs: FR-031 (proactive thread detection), FR-032 (@-mention prompt posting), FR-033 (mention stripping), FR-034 (reply routing), FR-035 (HITL automation loop)
+  - Add acceptance scenarios for each FR
+  - Update Status to `In Progress`
+  - FRs: FR-031–FR-035
+
+- [X] **11.2** Update `SCENARIOS.md` with new scenarios
+  - S-T3-AUTO-006: @-mention prompt text visible in seeded thread
+  - S-T3-AUTO-007: End-to-end — click Refine in thread → @-mention prompt appears → reply routes
+  - S-T3-HITL-001: Automated HITL — full forward_prompt cycle with server running
+  - S-T3-HITL-002: Automated HITL — wait_for_instruction via thread reply
+  - FRs: FR-031–FR-035
+
+- [X] **11.3** Extend `tests/visual/helpers/slack-fixtures.ts` with @-mention seed
+  - Add `AtMentionFixtures` type: `{ anchorTs, promptTs, atMentionPromptTs, cleanupTs }`
+  - Add `seedAtMentionThreadFixture()`: posts anchor → threads a prompt-with-Refine → threads the @-mention fallback text (`🤖 Please type your instructions as a reply mentioning @agent-intercom`)
+  - Token: use existing `SLACK_BOT_TOKEN` / `SLACK_TEST_BOT_TOKEN` cascade
+  - Scenarios: S-T3-AUTO-006
+
+- [X] **11.4** Create `tests/visual/scenarios/at-mention-thread-reply.spec.ts`
+  - `beforeAll`: seed `AtMentionFixtures` via `seedAtMentionThreadFixture()` (skip if env missing)
+  - `afterAll`: delete seeded messages
+  - Test S-T3-AUTO-006: navigate to channel → open thread → verify @-mention prompt text visible with `@agent-intercom` → capture screenshots
+  - Test S-T3-AUTO-007: verify the seeded prompt-with-Refine has all three buttons visible inside the thread pane → capture screenshots
+  - Graceful skip when `hasAutomatedVisualEnv()` is false
+  - Scenarios: S-T3-AUTO-006, S-T3-AUTO-007
+
+- [X] **11.5** Add automated HITL scenario to `automated-harness.spec.ts`
+  - Add test S-T3-AUTO-008: given a seeded @-mention prompt fixture, verify the @-mention text contains the expected bot mention pattern (static fixture validation does not require server)
+  - Import `seedAtMentionThreadFixture` from `slack-fixtures`
+  - Scenarios: S-T3-AUTO-008
+
+- [X] **11.6** Create `tests/integration/at_mention_routing_integration_tests.rs`
+  - Test AM-001: `activate_thread_reply_fallback` followed by `route_thread_reply` with stripped @-mention text resolves the pending oneshot
+  - Test AM-002: @-mention reply from unauthorized user is rejected; pending waiter is not resolved
+  - Test AM-003: @-mention reply with no pending entry returns `Ok(false)`; no state change
+  - Test AM-004: two concurrent pending thread replies in different channels — only the correct one resolves
+  - Test AM-005: stripped text passed to waiter matches the original reply minus the `<@BOTID>` prefix
+  - Register in `tests/integration/mod.rs`
+  - FRs: FR-033, FR-034
+
+- [X] **11.7** Extend `scripts/run_automated_test_harness.ps1` with HITL automation
+  - Add `-Suite hitl` parameter mode
+  - `Invoke-HitlAutomatedSuite` function:
+    - Phase 1: health-check `agent-intercom` on configured port (skip if not running)
+    - Phase 2: post a real `forward_prompt` via MCP HTTP `POST /mcp` (JSON-RPC call to `forward_prompt` tool)
+    - Phase 3: run `npm --prefix tests\visual exec playwright test -- --project=visual --no-deps at-mention-thread-reply.spec.ts` with `PLAYWRIGHT_HEADLESS=true`
+    - Phase 4: report pass/fail with screenshot paths
+  - Update `-Suite all` and `-Suite visual` to include `at-mention-thread-reply.spec.ts`
+  - Scenarios: S-T3-HITL-001, S-T3-HITL-002
+
+- [X] **11.8** Update `package.json` in `tests/visual` with new scripts
+  - Add `test:at-mention` to run `at-mention-thread-reply.spec.ts` in isolation
+  - Update `test:automated` to include `at-mention-thread-reply.spec.ts`
+
+### Constitution Gate
+
+- [ ] All new integration tests pass: `cargo test -- at_mention_routing`
+- [ ] Clippy clean: `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`
+- [ ] `npm --prefix tests\visual run test:at-mention` passes (with env configured)
+- [ ] `pwsh -File scripts\run_automated_test_harness.ps1 -Suite visual` includes at-mention scenarios
+- [ ] Screenshots captured for S-T3-AUTO-006, S-T3-AUTO-007
+- [ ] @-mention prompt text validated in visual test
+- [ ] FR-031 through FR-035 all verified
+
+---
+
 ## Task Dependency Graph
 
 ```
@@ -505,6 +585,9 @@ Phase 7 ─► Phase 8 ─► Phase 9 ◄───────┘
                          │
                          ▼
                       Phase 10
+                         │
+                         ▼
+                      Phase 11  ◄──── (480aaab @-mention fix)
 ```
 
 - Phases 1 and 7 have no dependencies and can start immediately.
