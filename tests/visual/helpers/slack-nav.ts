@@ -31,7 +31,21 @@ export async function navigateToChannel(page: Page, channelName: string): Promis
   if (!currentUrl.includes('slack.com')) {
     const workspaceUrl = process.env.SLACK_WORKSPACE_URL ?? 'https://app.slack.com';
     await page.goto(workspaceUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2_000);
+  }
+
+  // Strategy 0: Slack sets the browser tab title to the current channel name once the
+  // SPA has finished routing. Poll briefly so the SPA has time to restore the
+  // last-visited channel from session storage before trying harder strategies.
+  const onTarget = await page
+    .waitForFunction(
+      (name: string) => document.title.toLowerCase().includes(name.toLowerCase()),
+      channelName,
+      { timeout: 2_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  if (onTarget) {
+    return;
   }
 
   // Dismiss any open search overlay from a prior strategy attempt.
@@ -69,18 +83,32 @@ export async function navigateToChannel(page: Page, channelName: string): Promis
       !finalUrl.includes('/error') &&
       !finalUrl.includes('/landing')
     ) {
-      await waitForChannelLoad(page);
-      return;
+      // Non-fatal: if the channel doesn't load in time, fall through to sidebar/search.
+      const loaded = await waitForChannelLoad(page).then(() => true).catch(() => false);
+      // Also accept a title-based confirmation — guards against stale data-qa selectors.
+      const titleOk = await page
+        .waitForFunction(
+          (name: string) => document.title.toLowerCase().includes(name.toLowerCase()),
+          channelName,
+          { timeout: 5_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (loaded || titleOk) {
+        return;
+      }
     }
   } catch {
     // URL navigation failed; fall through to DOM-based strategies.
   }
 
-  // Strategy 2: click the channel name in the sidebar using plain text matching.
-  // Uses Playwright role/text APIs which are layout-agnostic.
+  // Strategy 2: click the channel name in the sidebar.
+  // Slack renders sidebar items as [role="treeitem"], not as <a> links. Use a filter
+  // on the text content so we match the exact channel name without partial matches.
   const sidebarItem = page
-    .getByRole('link', { name: new RegExp(`\b${channelName}\b`, 'i') })
-    .or(page.locator(`[data-sidebar-link-id], nav`).getByText(channelName, { exact: true }))
+    .locator('[role="treeitem"]')
+    .filter({ hasText: new RegExp(`^\\s*${channelName}\\s*$`, 'i') })
+    .or(page.getByRole('link', { name: new RegExp(`\\b${channelName}\\b`, 'i') }))
     .first();
 
   const sidebarVisible = await sidebarItem
@@ -113,35 +141,80 @@ export async function navigateToChannel(page: Page, channelName: string): Promis
     .catch(() => false);
   if (searchVisible) {
     await searchTrigger.click();
-    // After clicking the trigger an actual input should appear
+    // After clicking the trigger an actual input should appear.
+    // Use a non-fatal wait so a changed Slack DOM falls through to Strategy 4.
     const searchInput = page
       .locator('input[type="search"], input[role="combobox"], [data-qa="search_input"]')
       .first();
-    await searchInput.waitFor({ state: 'visible', timeout: 5_000 });
-    await searchInput.fill(channelName);
-    const result = page
-      .locator('[data-qa="channel_search_result_item"], .c-search_autocomplete__item, [role="option"]')
-      .first();
-    await result.waitFor({ state: 'visible', timeout: 8_000 });
-    await result.click();
-    await waitForChannelLoad(page);
-    return;
+    const searchInputVisible = await searchInput
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (searchInputVisible) {
+      await searchInput.fill(channelName);
+      const result = page
+        .locator(
+          '[data-qa="channel_search_result_item"], .c-search_autocomplete__item, [role="option"]',
+        )
+        .first();
+      const resultVisible = await result
+        .waitFor({ state: 'visible', timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (resultVisible) {
+        await result.click();
+        await waitForChannelLoad(page);
+        return;
+      }
+    }
+    // Input or result did not appear — dismiss the overlay and fall through to Ctrl+K.
+    await page.keyboard.press('Escape').catch(() => undefined);
+    await page.waitForTimeout(300);
   }
 
-  // Strategy 4: Ctrl+K quick-switcher (older Slack layouts).
-  await page.keyboard.press('Control+K');
-  const switcher = page
-    .locator('[data-qa="channel_search_input"], [placeholder="Jump to..."]')
-    .first();
-  await switcher.waitFor({ state: 'visible', timeout: 10_000 });
-  await switcher.fill(channelName);
-  const switcherResult = page
-    .locator('[data-qa="channel_search_result_item"], .c-search_autocomplete__item, [role="option"]')
-    .first();
-  await switcherResult.waitFor({ state: 'visible', timeout: 5_000 });
-  await switcherResult.click();
+  // Strategy 4: Ctrl+K / Ctrl+P quick-switcher — works across all Slack versions.
+  // Try both Ctrl+K (standard) and Ctrl+P (some Slack builds) before giving up.
+  for (const shortcut of ['Control+K', 'Control+P']) {
+    await page.keyboard.press(shortcut);
+    const switcher = page
+      .locator(
+        [
+          '[data-qa="channel_search_input"]',
+          '[placeholder="Jump to..."]',
+          '[placeholder*="Find or start"]',
+          '[aria-label*="quick switcher"]',
+          // Newer Slack replaces the quick-switcher with a floating input.
+          'input[placeholder*="jump"]',
+          'input[placeholder*="search"]',
+          '[data-qa="quick_switcher_input"]',
+        ].join(', '),
+      )
+      .first();
+    const switcherVisible = await switcher
+      .waitFor({ state: 'visible', timeout: 6_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (switcherVisible) {
+      await switcher.fill(channelName);
+      const switcherResult = page
+        .locator(
+          '[data-qa="channel_search_result_item"], .c-search_autocomplete__item, [role="option"]',
+        )
+        .first();
+      await switcherResult.waitFor({ state: 'visible', timeout: 8_000 });
+      await switcherResult.click();
+      await waitForChannelLoad(page);
+      return;
+    }
+    // Close the overlay if the shortcut opened something unexpected.
+    await page.keyboard.press('Escape').catch(() => undefined);
+    await page.waitForTimeout(200);
+  }
 
-  await waitForChannelLoad(page);
+  throw new Error(
+    `navigateToChannel: all navigation strategies failed for channel "${channelName}". ` +
+      'Check SLACK_WORKSPACE_URL and Slack DOM selectors.',
+  );
 }
 
 /**
@@ -227,14 +300,18 @@ export async function waitForChannelLoad(page: Page): Promise<void> {
  * @param page - Playwright page instance
  */
 export async function scrollToLatestMessage(page: Page): Promise<void> {
-  // Click "Jump to present" / "New messages" badge if visible (appears when scrolled up).
+  // Click "Jump to present" if visible — only match the dedicated jump-to-present
+  // button, not generic "new message" text that matches the Slack "New" divider.
   const jumpToPresent = page.locator(
-    '[data-qa="jump_to_present_button"], .c-message_pane__jump_btn, button:has-text("new message")',
+    '[data-qa="jump_to_present_button"], .c-message_pane__jump_btn',
   );
   if (await jumpToPresent.first().isVisible({ timeout: 1_500 }).catch(() => false)) {
-    await jumpToPresent.first().click();
-    await waitForChannelLoad(page);
-    return;
+    await jumpToPresent.first().click().catch(() => undefined);
+    const loaded = await waitForChannelLoad(page).then(() => true).catch(() => false);
+    if (loaded) {
+      return;
+    }
+    // Click did not land — fall through to keyboard scroll.
   }
 
   // Try to focus the Quill editor (the message composer) and then press Escape so

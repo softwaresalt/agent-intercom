@@ -100,12 +100,14 @@ test.describe('@-mention thread reply fix — automated visual validation', () =
 
       await captureStep(page, AT_MENTION_SCENARIO, 3, 'thread-panel-visible');
 
-      // Locate the @-mention prompt message by searching for the identifying text.
-      const atMentionMsg = threadPanel
-        .locator(`${MESSAGE_SELECTORS.messageText}:has-text("mentioning @agent-intercom")`)
+      // Locate the @-mention prompt message by its unique Slack timestamp.
+      // Using the timestamp-keyed selector avoids the `:has-text()` ancestor-matching
+      // issue where a parent container would be found instead of the specific reply.
+      const atMentionMsgRow = threadPanel
+        .locator(`[data-item-key="${f.atMentionPromptTs}"]`)
         .first();
 
-      const msgVisible = await isVisibleWithin(atMentionMsg, 15_000);
+      const msgVisible = await isVisibleWithin(atMentionMsgRow, 15_000);
 
       await captureStep(
         page,
@@ -119,11 +121,14 @@ test.describe('@-mention thread reply fix — automated visual validation', () =
         'S-T3-AUTO-006: @-mention prompt text must be visible in the thread panel',
       ).toBe(true);
 
-      // Verify text contains the @agent-intercom marker.
-      const msgText = await atMentionMsg.textContent();
+      // Verify the text content of the message body contains the @agent-intercom marker.
+      const msgText = await atMentionMsgRow
+        .locator(MESSAGE_SELECTORS.messageText)
+        .first()
+        .textContent();
       expect(msgText?.toLowerCase()).toContain('@agent-intercom');
 
-      await captureElement(atMentionMsg, AT_MENTION_SCENARIO, 5, 'at-mention-message-closeup');
+      await captureElement(atMentionMsgRow, AT_MENTION_SCENARIO, 5, 'at-mention-message-closeup');
       await captureStep(page, AT_MENTION_SCENARIO, 6, 'at-mention-text-verified');
 
       console.log(

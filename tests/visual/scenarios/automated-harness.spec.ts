@@ -332,12 +332,14 @@ test.describe('S-T3-AUTO-008: @-mention thread reply fix — static fixture vali
       const panelVisible = await isVisibleWithin(threadPanel, 10_000);
       expect(panelVisible, 'Thread panel must open').toBe(true);
 
-      // Locate the @-mention prompt text in the thread.
-      const atMentionMsg = threadPanel
-        .locator(`${MESSAGE_SELECTORS.messageText}:has-text("@agent-intercom")`)
+      // Locate the @-mention prompt message by its unique Slack timestamp.
+      // Using the timestamp-keyed selector avoids the `:has-text()` ancestor-matching
+      // issue where a parent container would be found instead of the specific reply.
+      const atMentionMsgRow = threadPanel
+        .locator(`[data-item-key="${atMentionFixtures.atMentionPromptTs}"]`)
         .first();
 
-      const msgVisible = await isVisibleWithin(atMentionMsg, 15_000);
+      const msgVisible = await isVisibleWithin(atMentionMsgRow, 15_000);
 
       await captureStep(
         page,
@@ -351,10 +353,13 @@ test.describe('S-T3-AUTO-008: @-mention thread reply fix — static fixture vali
         'S-T3-AUTO-008: seeded @-mention prompt must be visible in thread',
       ).toBe(true);
 
-      const text = await atMentionMsg.textContent();
+      const text = await atMentionMsgRow
+        .locator(MESSAGE_SELECTORS.messageText)
+        .first()
+        .textContent();
       expect(text?.toLowerCase()).toContain('@agent-intercom');
 
-      await captureElement(atMentionMsg, AT_MENTION_AUTO_SCENARIO, 4, 'at-mention-closeup');
+      await captureElement(atMentionMsgRow, AT_MENTION_AUTO_SCENARIO, 4, 'at-mention-closeup');
       await captureStep(page, AT_MENTION_AUTO_SCENARIO, 5, 'at-mention-text-validated');
 
       console.log(
