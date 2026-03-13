@@ -69,6 +69,21 @@ export type AtMentionFixtures = {
   cleanupTs: string[];
 };
 
+/** Fixtures for US17 text-only thread prompt validation. */
+export type TextOnlyFixtures = {
+  runId: string;
+  /** Top-level anchor message that opens the thread. */
+  anchorTs: string;
+  /** Text-only continuation prompt (no blocks/buttons). */
+  promptTs: string;
+  /** Text-only wait status (no blocks/buttons). */
+  waitTs: string;
+  /** Text-only approval request (no blocks/buttons). */
+  approvalTs: string;
+  /** All timestamps to delete on cleanup. */
+  cleanupTs: string[];
+};
+
 function getEnv(name: string): string | undefined {
   const value = process.env[name];
   return value && value.trim().length > 0 ? value.trim() : undefined;
@@ -346,6 +361,62 @@ export class SlackFixtureClient {
       promptTs,
       atMentionPromptTs,
       cleanupTs: [atMentionPromptTs, promptTs, anchorTs],
+    };
+  }
+
+  /**
+   * Seed fixtures for US17 text-only thread prompt validation.
+   *
+   * Creates a thread with:
+   * 1. A top-level anchor message
+   * 2. A text-only prompt (no blocks/buttons) as a thread reply — mimics
+   *    the US17 `forward_prompt` behavior when `session_thread_ts` is set
+   * 3. A text-only wait message as a second thread reply
+   * 4. A text-only approval message as a third thread reply
+   */
+  public async seedTextOnlyThreadFixtures(): Promise<TextOnlyFixtures> {
+    const runId = randomUUID().split('-')[0];
+
+    const anchorTs = await this.postMessage(
+      `[automated-visual] US17 text-only thread anchor ${runId}`,
+    );
+
+    // Text-only prompt (US17) — no blocks, no buttons.
+    const promptText =
+      `🔄 *Continuation Prompt*\n` +
+      `Agent needs guidance on next steps for run \`${runId}\`.\n` +
+      `⏱️ 45s elapsed | 📋 7 actions taken\n\n` +
+      `💬 Reply with \`@agent-intercom\` followed by: ` +
+      `\`continue\`, \`refine <instructions>\`, or \`stop\``;
+    const promptTs = await this.postMessage(promptText, undefined, anchorTs);
+
+    // Text-only wait (US17) — no blocks, no buttons.
+    const waitText =
+      `⏸️ *Agent Waiting*\n` +
+      `Idle and awaiting operator instructions for run \`${runId}\`.\n` +
+      `⏱️ Timeout: 300s\n\n` +
+      `💬 Reply with \`@agent-intercom\` followed by: ` +
+      `\`resume [instructions]\` or \`stop\``;
+    const waitTs = await this.postMessage(waitText, undefined, anchorTs);
+
+    // Text-only approval (US17) — no blocks, no buttons.
+    const approvalText =
+      `🟢 *Approval Request* (low)\n` +
+      `*Add error handler to config parser*\n` +
+      `📄 \`src/config.rs\`\n` +
+      `\`\`\`\n--- a/src/config.rs\n+++ b/src/config.rs\n` +
+      `@@ -12 +12 @@\n-old line\n+new line\n\`\`\`\n\n` +
+      `💬 Reply with \`@agent-intercom\` followed by: ` +
+      `\`approve\` or \`reject <reason>\``;
+    const approvalTs = await this.postMessage(approvalText, undefined, anchorTs);
+
+    return {
+      runId,
+      anchorTs,
+      promptTs,
+      waitTs,
+      approvalTs,
+      cleanupTs: [approvalTs, waitTs, promptTs, anchorTs],
     };
   }
 }
