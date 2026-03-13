@@ -112,31 +112,49 @@ pub async fn handle(
             .map(|ts| slack_morphism::prelude::SlackTs(ts.to_owned()));
 
         // ── Post waiting status to Slack ─────────────────────
+        // US17: when the session lives in a thread, post plain text and
+        // register a thread-reply fallback for @-mention decisions.
+        let is_threaded = session_thread_ts.is_some();
+
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
-            let mut message_blocks = vec![blocks::text_section(&format!(
-                "\u{23f8}\u{fe0f} *Agent Waiting*\n{}",
-                &input.message,
-            ))];
-            if input.timeout_seconds > 0 {
-                message_blocks.push(blocks::text_section(&format!(
-                    "\u{23f1}\u{fe0f} Timeout: {}s",
-                    input.timeout_seconds,
-                )));
-            }
-            message_blocks.push(blocks::wait_buttons(&session.id));
 
-            let msg = SlackMessage {
-                channel,
-                text: Some(format!(
-                    "\u{23f8}\u{fe0f} Agent waiting: {}",
-                    truncate_text(&input.message, 100),
-                )),
-                blocks: Some(message_blocks),
-                thread_ts: session_thread_ts,
-            };
-            if let Err(err) = slack.enqueue(msg).await {
-                warn!(%err, "failed to enqueue wait status to slack");
+            if is_threaded {
+                let text_body = blocks::build_text_only_wait(&input.message, input.timeout_seconds);
+                let msg = SlackMessage {
+                    channel,
+                    text: Some(text_body),
+                    blocks: None,
+                    thread_ts: session_thread_ts.clone(),
+                };
+                if let Err(err) = slack.enqueue(msg).await {
+                    warn!(%err, "failed to enqueue text-only wait message");
+                }
+            } else {
+                let mut message_blocks = vec![blocks::text_section(&format!(
+                    "\u{23f8}\u{fe0f} *Agent Waiting*\n{}",
+                    &input.message,
+                ))];
+                if input.timeout_seconds > 0 {
+                    message_blocks.push(blocks::text_section(&format!(
+                        "\u{23f1}\u{fe0f} Timeout: {}s",
+                        input.timeout_seconds,
+                    )));
+                }
+                message_blocks.push(blocks::wait_buttons(&session.id));
+
+                let msg = SlackMessage {
+                    channel,
+                    text: Some(format!(
+                        "\u{23f8}\u{fe0f} Agent waiting: {}",
+                        truncate_text(&input.message, 100),
+                    )),
+                    blocks: Some(message_blocks),
+                    thread_ts: None,
+                };
+                if let Err(err) = slack.enqueue(msg).await {
+                    warn!(%err, "failed to enqueue wait status to slack");
+                }
             }
         } else {
             warn!("slack not configured; wait will block without notification");
@@ -147,6 +165,68 @@ pub async fn handle(
         {
             let mut pending = state.pending_waits.lock().await;
             pending.insert(session.id.clone(), tx);
+        }
+
+        // US17: register thread-reply fallback for @-mention resolution.
+        if is_threaded {
+            if let Some(ref ch) = channel_id {
+                let thread_ts = session_thread_ts
+                    .as_ref()
+                    .map(|ts| ts.0.clone())
+                    .unwrap_or_default();
+                let authorized_user = state
+                    .config
+                    .authorized_user_ids
+                    .first()
+                    .cloned()
+                    .unwrap_or_default();
+
+                let (reply_tx, reply_rx) = oneshot::channel::<String>();
+                crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                    ch,
+                    thread_ts,
+                    session.id.clone(),
+                    authorized_user,
+                    reply_tx,
+                    Arc::clone(&state.pending_thread_replies),
+                )
+                .await;
+
+                let state_fb = Arc::clone(&state);
+                let sid = session.id.clone();
+                tokio::spawn(async move {
+                    let timeout_secs = state_fb.config.timeouts.wait_seconds;
+                    let wait_future = async { reply_rx.await.ok() };
+
+                    let result = if timeout_secs == 0 {
+                        wait_future.await
+                    } else {
+                        tokio::time::timeout(Duration::from_secs(timeout_secs), wait_future)
+                            .await
+                            .ok()
+                            .flatten()
+                    };
+
+                    if let Some(reply_text) = result {
+                        let decision = crate::slack::handlers::thread_reply::parse_thread_decision(
+                            &reply_text,
+                        );
+                        let inst = if decision.instruction.is_empty() {
+                            None
+                        } else {
+                            Some(decision.instruction)
+                        };
+                        // "resume" and "continue" both resolve as resumed.
+                        if let Err(err) = state_fb.driver.resolve_wait(&sid, inst).await {
+                            warn!(
+                                session_id = sid,
+                                %err,
+                                "US17: failed to resolve wait from thread reply"
+                            );
+                        }
+                    }
+                });
+            }
         }
 
         // Determine effective timeout.

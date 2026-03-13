@@ -348,11 +348,38 @@
 
 ---
 
-## Summary
+## Phase 14: User Story 17 — Text-Only Thread Prompts with @-Mention Reply (Priority: P1)
+
+**Purpose**: Eliminate block-kit buttons from thread messages. Post plain text prompts/approvals in threads and use @-mention replies for operator decisions. Main channel messages remain unchanged.
+
+**Dependencies**: Phase 6 (Modal), Phase 13 (Polish) — all complete. Requires thread_reply infrastructure from spec 007 (complete).
+
+### Tests First (TDD)
+
+- [ ] T081 [US17] Unit test: `parse_thread_decision` extracts decision keyword and instruction text from stripped @-mention text — covers `continue`, `refine <text>`, `stop`, `approve`, `reject <reason>`, `resume`, `resume <text>`, and unknown keyword fallback
+- [ ] T082 [US17] Unit test: `build_text_only_prompt` returns plain text (no blocks) with decision keyword instructions for each prompt type
+- [ ] T083 [US17] Unit test: `build_text_only_wait` returns plain text (no blocks) with resume/stop instructions
+- [ ] T084 [US17] Unit test: `build_text_only_approval` returns plain text (no blocks) with approve/reject instructions and inline diff
+- [ ] T085 [US17] Contract test: `forward_prompt` in threaded session posts message without blocks and resolves on @-mention reply
+- [ ] T086 [US17] Contract test: `wait_for_instruction` in threaded session posts message without blocks and resolves on @-mention reply
+- [ ] T087 [US17] Contract test: `ask_approval` in threaded session posts message without blocks and resolves on @-mention reply
+- [ ] T088 [US17] Integration test: end-to-end threaded prompt flow — tool posts text-only, simulated @-mention delivers `continue`, tool resolves with correct decision
+- [ ] T089 [US17] Integration test: end-to-end threaded prompt flow — `refine <instructions>` reply delivers instruction text
+- [ ] T090 [US17] Integration test: threaded approval flow — `approve` and `reject <reason>` replies resolve correctly
+
+### Implementation
+
+- [ ] T091 [US17] Add `parse_thread_decision()` function to `src/slack/handlers/thread_reply.rs` — parse first word as decision keyword, remainder as instruction
+- [ ] T092 [US17] Add text-only message builders to `src/slack/blocks.rs` — `build_text_only_prompt()`, `build_text_only_wait()`, `build_text_only_approval()`
+- [ ] T093 [US17] Modify `src/mcp/tools/forward_prompt.rs` — when `session_thread_ts.is_some()`, post text-only (no blocks) and use `activate_thread_reply_fallback` with a resolve callback that parses the decision keyword
+- [ ] T094 [US17] Modify `src/mcp/tools/wait_for_instruction.rs` — when `session_thread_ts.is_some()`, post text-only and use `activate_thread_reply_fallback` with a resolve callback that parses resume/stop
+- [ ] T095 [US17] Modify `src/mcp/tools/ask_approval.rs` — when `session_thread_ts.is_some()`, post text-only and use `activate_thread_reply_fallback` with a resolve callback that parses approve/reject
+
+---
 
 | Metric | Count |
 |---|---|
-| Total tasks | 86 |
+| Total tasks | 101 |
 | Phase 1 (Setup) | 6 |
 | Phase 2 (Foundational) | 7 |
 | Phase 3 (Steering - MVP) | 10 |
@@ -366,6 +393,7 @@
 | Phase 11 (Ping + Drain) | 4 |
 | Phase 12 (Approval File Attachment) | 6 |
 | Phase 13 (Polish) | 8 |
+| Phase 14 (Text-Only Thread Prompts) | 15 |
 
 ## Notes
 

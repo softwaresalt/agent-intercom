@@ -1,4 +1,5 @@
-//! Unit tests for thread-reply fallback (F-16, F-17) — S029–S033.
+//! Unit tests for thread-reply fallback (F-16, F-17) — S029–S033,
+//! and `parse_thread_decision` (US17 — T081).
 //!
 //! These tests verify the core `register_thread_reply_fallback` and
 //! `route_thread_reply` functions in isolation, without requiring a full
@@ -499,4 +500,136 @@ async fn test_s035_cleanup_session_fallbacks_removes_correct_entries() {
         guard.contains_key(&fallback_map_key("C1", "1700000003.000001")),
         "session-B entry must remain after session-A cleanup"
     );
+}
+
+// ── T081 / US17 — parse_thread_decision ───────────────────────────────────────
+
+/// `parse_thread_decision` extracts `continue` from bare keyword.
+#[test]
+fn test_parse_thread_decision_continue() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("continue");
+    assert_eq!(d.keyword, "continue");
+    assert!(d.instruction.is_empty());
+}
+
+/// `parse_thread_decision` extracts `refine` with trailing instruction text.
+#[test]
+fn test_parse_thread_decision_refine_with_instruction() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("refine fix the error handling");
+    assert_eq!(d.keyword, "refine");
+    assert_eq!(d.instruction, "fix the error handling");
+}
+
+/// `parse_thread_decision` extracts `stop` keyword.
+#[test]
+fn test_parse_thread_decision_stop() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("stop");
+    assert_eq!(d.keyword, "stop");
+    assert!(d.instruction.is_empty());
+}
+
+/// `parse_thread_decision` extracts `approve` keyword.
+#[test]
+fn test_parse_thread_decision_approve() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("approve");
+    assert_eq!(d.keyword, "approve");
+    assert!(d.instruction.is_empty());
+}
+
+/// `parse_thread_decision` extracts `reject` with reason text.
+#[test]
+fn test_parse_thread_decision_reject_with_reason() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("reject the path is wrong");
+    assert_eq!(d.keyword, "reject");
+    assert_eq!(d.instruction, "the path is wrong");
+}
+
+/// `parse_thread_decision` extracts `resume` with optional instruction.
+#[test]
+fn test_parse_thread_decision_resume_with_instruction() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("resume check the database schema");
+    assert_eq!(d.keyword, "resume");
+    assert_eq!(d.instruction, "check the database schema");
+}
+
+/// `parse_thread_decision` extracts `resume` without instruction.
+#[test]
+fn test_parse_thread_decision_resume_bare() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("resume");
+    assert_eq!(d.keyword, "resume");
+    assert!(d.instruction.is_empty());
+}
+
+/// Empty input defaults to `continue` (matches FR-008 auto-continue).
+#[test]
+fn test_parse_thread_decision_empty_defaults_continue() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("");
+    assert_eq!(d.keyword, "continue");
+    assert!(d.instruction.is_empty());
+}
+
+/// Whitespace-only input defaults to `continue`.
+#[test]
+fn test_parse_thread_decision_whitespace_defaults_continue() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("   ");
+    assert_eq!(d.keyword, "continue");
+    assert!(d.instruction.is_empty());
+}
+
+/// Unknown keyword is passed through as-is.
+#[test]
+fn test_parse_thread_decision_unknown_keyword() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("unknown stuff here");
+    assert_eq!(d.keyword, "unknown");
+    assert_eq!(d.instruction, "stuff here");
+}
+
+/// Keywords are case-insensitive.
+#[test]
+fn test_parse_thread_decision_case_insensitive() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("CONTINUE");
+    assert_eq!(d.keyword, "continue");
+
+    let d2 = parse_thread_decision("Refine do this thing");
+    assert_eq!(d2.keyword, "refine");
+    assert_eq!(d2.instruction, "do this thing");
+
+    let d3 = parse_thread_decision("APPROVE");
+    assert_eq!(d3.keyword, "approve");
+}
+
+/// Leading/trailing whitespace is trimmed.
+#[test]
+fn test_parse_thread_decision_trims_whitespace() {
+    use agent_intercom::slack::handlers::thread_reply::parse_thread_decision;
+
+    let d = parse_thread_decision("  continue  ");
+    assert_eq!(d.keyword, "continue");
+    assert!(d.instruction.is_empty());
+
+    let d2 = parse_thread_decision("  refine   fix this  ");
+    assert_eq!(d2.keyword, "refine");
+    assert_eq!(d2.instruction, "fix this");
 }

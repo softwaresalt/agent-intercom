@@ -129,35 +129,60 @@ pub async fn handle(
         })?;
 
         // ── Post to Slack ────────────────────────────────────
+        // US17: when the session lives in a thread, post plain text (no
+        // block-kit buttons) and use the @-mention thread-reply mechanism
+        // for operator decisions.  Main channel messages keep block-kit.
+        let is_threaded = session_thread_ts.is_some();
+
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
-            let message_blocks = blocks::build_prompt_blocks(
-                &input.prompt_text,
-                input.prompt_type,
-                input.elapsed_seconds,
-                input.actions_taken,
-                &prompt_id,
-            );
 
-            let post_span = info_span!("slack_post_prompt", prompt_id = %prompt_id);
-            async {
+            if is_threaded {
+                // US17: text-only thread prompt — no blocks.
+                let text_body = blocks::build_text_only_prompt(
+                    &input.prompt_text,
+                    input.prompt_type,
+                    input.elapsed_seconds,
+                    input.actions_taken,
+                );
                 let msg = SlackMessage {
                     channel,
-                    text: Some(format!(
-                        "\u{1f4ac} {} Prompt: {}",
-                        blocks::prompt_type_label(input.prompt_type),
-                        blocks::truncate_text(&input.prompt_text, 100),
-                    )),
-                    blocks: Some(message_blocks),
-                    // S037: post inside the session's Slack thread.
+                    text: Some(text_body),
+                    blocks: None,
                     thread_ts: session_thread_ts.clone(),
                 };
                 if let Err(err) = slack.enqueue(msg).await {
-                    warn!(%err, "failed to enqueue prompt message");
+                    warn!(%err, "failed to enqueue text-only prompt message");
                 }
+            } else {
+                // Main channel: block-kit with buttons (unchanged).
+                let message_blocks = blocks::build_prompt_blocks(
+                    &input.prompt_text,
+                    input.prompt_type,
+                    input.elapsed_seconds,
+                    input.actions_taken,
+                    &prompt_id,
+                );
+
+                let post_span = info_span!("slack_post_prompt", prompt_id = %prompt_id);
+                async {
+                    let msg = SlackMessage {
+                        channel,
+                        text: Some(format!(
+                            "\u{1f4ac} {} Prompt: {}",
+                            blocks::prompt_type_label(input.prompt_type),
+                            blocks::truncate_text(&input.prompt_text, 100),
+                        )),
+                        blocks: Some(message_blocks),
+                        thread_ts: None,
+                    };
+                    if let Err(err) = slack.enqueue(msg).await {
+                        warn!(%err, "failed to enqueue prompt message");
+                    }
+                }
+                .instrument(post_span)
+                .await;
             }
-            .instrument(post_span)
-            .await;
         } else {
             warn!("slack not configured; prompt will block without notification");
         }
@@ -170,6 +195,65 @@ pub async fn handle(
         {
             let mut pending = state.pending_prompts.lock().await;
             pending.insert(prompt_id.clone(), tx);
+        }
+
+        // US17: register thread-reply fallback so an @-mention reply in
+        // the thread resolves the prompt via `driver.resolve_prompt()`.
+        if is_threaded {
+            if let Some(ref ch) = channel_id {
+                let thread_ts = session_thread_ts
+                    .as_ref()
+                    .map(|ts| ts.0.clone())
+                    .unwrap_or_default();
+                let authorized_user = state
+                    .config
+                    .authorized_user_ids
+                    .first()
+                    .cloned()
+                    .unwrap_or_default();
+
+                let (reply_tx, reply_rx) = oneshot::channel::<String>();
+                crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                    ch,
+                    thread_ts,
+                    session.id.clone(),
+                    authorized_user,
+                    reply_tx,
+                    Arc::clone(&state.pending_thread_replies),
+                )
+                .await;
+
+                // Spawn a task that waits for the @-mention text and
+                // resolves the prompt through the driver.
+                let state_fb = Arc::clone(&state);
+                let pid = prompt_id.clone();
+                tokio::spawn(async move {
+                    let timeout = Duration::from_secs(state_fb.config.timeouts.prompt_seconds);
+                    if let Ok(Ok(reply_text)) = tokio::time::timeout(timeout, reply_rx).await {
+                        let decision = crate::slack::handlers::thread_reply::parse_thread_decision(
+                            &reply_text,
+                        );
+                        let inst = if decision.instruction.is_empty() {
+                            None
+                        } else {
+                            Some(decision.instruction)
+                        };
+                        if let Err(err) = state_fb
+                            .driver
+                            .resolve_prompt(&pid, &decision.keyword, inst)
+                            .await
+                        {
+                            warn!(
+                                prompt_id = pid,
+                                %err,
+                                "US17: failed to resolve prompt from thread reply"
+                            );
+                        }
+                    }
+                    // else: sender dropped or timeout — handled by the
+                    // main timeout path below.
+                });
+            }
         }
 
         let timeout_seconds = state.config.timeouts.prompt_seconds;

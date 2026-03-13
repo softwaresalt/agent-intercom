@@ -1,4 +1,4 @@
-//! Thread-reply fallback handler (F-16, F-17 — US4).
+//! Thread-reply fallback handler (F-16, F-17 — US4, US17).
 //!
 //! When Slack modals cannot be opened (e.g. due to `trigger_id` expiry in
 //! Socket Mode), this module provides the fallback mechanism: a message is
@@ -6,6 +6,14 @@
 //! and a [`tokio::sync::oneshot`] sender is registered. When the operator
 //! replies, [`route_thread_reply`] captures the first reply from the
 //! authorized user and delivers it through the oneshot channel.
+//!
+//! ## Text-only thread prompts (US17)
+//!
+//! When a session has a `thread_ts`, MCP tool handlers post plain text
+//! prompts (no block-kit buttons) and register a thread-reply fallback
+//! directly. The operator replies with `@agent-intercom <decision> [text]`.
+//! [`parse_thread_decision`] extracts the decision keyword and optional
+//! instruction from the stripped mention text.
 //!
 //! ## Design
 //!
@@ -315,4 +323,64 @@ where
     });
 
     Ok(())
+}
+
+/// Parsed decision from an operator's @-mention thread reply (US17).
+///
+/// The decision keyword is the first whitespace-delimited word of the
+/// stripped mention text (after `<@BOT_ID>` removal). Everything after
+/// the keyword is the instruction or reason text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadDecision {
+    /// Normalized decision keyword: `continue`, `refine`, `stop`,
+    /// `approve`, `reject`, `resume`, or the raw first word if unrecognised.
+    pub keyword: String,
+    /// Remainder of the reply after the decision keyword, trimmed.
+    /// Empty string when no additional text was provided.
+    pub instruction: String,
+}
+
+/// Parse a decision keyword and optional instruction from an operator's
+/// thread reply text.
+///
+/// The input `text` should already have the `<@BOT_ID>` mention prefix
+/// stripped (via [`super::steer::strip_mention`]). The first
+/// whitespace-delimited token is matched case-insensitively against the
+/// known decision keywords. Everything after the first token is returned
+/// as the instruction text.
+///
+/// # Examples
+///
+/// ```text
+/// "continue"                     → { keyword: "continue", instruction: "" }
+/// "refine fix the error"         → { keyword: "refine",   instruction: "fix the error" }
+/// "stop"                         → { keyword: "stop",     instruction: "" }
+/// "approve"                      → { keyword: "approve",  instruction: "" }
+/// "reject path is wrong"         → { keyword: "reject",   instruction: "path is wrong" }
+/// "resume check schemas"         → { keyword: "resume",   instruction: "check schemas" }
+/// "unknown stuff"                → { keyword: "unknown",  instruction: "stuff" }
+/// ""                             → { keyword: "continue", instruction: "" }
+/// ```
+#[must_use]
+pub fn parse_thread_decision(text: &str) -> ThreadDecision {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        // Empty reply defaults to "continue" — matches FR-008 auto-continue
+        // semantics so an accidental empty mention is non-destructive.
+        return ThreadDecision {
+            keyword: "continue".to_owned(),
+            instruction: String::new(),
+        };
+    }
+
+    let (first_word, rest) = trimmed
+        .split_once(char::is_whitespace)
+        .map_or((trimmed, ""), |(w, r)| (w, r.trim()));
+
+    let keyword = first_word.to_lowercase();
+
+    ThreadDecision {
+        keyword,
+        instruction: rest.to_owned(),
+    }
 }
