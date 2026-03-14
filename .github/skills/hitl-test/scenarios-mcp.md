@@ -512,3 +512,198 @@ slash prefix `/acom`). The operator's expected action is stated in **bold**.
 - [ ] No "Add to auto-approve?" suggestion appeared after rejection
 - [ ] Call without `kind` returned immediately (no Slack prompt)
 - [ ] Call with `kind: "file_operation"` returned immediately (no Slack prompt)
+
+---
+
+## US17 — Text-Only Thread Prompts via @-mention
+
+> **Context:** User Story 17 (US17) changes how MCP tool handlers post messages when
+> the server session has a `session_thread_ts` set. Instead of block-kit cards with
+> action buttons, the server posts **plain-text messages** to the session thread and
+> waits for the operator to reply with `@agent-intercom <decision>`. This behavior is
+> always active in ACP sessions (which always have a thread). In MCP mode it activates
+> only when an explicit `session_thread_ts` is set (typically via the first broadcast
+> `ts` captured and bound to the session).
+>
+> **Scenarios 23–28 below validate the US17 code paths.** They are most naturally
+> run in ACP mode; in pure MCP mode without a session thread they serve as a
+> documentation reference. The contrast scenario (28) validates that non-threaded
+> main-channel messages still use block-kit buttons as before.
+
+---
+
+## Scenario 23: Text-Only Thread Prompt — Continue (@-mention, US17)
+
+**Purpose:** Verify that when a session thread exists, `transmit` posts a plain-text prompt with no action buttons, and resolves when the operator replies `@agent-intercom continue` in the thread.
+
+**Prerequisites:** An active session with `session_thread_ts` set (e.g., run in ACP mode — see ACP Scenario 3, or in MCP mode with thread context configured).
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] US17 text-only prompt test. Operator: a plain-text message will appear in the session thread — reply '@agent-intercom continue' (no button to click)."`, `level: "info"`
+2. Call `transmit` with:
+   - `prompt_text`: `"HITL TEST (US17): This is a text-only thread prompt. Reply in this thread with '@agent-intercom continue' to proceed."`
+3. **Operator action:** Observe the session thread. Verify:
+   - A **plain-text** message appeared in the thread (NOT a block-kit card)
+   - There are NO "Continue / Refine / Stop" action buttons
+   - The message contains `@agent-intercom` usage instructions
+4. **Operator action: Reply in the thread with `@agent-intercom continue`**
+5. Verify the `transmit` call resolved with `decision: "continue"` (or equivalent)
+
+**Expected:** Text-only prompt posted in thread. No buttons. `@agent-intercom continue` resolves the call.
+
+**Error resilience:** `transmit` is a blocking call. If no reply is received within a reasonable time, record as FAIL/TIMEOUT and continue.
+
+**Operator validates:**
+- [ ] Plain-text message appeared in the session thread (no block-kit card)
+- [ ] NO action buttons were present
+- [ ] Message contained @-mention usage instructions
+- [ ] `@agent-intercom continue` reply resolved the `transmit` call
+
+---
+
+## Scenario 24: Text-Only Thread Prompt — Refine with Instructions (@-mention, US17)
+
+**Purpose:** Verify that `@agent-intercom refine <instructions>` carries the full instruction text back to the calling tool via the thread-reply path.
+
+**Prerequisites:** Active session with `session_thread_ts` set.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] US17 refine flow test. Operator: reply '@agent-intercom refine focus on error handling' in the session thread when the prompt appears."`, `level: "info"`
+2. Call `transmit` with:
+   - `prompt_text`: `"HITL TEST (US17): Reply in this thread with '@agent-intercom refine focus on error handling'."`
+3. **Operator action:** Verify plain-text prompt in thread (no buttons).
+4. **Operator action: Reply in the thread with `@agent-intercom refine focus on error handling`**
+5. Verify the `transmit` response:
+   - `decision` is `"refine"` (or contains the keyword)
+   - The instruction text `"focus on error handling"` is preserved in the response
+
+**Expected:** `@agent-intercom refine <text>` returns decision keyword and full instruction text.
+
+**Operator validates:**
+- [ ] Plain-text prompt in thread (no buttons)
+- [ ] `@agent-intercom refine <text>` reply was accepted
+- [ ] Instruction text was fully preserved in the tool response
+
+---
+
+## Scenario 25: Text-Only Thread Wait — Resume (@-mention, US17)
+
+**Purpose:** Verify that `standby` in a threaded session posts a plain-text standby message with no button, and resolves when the operator replies `@agent-intercom resume <instructions>`.
+
+**Prerequisites:** Active session with `session_thread_ts` set.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] US17 standby test. When the standby message appears in the session thread, reply '@agent-intercom resume switch to integration tests' — there is NO button to press."`, `level: "info"`
+2. Call `standby` with `message: "HITL TEST (US17): Agent paused. Reply in this thread with '@agent-intercom resume <your instruction>' to continue."`, `timeout_seconds: 120`
+3. **Operator action:** Observe the session thread. Verify:
+   - A **plain-text** standby message appeared in the thread
+   - There is NO "Resume with Instructions" button
+4. **Operator action: Reply in the thread with `@agent-intercom resume switch to integration tests`**
+5. Verify the `standby` response:
+   - `status` is `"resumed"`
+   - `instruction` (or equivalent field) contains `"switch to integration tests"`
+
+**Expected:** Text-only standby message. No button. `@agent-intercom resume <text>` resolves it with instruction preserved.
+
+**Error resilience:** If no response is received within `timeout_seconds`, record as FAIL/TIMEOUT.
+
+**Operator validates:**
+- [ ] Plain-text standby message in thread (no button)
+- [ ] NO "Resume with Instructions" button was present
+- [ ] `@agent-intercom resume <text>` reply resolved the standby call
+- [ ] Instruction text was preserved in the response
+
+---
+
+## Scenario 26: Text-Only Thread Approval — Approve (@-mention, US17)
+
+**Purpose:** Verify that `check_clearance` in a threaded session posts a plain-text proposal with no block-kit buttons, and resolves when the operator replies `@agent-intercom approve` in the thread.
+
+**Prerequisites:** Active session with `session_thread_ts` set.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] US17 approval test. Operator: when the proposal appears in the session thread, reply '@agent-intercom approve' — do NOT look for Approve/Reject buttons."`, `level: "info"`
+2. Call `check_clearance` with:
+   - `title`: `"HITL Test (US17): Text-only approval in thread"`
+   - `diff`: `"# US17 Thread Approval Test\nThis file tests text-only approval flow.\n"`
+   - `file_path`: `"tests/fixtures/hitl-thread-approval-test.txt"`
+   - `description`: `"HITL TEST: Reply '@agent-intercom approve' in the SESSION THREAD (no button to click)."`
+   - `risk_level`: `"low"`
+3. **Operator action:** Observe the session thread. Verify:
+   - A **plain-text** proposal appeared in the thread with NO Approve / Reject buttons
+4. **Operator action: Reply in the thread with `@agent-intercom approve`**
+5. Verify `check_clearance` response `status` is `"approved"`
+6. Call `check_diff` with the returned `request_id`
+7. Verify response `status` is `"applied"`
+8. Verify `tests/fixtures/hitl-thread-approval-test.txt` exists on disk
+
+**Expected:** Text-only proposal in thread. No buttons. `@agent-intercom approve` resolves it. File written.
+
+**Operator validates:**
+- [ ] Plain-text approval proposal appeared in session thread (no block-kit buttons)
+- [ ] `@agent-intercom approve` reply resolved the approval
+- [ ] File was created on disk
+
+---
+
+## Scenario 27: Text-Only Thread Approval — Reject (@-mention, US17)
+
+**Purpose:** Verify that `@agent-intercom reject <reason>` in the session thread rejects the proposal and carries the reason back to the agent.
+
+**Prerequisites:** Active session with `session_thread_ts` set.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] US17 rejection test. Operator: when the proposal appears in the session thread, reply '@agent-intercom reject too risky for this test'."`, `level: "info"`
+2. Call `check_clearance` with:
+   - `title`: `"HITL Test (US17): Text-only rejection in thread"`
+   - `diff`: `"+this should never be written\n"`
+   - `file_path`: `"tests/fixtures/hitl-thread-rejected-file.txt"`
+   - `description`: `"HITL TEST: Reply '@agent-intercom reject too risky for this test' in the session thread."`
+   - `risk_level`: `"low"`
+3. **Operator action:** Observe the session thread — verify plain-text proposal with no buttons.
+4. **Operator action: Reply in the thread with `@agent-intercom reject too risky for this test`**
+5. Verify `check_clearance` response:
+   - `status` is `"rejected"`
+   - `reason` contains `"too risky for this test"`
+6. Do NOT call `check_diff`
+7. Verify `tests/fixtures/hitl-thread-rejected-file.txt` does NOT exist on disk
+
+**Expected:** Text-only proposal in thread. `@agent-intercom reject <reason>` rejects it. Reason preserved. No file written.
+
+**Operator validates:**
+- [ ] Plain-text rejection proposal in thread (no buttons)
+- [ ] `@agent-intercom reject <reason>` resolved the call
+- [ ] Rejection reason was preserved in the tool response
+- [ ] No file was created
+
+---
+
+## Scenario 28: Main Channel (Non-Threaded) Still Uses Block-Kit (Contrast, US17)
+
+**Purpose:** Verify the US17 behavior boundary. When `session_thread_ts` is NOT set (no active ACP session, plain MCP context), `check_clearance` must still post a **block-kit** approval card to the main channel with Approve / Reject buttons — unchanged from pre-US17 behavior.
+
+**Prerequisites:** No active ACP session; server in MCP mode with no session thread active.
+
+**Note:** If an ACP session is active and holds a `session_thread_ts`, this scenario cannot be cleanly run — skip it and mark as NOT APPLICABLE. The equivalent contrast is captured in ACP Scenario 24.
+
+**Steps:**
+1. Call `broadcast` with `message: "[TEST] US17 contrast test — verifying non-threaded main-channel messages still use block-kit buttons. Operator: the next check_clearance should show Approve/Reject BUTTONS in the main channel."`, `level: "info"`
+2. Call `check_clearance` with:
+   - `title`: `"HITL Test: Block-kit button verification (non-threaded, US17 contrast)"`
+   - `diff`: `"+# Block-kit contrast test\n"`
+   - `file_path`: `"tests/fixtures/hitl-blockkit-contrast.txt"`
+   - `description`: `"HITL TEST: Please REJECT by clicking the REJECT BUTTON (not @-mention). Verify block-kit buttons are present."`
+   - `risk_level`: `"low"`
+3. **Operator action:** Observe the main Slack channel (not a thread). Verify:
+   - A **block-kit** approval card appeared with Approve / Reject buttons
+   - There are explicit buttons to click
+4. **Operator action: Click the REJECT button** (do NOT use @-mention)
+5. Verify `status` is `"rejected"`
+
+**Expected:** Main channel message uses block-kit with buttons. Button-click rejection works correctly. US17 did not break non-threaded flows.
+
+**Operator validates:**
+- [ ] Block-kit approval card appeared in the main Slack channel (NOT plain text)
+- [ ] Approve / Reject buttons were present and clickable
+- [ ] Reject button (not @-mention) resolved the call
+- [ ] No text-only @-mention instructions were shown in this non-threaded context
