@@ -221,9 +221,14 @@ pub async fn handle(
 
             if is_threaded {
                 // US17: text-only thread approval — no blocks/buttons.
+                // Mirror the main-channel path: inline for short diffs,
+                // upload as a thread snippet for large diffs (RI-004).
+                let diff_line_count = input.diff.lines().count();
+                let inline_diff = (diff_line_count <= blocks::INLINE_DIFF_THRESHOLD)
+                    .then_some(input.diff.as_str());
                 let text_body = blocks::build_text_only_approval(
                     &input.title,
-                    &input.diff,
+                    inline_diff,
                     &input.file_path,
                     &input.risk_level,
                     input.description.as_deref(),
@@ -236,6 +241,30 @@ pub async fn handle(
                 };
                 if let Err(err) = slack.enqueue(msg).await {
                     warn!(%err, "failed to enqueue text-only approval message");
+                }
+                // Mirror main-channel path: upload large diffs as a file snippet
+                // pinned to the session thread (upload_file already accepts thread_ts).
+                if diff_line_count > blocks::INLINE_DIFF_THRESHOLD {
+                    let upload_span =
+                        info_span!("slack_upload_diff_thread", request_id = %request_id);
+                    async {
+                        let sanitized = input.file_path.replace(['/', '.'], "_");
+                        let filename = format!("{sanitized}.diff.txt");
+                        if let Err(err) = slack
+                            .upload_file(
+                                channel.clone(),
+                                &filename,
+                                &input.diff,
+                                session_thread_ts.clone(),
+                                Some("text"),
+                            )
+                            .await
+                        {
+                            warn!(%err, "failed to upload diff snippet to thread");
+                        }
+                    }
+                    .instrument(upload_span)
+                    .await;
                 }
             } else {
                 let mut message_blocks = blocks::build_approval_blocks(
@@ -388,52 +417,52 @@ pub async fn handle(
                     .as_ref()
                     .map(|ts| ts.0.clone())
                     .unwrap_or_default();
-                let authorized_user = state
-                    .config
-                    .authorized_user_ids
-                    .first()
-                    .cloned()
-                    .unwrap_or_default();
+                let authorized_user = session.owner_user_id.clone();
 
                 let (reply_tx, reply_rx) = oneshot::channel::<String>();
-                crate::slack::handlers::thread_reply::register_thread_reply_fallback(
-                    ch,
-                    thread_ts,
-                    session.id.clone(),
-                    authorized_user,
-                    reply_tx,
-                    Arc::clone(&state.pending_thread_replies),
-                )
-                .await;
+                let registered =
+                    crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                        ch,
+                        thread_ts,
+                        session.id.clone(),
+                        authorized_user,
+                        reply_tx,
+                        Arc::clone(&state.pending_thread_replies),
+                    )
+                    .await;
 
-                let state_fb = Arc::clone(&state);
-                let rid = request_id.clone();
-                tokio::spawn(async move {
-                    let timeout = Duration::from_secs(state_fb.config.timeouts.approval_seconds);
-                    if let Ok(Ok(reply_text)) = tokio::time::timeout(timeout, reply_rx).await {
-                        let decision = crate::slack::handlers::thread_reply::parse_thread_decision(
-                            &reply_text,
-                        );
-                        let approved = decision.keyword == "approve";
-                        let reason = if decision.instruction.is_empty() {
-                            None
-                        } else {
-                            Some(decision.instruction)
-                        };
-                        if let Err(err) = state_fb
-                            .driver
-                            .resolve_clearance(&rid, approved, reason)
-                            .await
-                        {
-                            warn!(
-                                request_id = rid,
-                                %err,
-                                "US17: failed to resolve clearance from thread reply"
-                            );
+                if registered {
+                    let state_fb = Arc::clone(&state);
+                    let rid = request_id.clone();
+                    tokio::spawn(async move {
+                        let timeout =
+                            Duration::from_secs(state_fb.config.timeouts.approval_seconds);
+                        if let Ok(Ok(reply_text)) = tokio::time::timeout(timeout, reply_rx).await {
+                            let decision =
+                                crate::slack::handlers::thread_reply::parse_thread_decision(
+                                    &reply_text,
+                                );
+                            let approved = decision.keyword == "approve";
+                            let reason = if decision.instruction.is_empty() {
+                                None
+                            } else {
+                                Some(decision.instruction)
+                            };
+                            if let Err(err) = state_fb
+                                .driver
+                                .resolve_clearance(&rid, approved, reason)
+                                .await
+                            {
+                                warn!(
+                                    request_id = rid,
+                                    %err,
+                                    "US17: failed to resolve clearance from thread reply"
+                                );
+                            }
                         }
-                    }
-                    // else: sender dropped or timeout.
-                });
+                        // else: sender dropped or timeout.
+                    });
+                }
             }
         }
 

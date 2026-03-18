@@ -110,6 +110,10 @@ pub async fn handle_command(
 /// Routes `command` (the word after `/intercom`) to the appropriate sub-handler,
 /// passing `args`, the acting `user_id`, and the originating `channel_id`.
 ///
+/// `pub` visibility is intentional — required for integration test access from
+/// `tests/`. Not part of the stable public API; prefer `pub(crate)` once the
+/// test harness can be restructured to avoid direct invocation.
+///
 /// # Errors
 ///
 /// Returns `AppError` if the underlying sub-handler fails (e.g., database error,

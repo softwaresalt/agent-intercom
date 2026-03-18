@@ -83,6 +83,11 @@ pub fn fallback_map_key(channel_id: &str, thread_ts: &str) -> String {
 /// * `authorized_user_id` — The single Slack user ID allowed to complete this fallback.
 /// * `tx` — The oneshot sender. The spawned fallback task holds the `rx` end.
 /// * `pending` — Shared map of pending thread-reply senders.
+///
+/// # Returns
+///
+/// `true` if the entry was successfully registered; `false` if the LC-04 duplicate
+/// guard fired and the new sender was dropped (the original entry is still waiting).
 pub async fn register_thread_reply_fallback(
     channel_id: &str,
     thread_ts: String,
@@ -90,7 +95,7 @@ pub async fn register_thread_reply_fallback(
     authorized_user_id: String,
     tx: oneshot::Sender<String>,
     pending: PendingThreadReplies,
-) {
+) -> bool {
     let key = fallback_map_key(channel_id, &thread_ts);
     let mut guard = pending.lock().await;
     if guard.contains_key(&key) {
@@ -101,9 +106,10 @@ pub async fn register_thread_reply_fallback(
             thread_ts,
             "thread-reply fallback: duplicate registration for existing key — dropping new sender (LC-04)"
         );
-        return; // `tx` is dropped here, making `rx` resolve to `Err`
+        return false; // `tx` is dropped here, making `rx` resolve to `Err`
     }
     guard.insert(key, (session_id, authorized_user_id, tx));
+    true
 }
 
 /// Route an incoming thread reply to the waiting oneshot sender.
@@ -245,7 +251,7 @@ where
     Fut: Future<Output = ()> + Send + 'static,
 {
     let (tx, rx) = oneshot::channel::<String>();
-    register_thread_reply_fallback(
+    let registered = register_thread_reply_fallback(
         chan_id,
         thread_ts.to_owned(),
         session_id,
@@ -254,6 +260,11 @@ where
         Arc::clone(&pending),
     )
     .await;
+    if !registered {
+        // LC-04 duplicate guard fired — the original entry is still waiting.
+        // Skip posting and spawning to avoid a duplicate operator message.
+        return Ok(());
+    }
 
     // FR-022: Replace buttons with "awaiting thread reply" status immediately.
     if let Some(ts) = button_msg_ts {

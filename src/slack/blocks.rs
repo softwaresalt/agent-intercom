@@ -599,10 +599,13 @@ pub fn build_text_only_wait(message: &str, timeout_seconds: u64) -> String {
 }
 
 /// Build plain-text approval message for thread-only display (US17).
+///
+/// When `diff` is `None`, a placeholder noting the diff was uploaded as
+/// a file attachment is rendered instead of an inline code block.
 #[must_use]
 pub fn build_text_only_approval(
     title: &str,
-    diff: &str,
+    diff: Option<&str>,
     file_path: &str,
     risk_level: &RiskLevel,
     description: Option<&str>,
@@ -628,7 +631,10 @@ pub fn build_text_only_approval(
     }
 
     parts.push(format!("\u{1f4c4} `{file_path}`"));
-    parts.push(format!("```\n{diff}\n```"));
+    match diff {
+        Some(d) => parts.push(format!("```\n{d}\n```")),
+        None => parts.push("_Diff uploaded as a file attachment in this thread._".to_owned()),
+    }
 
     parts.push(
         "\n\u{1f4ac} Reply with `@agent-intercom` followed by: \

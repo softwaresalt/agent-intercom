@@ -95,14 +95,30 @@ pub async fn handle(
         }
 
         // ── Resolve session ──────────────────────────────────
+        // In ACP mode the agent subprocess supplies `?session_id=<id>` so we
+        // can pin the tool call to the exact session. Fall back to the first
+        // active session for backwards-compatible MCP mode.
         let session_repo = SessionRepo::new(Arc::clone(&state.db));
-        let sessions = session_repo.list_active().await.map_err(|err| {
-            rmcp::ErrorData::internal_error(format!("failed to query active sessions: {err}"), None)
-        })?;
-        let session = sessions
-            .into_iter()
-            .next()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?;
+        let session = if let Some(sid) = context.service.session_id_override() {
+            session_repo
+                .get_by_id(sid)
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(format!("failed to query session: {err}"), None)
+                })?
+                .ok_or_else(|| rmcp::ErrorData::internal_error("session not found", None))?
+        } else {
+            let sessions = session_repo.list_active().await.map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("failed to query active sessions: {err}"),
+                    None,
+                )
+            })?;
+            sessions
+                .into_iter()
+                .next()
+                .ok_or_else(|| rmcp::ErrorData::internal_error("no active session found", None))?
+        };
 
         // S037: capture thread_ts so all outgoing messages go to the session thread.
         let session_thread_ts = session
@@ -205,54 +221,53 @@ pub async fn handle(
                     .as_ref()
                     .map(|ts| ts.0.clone())
                     .unwrap_or_default();
-                let authorized_user = state
-                    .config
-                    .authorized_user_ids
-                    .first()
-                    .cloned()
-                    .unwrap_or_default();
+                let authorized_user = session.owner_user_id.clone();
 
                 let (reply_tx, reply_rx) = oneshot::channel::<String>();
-                crate::slack::handlers::thread_reply::register_thread_reply_fallback(
-                    ch,
-                    thread_ts,
-                    session.id.clone(),
-                    authorized_user,
-                    reply_tx,
-                    Arc::clone(&state.pending_thread_replies),
-                )
-                .await;
+                let registered =
+                    crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                        ch,
+                        thread_ts,
+                        session.id.clone(),
+                        authorized_user,
+                        reply_tx,
+                        Arc::clone(&state.pending_thread_replies),
+                    )
+                    .await;
 
-                // Spawn a task that waits for the @-mention text and
-                // resolves the prompt through the driver.
-                let state_fb = Arc::clone(&state);
-                let pid = prompt_id.clone();
-                tokio::spawn(async move {
-                    let timeout = Duration::from_secs(state_fb.config.timeouts.prompt_seconds);
-                    if let Ok(Ok(reply_text)) = tokio::time::timeout(timeout, reply_rx).await {
-                        let decision = crate::slack::handlers::thread_reply::parse_thread_decision(
-                            &reply_text,
-                        );
-                        let inst = if decision.instruction.is_empty() {
-                            None
-                        } else {
-                            Some(decision.instruction)
-                        };
-                        if let Err(err) = state_fb
-                            .driver
-                            .resolve_prompt(&pid, &decision.keyword, inst)
-                            .await
-                        {
-                            warn!(
-                                prompt_id = pid,
-                                %err,
-                                "US17: failed to resolve prompt from thread reply"
-                            );
+                if registered {
+                    // Spawn a task that waits for the @-mention text and
+                    // resolves the prompt through the driver.
+                    let state_fb = Arc::clone(&state);
+                    let pid = prompt_id.clone();
+                    tokio::spawn(async move {
+                        let timeout = Duration::from_secs(state_fb.config.timeouts.prompt_seconds);
+                        if let Ok(Ok(reply_text)) = tokio::time::timeout(timeout, reply_rx).await {
+                            let decision =
+                                crate::slack::handlers::thread_reply::parse_thread_decision(
+                                    &reply_text,
+                                );
+                            let inst = if decision.instruction.is_empty() {
+                                None
+                            } else {
+                                Some(decision.instruction)
+                            };
+                            if let Err(err) = state_fb
+                                .driver
+                                .resolve_prompt(&pid, &decision.keyword, inst)
+                                .await
+                            {
+                                warn!(
+                                    prompt_id = pid,
+                                    %err,
+                                    "US17: failed to resolve prompt from thread reply"
+                                );
+                            }
                         }
-                    }
-                    // else: sender dropped or timeout — handled by the
-                    // main timeout path below.
-                });
+                        // else: sender dropped or timeout — handled by the
+                        // main timeout path below.
+                    });
+                }
             }
         }
 
