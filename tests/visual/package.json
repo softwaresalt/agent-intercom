@@ -1,0 +1,22 @@
+{
+  "name": "agent-intercom-visual-tests",
+  "version": "1.0.0",
+  "description": "Tier 3 browser-automated visual tests for agent-intercom Slack UI",
+  "private": true,
+  "scripts": {
+    "test": "npx playwright test",
+    "test:auth-smoke": "npx playwright test scenarios/slack-auth-handoff.spec.ts scenarios/scaffold-smoke.spec.ts scenarios/slack-workspace-auth.spec.ts",
+    "test:fixtures": "npx playwright test scenarios/automated-harness.spec.ts",
+    "test:at-mention": "npx playwright test --project=visual scenarios/at-mention-thread-reply.spec.ts",
+    "test:automated": "npx playwright test scenarios/slack-auth-handoff.spec.ts scenarios/scaffold-smoke.spec.ts scenarios/slack-workspace-auth.spec.ts scenarios/automated-harness.spec.ts scenarios/at-mention-thread-reply.spec.ts",
+    "test:setup": "npx playwright test --project=setup",
+    "report": "npx playwright show-report reports",
+    "gallery": "npx playwright test --reporter=list --dry-run 2>/dev/null; node -e \"require('./helpers/generate-gallery').generateGallery().then(n => console.log('Gallery: ' + n + ' screenshots'))\""
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "@types/node": "^25.3.5",
+    "dotenv": "^16.4.5",
+    "typescript": "^5.9.3"
+  }
+}

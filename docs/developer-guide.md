@@ -216,6 +216,56 @@ Run a specific test by name:
 cargo test contract::check_clearance
 ```
 
+### Automated API + Playwright Harness
+
+For routine regression checks that should not require the manual HITL skill,
+run the automated harness:
+
+```powershell
+pwsh .\scripts\run_automated_test_harness.ps1
+```
+
+The harness combines:
+
+* `cargo test --lib --test unit --test contract`
+* `cargo test --test integration`
+* Optional `cargo test --features live-slack-tests --test live`
+* A split visual flow in `tests/visual`:
+  * `npm run test:auth-smoke` for browser login, handoff handling, and live workspace-shell validation
+  * Slack `auth.test` preflight for `SLACK_TEST_BOT_TOKEN`
+  * `npm run test:fixtures` for the self-seeding Slack UX assertions
+
+The automated Playwright suite is intentionally separate from the broader
+manual-oriented visual scenarios. It first proves that browser authentication
+works against the real Slack workspace, then preflights the fixture bot token,
+and only then seeds deterministic Slack fixture messages through the Slack Web
+API for the rendered UX assertions.
+
+To run the visual phases directly:
+
+```powershell
+Set-Location tests\visual
+npm run test:auth-smoke
+npm run test:fixtures
+```
+
+Configure the existing Playwright login values in `tests/visual/.env`, and add
+the Slack fixture values required by the automated harness:
+
+* `SLACK_TEST_BOT_TOKEN` - a valid `xoxb-` token for the same workspace, with permission to post in the configured channel
+* `SLACK_TEST_CHANNEL_ID`
+
+If the bot token is missing or invalid, the harness now reports that explicitly
+in the `Slack fixture token preflight` phase and skips the seeded fixture suite
+instead of reporting a generic Playwright failure.
+
+If `tests/visual/node_modules` is missing, either bootstrap it manually with
+`npm install --no-package-lock` or let the harness do it by supplying
+`-BootstrapVisualDeps`.
+
+Keep `.github/skills/hitl-test` for manual operator-driven acceptance runs that
+need real approval or continuation responses in Slack.
+
 ## Architecture Decision Records
 
 Numbered markdown files in `docs/adrs/` record key architectural decisions (ADR-0001 through ADR-0012). Read these to understand why specific design choices were made.

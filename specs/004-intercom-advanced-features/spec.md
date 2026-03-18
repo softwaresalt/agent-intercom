@@ -289,6 +289,31 @@ When an agent submits a code proposal via `check_clearance`, the operator sees a
 
 ---
 
+### User Story 17 - Text-Only Thread Prompts with @-Mention Reply (Priority: P1)
+
+When a session has a dedicated Slack thread (`thread_ts` is set via S037), all interactive messages posted INTO that thread currently use block-kit buttons (Continue/Refine/Stop, Accept/Reject, Resume/Stop). On mobile clients and in thread panels, Slack modals silently fail when triggered from these buttons, forcing a fallback to the @-mention thread reply mechanism. The operator wants thread messages to skip block-kit entirely and post plain text prompts, with the operator replying via `@agent-intercom <decision> [instructions]`. Main channel messages continue to use block-kit buttons unchanged.
+
+**Why this priority**: Block-kit buttons in threads create a poor operator experience — modals fail silently on mobile, and the fallback adds an extra step. Going directly to text-only @-mention replies eliminates the modal failure mode entirely and provides a consistent, reliable UX in threads. The thread-reply infrastructure from spec 007 already handles @-mention routing, authorization, timeouts, and cleanup.
+
+**Independent Test**: Can be tested by calling `forward_prompt` when the session has a `thread_ts`, verifying that the posted message contains no block-kit buttons, and then simulating an @-mention reply with a decision keyword.
+
+**Acceptance Scenarios**:
+
+1. **Given** a session with `thread_ts` set (S037), **When** the agent calls `forward_prompt`, **Then** the prompt message posted to the thread contains plain text (no block-kit action buttons) and includes instructions telling the operator to reply with `@agent-intercom continue`, `@agent-intercom refine <instructions>`, or `@agent-intercom stop`.
+2. **Given** a text-only prompt is posted in a thread, **When** the authorized operator replies `@agent-intercom continue`, **Then** `forward_prompt` resolves with `{ decision: "continue" }`.
+3. **Given** a text-only prompt is posted in a thread, **When** the authorized operator replies `@agent-intercom refine please fix the error handling`, **Then** `forward_prompt` resolves with `{ decision: "refine", instruction: "please fix the error handling" }`.
+4. **Given** a text-only prompt is posted in a thread, **When** the authorized operator replies `@agent-intercom stop`, **Then** `forward_prompt` resolves with `{ decision: "stop" }`.
+5. **Given** a session with `thread_ts` set, **When** the agent calls `wait_for_instruction`, **Then** the wait status message posted to the thread contains plain text with instructions to reply `@agent-intercom resume [instructions]` or `@agent-intercom stop`.
+6. **Given** a text-only wait message is posted, **When** the operator replies `@agent-intercom resume check the database schema`, **Then** `wait_for_instruction` resolves with `{ status: "resumed", instruction: "check the database schema" }`.
+7. **Given** a session with `thread_ts` set, **When** the agent calls `ask_approval` (check_clearance), **Then** the approval message posted to the thread contains plain text showing the diff and instructions to reply `@agent-intercom approve` or `@agent-intercom reject <reason>`.
+8. **Given** a text-only approval message is posted, **When** the operator replies `@agent-intercom approve`, **Then** `ask_approval` resolves with `{ status: "approved" }`.
+9. **Given** a text-only approval message is posted, **When** the operator replies `@agent-intercom reject the path is wrong`, **Then** `ask_approval` resolves with `{ status: "rejected", reason: "the path is wrong" }`.
+10. **Given** a session WITHOUT `thread_ts` (no thread), **When** the agent calls `forward_prompt`, **Then** the prompt message uses block-kit buttons (Continue/Refine/Stop) exactly as today — no change in behavior.
+11. **Given** a text-only prompt is posted, **When** the configured timeout elapses without an @-mention reply, **Then** the tool auto-continues per FR-008 with a timeout warning.
+12. **Given** a text-only prompt is posted, **When** an unauthorized user replies `@agent-intercom continue`, **Then** the reply is silently ignored and the prompt remains pending for the authorized user.
+
+---
+
 ### Edge Cases
 
 - What happens when the steering queue receives a message for a session that terminates before the next `ping`? The message should remain unconsumed and be available if the session is recovered, or purged by retention rules.
@@ -434,3 +459,6 @@ When an agent submits a code proposal via `check_clearance`, the operator sees a
 - **SC-009**: The `auto_check` response time does not increase linearly with the number of command regex patterns (pre-compilation eliminates per-call overhead).
 - **SC-010**: Task inbox items queued while no session is active are delivered to the next starting session with 100% reliability.
 - **SC-011**: Every `check_clearance` approval request for an existing file includes the original file content as a Slack attachment, enabling operators to review changes in full context.
+- **SC-012**: When a session has a `thread_ts` (S037), all `forward_prompt`, `wait_for_instruction`, and `ask_approval` messages posted INTO that thread use plain text (no block-kit buttons). The operator replies with `@agent-intercom <decision> [instructions]` and the server parses the decision keyword and resolves the pending request.
+- **SC-013**: Main channel messages (when `session_thread_ts` is `None`) continue to use block-kit buttons unchanged.
+- **SC-014**: The decision parser correctly extracts `continue`, `refine`, `stop`, `approve`, `reject`, `resume` from the first word of the stripped @-mention text, treating the remainder as instruction/reason text.

@@ -1,7 +1,7 @@
 ---
 name: hitl-test
 description: "Usage: Run HITL tests. Executes human-in-the-loop test scenarios against a live agent-intercom server with real Slack integration."
-version: 3.0
+version: 3.1
 maturity: experimental
 ---
 
@@ -9,9 +9,35 @@ maturity: experimental
 
 Executes structured test scenarios against a live agent-intercom server to
 validate the full Slack-mediated approval workflow, operator steering queue,
-task inbox, modal instruction capture, file attachments, audit logging, detail
-levels, stall detection, and (in ACP mode) session lifecycle, threading, and
-workspace routing — all with a real human operator.
+task inbox, modal instruction capture, text-only thread @-mention replies (US17),
+file attachments, audit logging, detail levels, stall detection, and (in ACP mode)
+session lifecycle, threading, and workspace routing — all with a real human operator.
+
+## US17 — Text-Only Thread Prompts (Important Behavior Change)
+
+When the server session has a `session_thread_ts` set (always in ACP sessions,
+and in MCP sessions with an active thread), the following tools change behavior:
+
+| Tool | Old behavior (non-threaded) | New behavior (threaded, US17) |
+|------|-----------------------------|---------------------------------|
+| `transmit` | Posts block-kit card with Continue/Refine/Stop buttons | Posts plain text in thread; waits for `@agent-intercom continue/refine/stop` @-mention reply |
+| `standby` | Posts block-kit card with Resume with Instructions button | Posts plain text in thread; waits for `@agent-intercom resume <instruction>` @-mention reply |
+| `check_clearance` | Posts block-kit card with Approve/Reject buttons | Posts plain text in thread; waits for `@agent-intercom approve/reject <reason>` @-mention reply |
+
+**Main channel messages (no thread) are unchanged** — they still use block-kit buttons.
+
+### @-mention decision keywords
+
+| Tool | Keywords | Example |
+|------|----------|---------|
+| `transmit` / `forward_prompt` | `continue`, `refine <text>`, `stop` | `@agent-intercom refine focus on error handling` |
+| `standby` / `wait_for_instruction` | `resume <text>`, `stop` | `@agent-intercom resume switch to integration tests` |
+| `check_clearance` / `ask_approval` | `approve`, `reject <reason>` | `@agent-intercom reject too risky` |
+
+- The first whitespace-delimited word is the decision keyword (case-insensitive).
+- Everything after the keyword is the instruction/reason text.
+- An empty reply (just `@agent-intercom`) defaults to `"continue"`.
+- Only the session owner's @-mention is accepted; unauthorized mentions are silently ignored.
 
 ## Prerequisites
 

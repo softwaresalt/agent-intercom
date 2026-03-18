@@ -539,3 +539,112 @@ pub fn truncate_text(text: &str, max_len: usize) -> String {
 
     format!("{}...", &text[..boundary])
 }
+
+// ── Text-only thread prompt builders (US17) ────────────────────────
+
+/// Build plain-text prompt message for thread-only display (US17).
+///
+/// When a session has `thread_ts`, the server posts this text instead
+/// of block-kit buttons. The operator replies with an @-mention
+/// containing a decision keyword.
+#[must_use]
+pub fn build_text_only_prompt(
+    prompt_text: &str,
+    prompt_type: PromptType,
+    elapsed_seconds: Option<i64>,
+    actions_taken: Option<i64>,
+) -> String {
+    let icon = prompt_type_icon(prompt_type);
+    let label = prompt_type_label(prompt_type);
+
+    let mut parts = vec![format!("{icon} *{label} Prompt*")];
+    parts.push(slack_escape(prompt_text));
+
+    let mut context = Vec::new();
+    if let Some(secs) = elapsed_seconds {
+        context.push(format!("\u{23f1}\u{fe0f} {secs}s elapsed"));
+    }
+    if let Some(count) = actions_taken {
+        context.push(format!("\u{1f4cb} {count} actions taken"));
+    }
+    if !context.is_empty() {
+        parts.push(context.join(" | "));
+    }
+
+    parts.push(
+        "\n\u{1f4ac} Reply with `@agent-intercom` followed by: \
+         `continue`, `refine <instructions>`, or `stop`"
+            .to_owned(),
+    );
+
+    parts.join("\n")
+}
+
+/// Build plain-text wait message for thread-only display (US17).
+#[must_use]
+pub fn build_text_only_wait(message: &str, timeout_seconds: u64) -> String {
+    let mut parts = vec![format!(
+        "\u{23f8}\u{fe0f} *Agent Waiting*\n{}",
+        slack_escape(message)
+    )];
+
+    if timeout_seconds > 0 {
+        parts.push(format!("\u{23f1}\u{fe0f} Timeout: {timeout_seconds}s"));
+    }
+
+    parts.push(
+        "\n\u{1f4ac} Reply with `@agent-intercom` followed by: \
+         `resume [instructions]` or `stop`"
+            .to_owned(),
+    );
+
+    parts.join("\n")
+}
+
+/// Build plain-text approval message for thread-only display (US17).
+///
+/// When `diff` is `None`, a placeholder noting the diff was uploaded as
+/// a file attachment is rendered instead of an inline code block.
+#[must_use]
+pub fn build_text_only_approval(
+    title: &str,
+    diff: Option<&str>,
+    file_path: &str,
+    risk_level: &RiskLevel,
+    description: Option<&str>,
+) -> String {
+    let risk_icon = match risk_level {
+        RiskLevel::Low => "\u{1f7e2}",
+        RiskLevel::High => "\u{1f7e1}",
+        RiskLevel::Critical => "\u{1f534}",
+    };
+
+    let risk_label = match risk_level {
+        RiskLevel::Low => "low",
+        RiskLevel::High => "high",
+        RiskLevel::Critical => "critical",
+    };
+
+    let mut parts = vec![format!(
+        "{risk_icon} *Approval Request* ({risk_label})\n*{}*",
+        slack_escape(title)
+    )];
+
+    if let Some(desc) = description {
+        parts.push(slack_escape(desc));
+    }
+
+    parts.push(format!("\u{1f4c4} `{file_path}`"));
+    match diff {
+        Some(d) => parts.push(format!("```\n{d}\n```")),
+        None => parts.push("_Diff uploaded as a file attachment in this thread._".to_owned()),
+    }
+
+    parts.push(
+        "\n\u{1f4ac} Reply with `@agent-intercom` followed by: \
+         `approve` or `reject <reason>`"
+            .to_owned(),
+    );
+
+    parts.join("\n")
+}

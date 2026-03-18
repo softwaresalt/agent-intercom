@@ -256,7 +256,7 @@ pub async fn ingest_app_mention(text: &str, channel_id: &str, state: &Arc<AppSta
 ///
 /// Uses [`str::split_once`] to avoid byte-offset arithmetic that could
 /// accidentally split a multi-byte UTF-8 sequence.
-fn strip_mention(text: &str) -> &str {
+pub(crate) fn strip_mention(text: &str) -> &str {
     let trimmed = text.trim_start();
     if trimmed.starts_with("<@") {
         trimmed

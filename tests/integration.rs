@@ -30,6 +30,7 @@ mod integration {
     mod stall_escalation_tests;
 
     mod acp_event_integration;
+    mod at_mention_routing_integration_tests;
     mod disconnect_tests;
     mod inbox_flow_tests;
     mod ipc_server_tests;
@@ -37,6 +38,10 @@ mod integration {
     mod policy_watcher_tests;
     mod push_events_tests;
     mod shutdown_tests;
+    mod slack_fallback_tests;
+    mod slack_interaction_tests;
+    mod slack_modal_flow_tests;
+    mod slack_threading_tests;
     mod startup_tests;
     mod stdio_transport_tests;
     mod steering_flow_tests;

@@ -211,129 +211,194 @@ pub async fn handle(
         let mut effective_thread_ts = session_thread_ts.clone();
 
         // ── Post to Slack ────────────────────────────────────
+        // US17: when the session lives in a thread, post plain text (no
+        // block-kit buttons) and register a thread-reply fallback for
+        // @-mention decisions.  Main channel messages keep block-kit.
+        let is_threaded = session_thread_ts.is_some();
+
         if let (Some(ref slack), Some(ref ch)) = (&state.slack, &channel_id) {
             let channel = SlackChannelId(ch.clone());
-            let mut message_blocks = blocks::build_approval_blocks(
-                &input.title,
-                input.description.as_deref(),
-                &input.diff,
-                &input.file_path,
-                input.risk_level,
-            );
-            message_blocks.push(blocks::approval_buttons(&request_id));
 
-            let diff_line_count = input.diff.lines().count();
-
-            if diff_line_count > blocks::INLINE_DIFF_THRESHOLD {
-                // Upload large diff as a file snippet.  Pass snippet_type
-                // "text" so Slack pre-classifies the file before its content
-                // scanner runs, preventing the "Binary" label.
-                let upload_span = info_span!("slack_upload_diff", request_id = %request_id);
-                async {
-                    let sanitized = input.file_path.replace(['/', '.'], "_");
-                    let filename = format!("{sanitized}.diff.txt");
-                    if let Err(err) = slack
-                        .upload_file(channel.clone(), &filename, &input.diff, None, Some("text"))
-                        .await
-                    {
-                        warn!(%err, "failed to upload diff snippet to slack");
-                    }
-                }
-                .instrument(upload_span)
-                .await;
-            }
-
-            // Post the approval message directly so we can capture the Slack
-            // `ts` for threading snippet replies.
-            let post_span = info_span!("slack_post_approval", request_id = %request_id);
-            let approval_ts: Option<slack_morphism::prelude::SlackTs> = async {
+            if is_threaded {
+                // US17: text-only thread approval — no blocks/buttons.
+                // Mirror the main-channel path: inline for short diffs,
+                // upload as a thread snippet for large diffs (RI-004).
+                let diff_line_count = input.diff.lines().count();
+                let inline_diff = (diff_line_count <= blocks::INLINE_DIFF_THRESHOLD)
+                    .then_some(input.diff.as_str());
+                let text_body = blocks::build_text_only_approval(
+                    &input.title,
+                    inline_diff,
+                    &input.file_path,
+                    &input.risk_level,
+                    input.description.as_deref(),
+                );
                 let msg = SlackMessage {
                     channel: channel.clone(),
-                    text: Some(format!("\u{1f4cb} Approval Request: {}", input.title)),
-                    blocks: Some(message_blocks),
-                    // S037: post inside session thread when thread_ts is set;
-                    // otherwise post at channel root (and this ts becomes the root).
+                    text: Some(text_body),
+                    blocks: None,
                     thread_ts: session_thread_ts.clone(),
                 };
-                match slack.post_message_direct(msg).await {
-                    Ok(ts) => {
-                        // S036: if the session had no thread_ts, record this
-                        // approval message as the session's thread root.
-                        if session_thread_ts.is_none() {
-                            if let Err(err) = session_repo.set_thread_ts(&session.id, &ts.0).await {
-                                warn!(%err, session_id = %session.id,
-                                    "failed to record thread_ts from approval message");
-                            }
-                        }
-                        Some(ts)
-                    }
-                    Err(err) => {
-                        warn!(%err, "failed to post approval message");
-                        None
-                    }
+                if let Err(err) = slack.enqueue(msg).await {
+                    warn!(%err, "failed to enqueue text-only approval message");
                 }
-            }
-            .instrument(post_span)
-            .await;
-
-            // S037: if this was the session's first Slack message, the approval
-            // post ts becomes the thread root for all subsequent messages.
-            if session_thread_ts.is_none() {
-                effective_thread_ts = approval_ts.clone();
-            }
-
-            // ── Snippet thread (preferred) or file upload (fallback) ──────
-            //
-            // When the agent supplies curated `snippets`, post them as a
-            // threaded Slack reply.  Inline code blocks in messages always
-            // render as readable text — no content-scanner interference.
-            //
-            // When no snippets are provided, fall back to uploading the full
-            // original file for operator review (T084–T086).
-            if !input.snippets.is_empty() {
-                if let Some(ref ts) = approval_ts {
-                    let snippet_span = info_span!("slack_post_snippets", request_id = %request_id);
+                // Mirror main-channel path: upload large diffs as a file snippet
+                // pinned to the session thread (upload_file already accepts thread_ts).
+                if diff_line_count > blocks::INLINE_DIFF_THRESHOLD {
+                    let upload_span =
+                        info_span!("slack_upload_diff_thread", request_id = %request_id);
                     async {
-                        let snippet_blocks = blocks::code_snippet_blocks(
-                            &input
-                                .snippets
-                                .iter()
-                                .map(|s| {
-                                    (s.label.as_str(), s.language.as_str(), s.content.as_str())
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                        let msg = SlackMessage {
-                            channel: channel.clone(),
-                            text: Some("Code snippets for review".into()),
-                            blocks: Some(snippet_blocks),
-                            thread_ts: Some(ts.clone()),
-                        };
-                        if let Err(err) = slack.enqueue(msg).await {
-                            warn!(%err, "failed to post snippet thread");
+                        let sanitized = input.file_path.replace(['/', '.'], "_");
+                        let filename = format!("{sanitized}.diff.txt");
+                        if let Err(err) = slack
+                            .upload_file(
+                                channel.clone(),
+                                &filename,
+                                &input.diff,
+                                session_thread_ts.clone(),
+                                Some("text"),
+                            )
+                            .await
+                        {
+                            warn!(%err, "failed to upload diff snippet to thread");
                         }
                     }
-                    .instrument(snippet_span)
+                    .instrument(upload_span)
                     .await;
                 }
-            } else if let Some(ref original) = original_content {
-                // Fallback: upload the full original file (T084). Skipped for
-                // new files (T085) or unreadable files (T086).
-                let orig_span = info_span!("slack_upload_original", request_id = %request_id);
-                async {
-                    let sanitized = input.file_path.replace(['/', '.'], "_");
-                    let filename = format!("{sanitized}.original.txt");
-                    let lang = crate::slack::commands::file_extension_language(&input.file_path);
-                    if let Err(err) = slack
-                        .upload_file(channel.clone(), &filename, original, None, Some(lang))
-                        .await
-                    {
-                        warn!(%err, "failed to upload original file to slack");
+            } else {
+                let mut message_blocks = blocks::build_approval_blocks(
+                    &input.title,
+                    input.description.as_deref(),
+                    &input.diff,
+                    &input.file_path,
+                    input.risk_level,
+                );
+                message_blocks.push(blocks::approval_buttons(&request_id));
+
+                let diff_line_count = input.diff.lines().count();
+
+                if diff_line_count > blocks::INLINE_DIFF_THRESHOLD {
+                    // Upload large diff as a file snippet.  Pass snippet_type
+                    // "text" so Slack pre-classifies the file before its content
+                    // scanner runs, preventing the "Binary" label.
+                    let upload_span = info_span!("slack_upload_diff", request_id = %request_id);
+                    async {
+                        let sanitized = input.file_path.replace(['/', '.'], "_");
+                        let filename = format!("{sanitized}.diff.txt");
+                        if let Err(err) = slack
+                            .upload_file(
+                                channel.clone(),
+                                &filename,
+                                &input.diff,
+                                None,
+                                Some("text"),
+                            )
+                            .await
+                        {
+                            warn!(%err, "failed to upload diff snippet to slack");
+                        }
+                    }
+                    .instrument(upload_span)
+                    .await;
+                }
+
+                // Post the approval message directly so we can capture the Slack
+                // `ts` for threading snippet replies.
+                let post_span = info_span!("slack_post_approval", request_id = %request_id);
+                let approval_ts: Option<slack_morphism::prelude::SlackTs> = async {
+                    let msg = SlackMessage {
+                        channel: channel.clone(),
+                        text: Some(format!("\u{1f4cb} Approval Request: {}", input.title)),
+                        blocks: Some(message_blocks),
+                        // S037: post inside session thread when thread_ts is set;
+                        // otherwise post at channel root (and this ts becomes the root).
+                        thread_ts: None,
+                    };
+                    match slack.post_message_direct(msg).await {
+                        Ok(ts) => {
+                            // S036: if the session had no thread_ts, record this
+                            // approval message as the session's thread root.
+                            if session_thread_ts.is_none() {
+                                if let Err(err) =
+                                    session_repo.set_thread_ts(&session.id, &ts.0).await
+                                {
+                                    warn!(%err, session_id = %session.id,
+                                    "failed to record thread_ts from approval message");
+                                }
+                            }
+                            Some(ts)
+                        }
+                        Err(err) => {
+                            warn!(%err, "failed to post approval message");
+                            None
+                        }
                     }
                 }
-                .instrument(orig_span)
+                .instrument(post_span)
                 .await;
-            }
+
+                // S037: if this was the session's first Slack message, the approval
+                // post ts becomes the thread root for all subsequent messages.
+                if session_thread_ts.is_none() {
+                    effective_thread_ts = approval_ts.clone();
+                }
+
+                // ── Snippet thread (preferred) or file upload (fallback) ──────
+                //
+                // When the agent supplies curated `snippets`, post them as a
+                // threaded Slack reply.  Inline code blocks in messages always
+                // render as readable text — no content-scanner interference.
+                //
+                // When no snippets are provided, fall back to uploading the full
+                // original file for operator review (T084–T086).
+                if !input.snippets.is_empty() {
+                    if let Some(ref ts) = approval_ts {
+                        let snippet_span =
+                            info_span!("slack_post_snippets", request_id = %request_id);
+                        async {
+                            let snippet_blocks = blocks::code_snippet_blocks(
+                                &input
+                                    .snippets
+                                    .iter()
+                                    .map(|s| {
+                                        (s.label.as_str(), s.language.as_str(), s.content.as_str())
+                                    })
+                                    .collect::<Vec<_>>(),
+                            );
+                            let msg = SlackMessage {
+                                channel: channel.clone(),
+                                text: Some("Code snippets for review".into()),
+                                blocks: Some(snippet_blocks),
+                                thread_ts: Some(ts.clone()),
+                            };
+                            if let Err(err) = slack.enqueue(msg).await {
+                                warn!(%err, "failed to post snippet thread");
+                            }
+                        }
+                        .instrument(snippet_span)
+                        .await;
+                    }
+                } else if let Some(ref original) = original_content {
+                    // Fallback: upload the full original file (T084). Skipped for
+                    // new files (T085) or unreadable files (T086).
+                    let orig_span = info_span!("slack_upload_original", request_id = %request_id);
+                    async {
+                        let sanitized = input.file_path.replace(['/', '.'], "_");
+                        let filename = format!("{sanitized}.original.txt");
+                        let lang =
+                            crate::slack::commands::file_extension_language(&input.file_path);
+                        if let Err(err) = slack
+                            .upload_file(channel.clone(), &filename, original, None, Some(lang))
+                            .await
+                        {
+                            warn!(%err, "failed to upload original file to slack");
+                        }
+                    }
+                    .instrument(orig_span)
+                    .await;
+                }
+            } // end else (non-threaded)
         } else {
             warn!("slack not configured; approval request will block without notification");
         }
@@ -343,6 +408,96 @@ pub async fn handle(
         {
             let mut pending = state.pending_approvals.lock().await;
             pending.insert(request_id.clone(), tx);
+        }
+
+        // US17: register thread-reply fallback for @-mention resolution.
+        if is_threaded {
+            if let Some(ref ch) = channel_id {
+                let thread_ts = session_thread_ts
+                    .as_ref()
+                    .map(|ts| ts.0.clone())
+                    .unwrap_or_default();
+                let authorized_user = session.owner_user_id.clone();
+                let fallback_ch = ch.clone();
+                let fallback_ts = thread_ts.clone();
+
+                let (reply_tx, reply_rx) = oneshot::channel::<String>();
+                let registered =
+                    crate::slack::handlers::thread_reply::register_thread_reply_fallback(
+                        ch,
+                        thread_ts,
+                        session.id.clone(),
+                        authorized_user,
+                        reply_tx,
+                        Arc::clone(&state.pending_thread_replies),
+                    )
+                    .await;
+
+                if registered {
+                    let state_fb = Arc::clone(&state);
+                    let rid = request_id.clone();
+                    tokio::spawn(async move {
+                        let timeout =
+                            Duration::from_secs(state_fb.config.timeouts.approval_seconds);
+                        match tokio::time::timeout(timeout, reply_rx).await {
+                            Ok(Ok(reply_text)) => {
+                                let decision =
+                                    crate::slack::handlers::thread_reply::parse_thread_decision(
+                                        &reply_text,
+                                    );
+                                match decision.keyword.as_str() {
+                                    "approve" | "reject" => {
+                                        let approved = decision.keyword == "approve";
+                                        let reason = if decision.instruction.is_empty() {
+                                            None
+                                        } else {
+                                            Some(decision.instruction)
+                                        };
+                                        if let Err(err) = state_fb
+                                            .driver
+                                            .resolve_clearance(&rid, approved, reason)
+                                            .await
+                                        {
+                                            warn!(
+                                                request_id = rid,
+                                                %err,
+                                                "US17: failed to resolve clearance from thread reply"
+                                            );
+                                        }
+                                    }
+                                    keyword => {
+                                        // Ignore non-explicit keywords (including empty → "continue").
+                                        // Leave the approval pending until an explicit approve/reject
+                                        // arrives or the main timeout fires.
+                                        warn!(
+                                            request_id = rid,
+                                            keyword,
+                                            "US17: non-explicit keyword in thread reply — expected 'approve' or 'reject', ignoring"
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(Err(_)) => {
+                                // Sender dropped (e.g., cleanup_session_fallbacks) — no-op.
+                            }
+                            Err(_elapsed) => {
+                                // Timeout — remove stale entry so future registrations
+                                // for this thread are not blocked by LC-04.
+                                state_fb
+                                    .pending_thread_replies
+                                    .lock()
+                                    .await
+                                    .remove(
+                                        &crate::slack::handlers::thread_reply::fallback_map_key(
+                                            &fallback_ch,
+                                            &fallback_ts,
+                                        ),
+                                    );
+                            }
+                        }
+                    });
+                }
+            }
         }
 
         let timeout_seconds = state.config.timeouts.approval_seconds;

@@ -140,3 +140,78 @@ fn unknown_detail_level_defaults_to_standard() {
         "unknown level should fall back to standard visibility"
     );
 }
+
+// ── S-T1-007: Comprehensive instruction_modal structure ───────────────────────
+
+/// S-T1-007a — The modal placeholder text appears in the serialised payload.
+#[test]
+fn instruction_modal_placeholder_is_serialized() {
+    let placeholder = "Enter your instructions here…";
+    let view =
+        blocks::instruction_modal("refine_prompt:xyz789", "Refine Instructions", placeholder);
+    let json = serde_json::to_string(&view).expect("serialise SlackView");
+    assert!(
+        json.contains("Enter your instructions here"),
+        "placeholder text must appear in serialised modal; got: {json}"
+    );
+}
+
+/// S-T1-007b — The modal is of type "modal" in the serialised JSON.
+#[test]
+fn instruction_modal_type_is_modal() {
+    let view = blocks::instruction_modal("cb:1", "Title", "Placeholder");
+    let json = serde_json::to_string(&view).expect("serialise SlackView");
+    assert!(
+        json.contains("\"type\":\"modal\"") || json.contains("\"type\": \"modal\""),
+        "modal type field must be 'modal'; got: {json}"
+    );
+}
+
+/// S-T1-007c — The input block is of type "input" in the serialised JSON.
+#[test]
+fn instruction_modal_contains_input_block_type() {
+    let view = blocks::instruction_modal("cb:2", "Title", "Placeholder");
+    let json = serde_json::to_string(&view).expect("serialise SlackView");
+    assert!(
+        json.contains("\"type\":\"input\"") || json.contains("\"type\": \"input\""),
+        "modal must contain an input block type; got: {json}"
+    );
+}
+
+/// S-T1-007d — The multiline flag is enabled on the text input.
+#[test]
+fn instruction_modal_multiline_enabled() {
+    let view = blocks::instruction_modal("cb:3", "Title", "Placeholder");
+    let json = serde_json::to_string(&view).expect("serialise SlackView");
+    assert!(
+        json.contains("\"multiline\":true") || json.contains("\"multiline\": true"),
+        "multiline must be true on the plain_text_input element; got: {json}"
+    );
+}
+
+/// S-T1-007e — Full structure: `callback_id`, title, submit, input block, `action_id`, `block_id`,
+/// and placeholder are all present in a single modal built with representative inputs.
+#[test]
+fn instruction_modal_full_structure_comprehensive() {
+    let callback_id = "refine_prompt:xyz789";
+    let title = "Refine Instructions";
+    let placeholder = "Enter your guidance here";
+    let view = blocks::instruction_modal(callback_id, title, placeholder);
+    let json = serde_json::to_string(&view).expect("serialise SlackView");
+
+    let assertions: &[(&str, &str)] = &[
+        (callback_id, "callback_id"),
+        (title, "title"),
+        ("Submit", "submit button"),
+        ("instruction_block", "block_id"),
+        ("instruction_text", "action_id"),
+        (placeholder, "placeholder"),
+    ];
+
+    for (pattern, label) in assertions {
+        assert!(
+            json.contains(pattern),
+            "{label} ('{pattern}') must appear in modal JSON"
+        );
+    }
+}

@@ -10,12 +10,18 @@ mod unit {
     mod ask_approval_tests;
     mod audit_tests;
     mod audit_writer_tests;
+    mod blocks_approval_tests;
+    mod blocks_misc_tests;
+    mod blocks_prompt_tests;
+    mod blocks_session_tests;
+    mod blocks_stall_tests;
     mod blocks_tests;
     mod checkpoint_tests;
     mod child_monitor_tests;
     mod cli_tests;
     mod command_approve_tests;
     mod command_exec_tests;
+    mod command_routing_tests;
     mod command_tests;
     mod config_tests;
     mod correlation_id_uniqueness;
@@ -38,6 +44,7 @@ mod unit {
     mod session_routing_tests;
     mod session_status;
     mod slack_client_tests;
+    mod slack_thread_mention_routing;
     mod sse_workspace_only_routing;
     mod stall_consumer_tests;
     mod stall_detector_tests;
