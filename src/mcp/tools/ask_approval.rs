@@ -418,6 +418,8 @@ pub async fn handle(
                     .map(|ts| ts.0.clone())
                     .unwrap_or_default();
                 let authorized_user = session.owner_user_id.clone();
+                let fallback_ch = ch.clone();
+                let fallback_ts = thread_ts.clone();
 
                 let (reply_tx, reply_rx) = oneshot::channel::<String>();
                 let registered =
@@ -437,30 +439,62 @@ pub async fn handle(
                     tokio::spawn(async move {
                         let timeout =
                             Duration::from_secs(state_fb.config.timeouts.approval_seconds);
-                        if let Ok(Ok(reply_text)) = tokio::time::timeout(timeout, reply_rx).await {
-                            let decision =
-                                crate::slack::handlers::thread_reply::parse_thread_decision(
-                                    &reply_text,
-                                );
-                            let approved = decision.keyword == "approve";
-                            let reason = if decision.instruction.is_empty() {
-                                None
-                            } else {
-                                Some(decision.instruction)
-                            };
-                            if let Err(err) = state_fb
-                                .driver
-                                .resolve_clearance(&rid, approved, reason)
-                                .await
-                            {
-                                warn!(
-                                    request_id = rid,
-                                    %err,
-                                    "US17: failed to resolve clearance from thread reply"
-                                );
+                        match tokio::time::timeout(timeout, reply_rx).await {
+                            Ok(Ok(reply_text)) => {
+                                let decision =
+                                    crate::slack::handlers::thread_reply::parse_thread_decision(
+                                        &reply_text,
+                                    );
+                                match decision.keyword.as_str() {
+                                    "approve" | "reject" => {
+                                        let approved = decision.keyword == "approve";
+                                        let reason = if decision.instruction.is_empty() {
+                                            None
+                                        } else {
+                                            Some(decision.instruction)
+                                        };
+                                        if let Err(err) = state_fb
+                                            .driver
+                                            .resolve_clearance(&rid, approved, reason)
+                                            .await
+                                        {
+                                            warn!(
+                                                request_id = rid,
+                                                %err,
+                                                "US17: failed to resolve clearance from thread reply"
+                                            );
+                                        }
+                                    }
+                                    keyword => {
+                                        // Ignore non-explicit keywords (including empty → "continue").
+                                        // Leave the approval pending until an explicit approve/reject
+                                        // arrives or the main timeout fires.
+                                        warn!(
+                                            request_id = rid,
+                                            keyword,
+                                            "US17: non-explicit keyword in thread reply — expected 'approve' or 'reject', ignoring"
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(Err(_)) => {
+                                // Sender dropped (e.g., cleanup_session_fallbacks) — no-op.
+                            }
+                            Err(_elapsed) => {
+                                // Timeout — remove stale entry so future registrations
+                                // for this thread are not blocked by LC-04.
+                                state_fb
+                                    .pending_thread_replies
+                                    .lock()
+                                    .await
+                                    .remove(
+                                        &crate::slack::handlers::thread_reply::fallback_map_key(
+                                            &fallback_ch,
+                                            &fallback_ts,
+                                        ),
+                                    );
                             }
                         }
-                        // else: sender dropped or timeout.
                     });
                 }
             }

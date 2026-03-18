@@ -558,7 +558,7 @@ pub fn build_text_only_prompt(
     let label = prompt_type_label(prompt_type);
 
     let mut parts = vec![format!("{icon} *{label} Prompt*")];
-    parts.push(prompt_text.to_owned());
+    parts.push(slack_escape(prompt_text));
 
     let mut context = Vec::new();
     if let Some(secs) = elapsed_seconds {
@@ -583,7 +583,10 @@ pub fn build_text_only_prompt(
 /// Build plain-text wait message for thread-only display (US17).
 #[must_use]
 pub fn build_text_only_wait(message: &str, timeout_seconds: u64) -> String {
-    let mut parts = vec![format!("\u{23f8}\u{fe0f} *Agent Waiting*\n{message}")];
+    let mut parts = vec![format!(
+        "\u{23f8}\u{fe0f} *Agent Waiting*\n{}",
+        slack_escape(message)
+    )];
 
     if timeout_seconds > 0 {
         parts.push(format!("\u{23f1}\u{fe0f} Timeout: {timeout_seconds}s"));
@@ -623,11 +626,12 @@ pub fn build_text_only_approval(
     };
 
     let mut parts = vec![format!(
-        "{risk_icon} *Approval Request* ({risk_label})\n*{title}*"
+        "{risk_icon} *Approval Request* ({risk_label})\n*{}*",
+        slack_escape(title)
     )];
 
     if let Some(desc) = description {
-        parts.push(desc.to_owned());
+        parts.push(slack_escape(desc));
     }
 
     parts.push(format!("\u{1f4c4} `{file_path}`"));

@@ -191,6 +191,8 @@ pub async fn handle(
                     .map(|ts| ts.0.clone())
                     .unwrap_or_default();
                 let authorized_user = session.owner_user_id.clone();
+                let fallback_ch = ch.clone();
+                let fallback_ts = thread_ts.clone();
 
                 let (reply_tx, reply_rx) = oneshot::channel::<String>();
                 let registered =
@@ -230,14 +232,43 @@ pub async fn handle(
                             } else {
                                 Some(decision.instruction)
                             };
-                            // "resume" and "continue" both resolve as resumed.
-                            if let Err(err) = state_fb.driver.resolve_wait(&sid, inst).await {
-                                warn!(
-                                    session_id = sid,
-                                    %err,
-                                    "US17: failed to resolve wait from thread reply"
-                                );
+                            match decision.keyword.as_str() {
+                                "resume" | "continue" => {
+                                    if let Err(err) = state_fb.driver.resolve_wait(&sid, inst).await
+                                    {
+                                        warn!(
+                                            session_id = sid,
+                                            %err,
+                                            "US17: failed to resolve wait from thread reply"
+                                        );
+                                    }
+                                }
+                                "stop" => {
+                                    if let Err(err) = state_fb.driver.interrupt(&sid).await {
+                                        warn!(
+                                            session_id = sid,
+                                            %err,
+                                            "US17: failed to interrupt session from thread reply"
+                                        );
+                                    }
+                                }
+                                keyword => {
+                                    warn!(
+                                        session_id = sid,
+                                        keyword,
+                                        "US17: unrecognized keyword in thread reply — ignoring"
+                                    );
+                                }
                             }
+                        } else {
+                            // Timeout — remove stale entry so future registrations
+                            // for this thread are not blocked by LC-04.
+                            state_fb.pending_thread_replies.lock().await.remove(
+                                &crate::slack::handlers::thread_reply::fallback_map_key(
+                                    &fallback_ch,
+                                    &fallback_ts,
+                                ),
+                            );
                         }
                     });
                 }
