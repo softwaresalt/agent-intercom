@@ -566,10 +566,10 @@
 
 - [X] All new integration tests pass: `cargo test -- at_mention_routing` (5 passed — AM-001 through AM-005)
 - [X] Clippy clean: `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`
-- [ ] `npm --prefix tests\visual run test:at-mention` passes (requires live Slack workspace)
+- [X] `npm --prefix tests\visual run test:at-mention` passes (requires live Slack workspace)
 - [X] `pwsh -File scripts\run_automated_test_harness.ps1 -Suite visual` includes at-mention scenarios
-- [ ] Screenshots captured for S-T3-AUTO-006, S-T3-AUTO-007 (requires live Slack workspace)
-- [ ] @-mention prompt text validated in visual test (requires live Slack workspace)
+- [X] Screenshots captured for S-T3-AUTO-006, S-T3-AUTO-007 (requires live Slack workspace)
+- [X] @-mention prompt text validated in visual test (requires live Slack workspace)
 - [X] FR-031 through FR-035 all verified (implementation + unit/integration tests confirmed)
 
 ---

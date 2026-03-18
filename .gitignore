@@ -58,3 +58,7 @@ tests/visual/screenshots/*.png
 tests/visual/reports/
 tests/visual/test-results/
 tests/visual/.env
+
+# UE
+*.prj
+*.pui
