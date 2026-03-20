@@ -1,5 +1,5 @@
 ---
-description: Expert Rust software engineer specializing in the agent-intercom MCP remote agent server — inherits `speckit.implement` and provides specific overrides with idiomatic, safe, and performant Rust implementation driven by the spec task plan.
+description: Expert Rust software engineer specializing in the agent-intercom MCP remote agent server — implements features by filling in structural stubs to make compiling but failing test harnesses pass, following idiomatic, safe, and performant Rust patterns.
 tools: ['execute/runInTerminal', 'execute/getTerminalOutput', 'read', 'read/problems', 'edit/createFile', 'edit/editFiles', 'search', 'agent-intercom/*']
 user-invokable: false
 ---
@@ -230,46 +230,24 @@ All Slack-posting modules send messages through a rate-limited in-memory queue w
 
 ## Implementation Workflow
 
-This agent **inherits** and **overrides** `speckit.implement` for the agent-intercom crate. When invoked for implementation work, execute the full `speckit.implement` workflow defined in `.github/agents/speckit.implement.agent.md`, applying the Rust-specific overrides listed below. Steps not mentioned here are inherited unchanged.
+This agent implements features by filling in structural stubs to make compiling but failing test harnesses pass. When invoked for implementation work, follow the mechanical feedback loop defined in the build-feature skill (`.$GITHUB/skills/build-feature/SKILL.md`). For ad-hoc questions, fixes, or reviews, skip to the Supplemental Workflow section below.
 
-For ad-hoc questions, fixes, or reviews that do not involve the full task plan, skip to the Supplemental Workflow section at the end.
+### Step 1 — Understand the Harness
 
-### Override: Step 3 — Load Implementation Context
+Read the test file targeted by the harness command. Internalize the embedded `// GIVEN`, `// WHEN`, `// THEN` BDD comments to understand behavioral intent. Identify the `src/` stubs containing `unimplemented!()` markers.
 
-When reading spec documents from `FEATURE_DIR`, apply Rust-specific interpretation:
+### Step 2 — Implement Logic
 
-* `data-model.md` entities map to Rust structs with `#[derive(Serialize, Deserialize, Debug, Clone)]` and `#[serde(rename_all = "snake_case")]`.
-* `contracts/` JSON schemas map to MCP tool JSON-RPC request/response types validated in `tests/contract/`.
+Replace `unimplemented!()` macros with real logic following the coding standards above:
 
-### Override: Step 4 — Project Setup Verification
+* All fallible operations return `Result<T, AppError>` — never `unwrap()` or `expect()`.
+* `data-model.md` entities (if available in `specs/`) map to Rust structs with `#[derive(Serialize, Deserialize, Debug, Clone)]`.
+* Contract tests go in `tests/contract/`, integration tests in `tests/integration/`, unit tests in `tests/unit/`.
+* After each implementation pass, run `cargo check` and `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`.
 
-Replace the multi-technology ignore-file detection with Rust-only patterns:
+### Step 3 — Verify
 
-* **`.gitignore`**: Verify it contains `target/`, `debug/`, `release/`, `*.rs.bk`, `*.rlib`, `*.prof*`, `.idea/`, `*.log`, `.env*`, plus universal patterns (`.DS_Store`, `Thumbs.db`, `*.tmp`, `*.swp`).
-* **`.dockerignore`** (if Dockerfile exists or Docker appears in plan.md): Verify it contains `target/`, `.git/`, `*.log*`, `.env*`.
-* Skip all non-Rust technology patterns (Node.js, Python, Java, C#, Go, etc.).
-* Append missing critical patterns to existing ignore files; create new ones only when absent.
-
-### Override: Step 6 — Execute Implementation
-
-Apply all `speckit.implement` execution rules (phase-by-phase, dependency ordering, TDD, file-based coordination, parallel `[P]` handling) with these Rust-specific additions:
-
-* **Validation checkpoints**: After each phase, run `cargo check` and `cargo clippy -- -D warnings -D clippy::pedantic`. Fix any issues before proceeding to the next phase.
-* **TDD locations**: Contract tests go in `tests/contract/`, integration tests in `tests/integration/`, unit tests in `tests/unit/`. Never use inline `#[cfg(test)]` modules unless testing private functions.
-* **Rust-specific phase ordering**:
-  1. Setup — `Cargo.toml` dependencies, module declarations, `mod.rs` files
-  2. Tests — contract, integration, and unit test scaffolds (failing stubs)
-  3. Core — domain models, error types, service logic
-  4. Integration — database repos, Slack client, MCP server handler wiring
-  5. Polish — doc comments, `cargo fmt`, final `cargo test` pass
-* All generated code must conform to the Coding Standards and Core Principles defined in this agent.
-
-### Override: Step 9 — Completion Validation
-
-Extend the base completion validation with Rust toolchain gates:
-
-* Run `cargo check`, `cargo clippy -- -D warnings -D clippy::pedantic`, and `cargo test` as final verification.
-* Confirm all clippy lints pass without suppression (unless explicitly allowed at the crate level).
+Run the harness command. If it fails, analyze the error output and fix. Do not modify the test file unless fixing a compilation error in the test setup.
 
 ### Supplemental Workflow
 

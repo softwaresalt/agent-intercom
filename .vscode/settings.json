@@ -8,16 +8,9 @@
     }
   },
   "chat.promptFilesRecommendations": {
-    "build-orchestrator": true,
-    "speckit.constitution": true,
-    "speckit.implement": true,
-    "speckit.plan": true,
-    "speckit.specify": true,
-    "speckit.tasks": true
+    "build-orchestrator": true
   },
   "chat.tools.terminal.autoApprove": {
-    ".specify/scripts/bash/": true,
-    ".specify/scripts/powershell/": true,
     "/^(Out-File|Set-Content|Add-Content|Get-Content|Get-ChildItem|Copy-Item|Move-Item|New-Item|Test-Path)(\\s[^;|&`]*)?$/": {
       "approve": true,
       "matchCommandLine": true
@@ -42,11 +35,12 @@
       "approve": true,
       "matchCommandLine": true
     },
-    "/^pwsh -File \"\\.specify/scripts/powershell/check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks$/": {
+
+    "/^pwsh -File \"lib/hve-core/scripts/powershell/check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks$/": {
       "approve": true,
       "matchCommandLine": true
     },
-    "/^pwsh -File \"lib/hve-core/scripts/powershell/check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks$/": {
+    "/^bd (ready|create|update|close|show|list|stats|context|reopen|blocked|dep|claim|discover_tools|get_tool_info|admin|dolt)(\\s[^;|&`]*)?$/": {
       "approve": true,
       "matchCommandLine": true
     },

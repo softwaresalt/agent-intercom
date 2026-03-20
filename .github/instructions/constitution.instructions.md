@@ -170,14 +170,14 @@ critical resources.
 
 ## Development Workflow
 
-1. **Feature specs first**: Every feature MUST have a specification
-   in `specs/###-feature-name/spec.md` before implementation begins.
-2. **Plan before code**: Implementation plans MUST be generated via
-   the speckit workflow (`spec → plan → tasks`) and stored alongside
-   the spec.
+1. **Harness before code**: Every feature MUST have a compiling but
+   failing BDD test harness before implementation begins. The
+   Harness Architect generates test files and structural stubs.
+2. **Beads-driven planning**: All task tracking MUST use Beads
+   (`bd ready`, `bd create`, `bd update`, `bd close`). Static
+   markdown task lists are not permitted.
 3. **Branch per feature**: Each feature MUST be developed on a
-   dedicated branch matching the spec directory name
-   (e.g., `001-mcp-remote-agent-server`).
+   dedicated branch.
 4. **Contract-first design**: MCP tool schemas and data models MUST
    be defined in contract documents before implementation. Changes
    to contracts require updating corresponding contract tests.

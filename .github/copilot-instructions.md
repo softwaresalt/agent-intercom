@@ -3,8 +3,16 @@ description: Shared agent-intercom development guidelines for custom agents.
 ---
 # agent-intercom Development Guidelines
 
-Last updated: 2026-02-28
+Last updated: 2026-03-18
 
+## Issue Tracking
+This project uses **bd (beads)** for issue tracking.
+Run `bd prime` for workflow context.
+**Quick reference:**
+- `bd ready` - Find unblocked work
+- `bd create "Title" --type task --priority 2` - Create issue
+- `bd close <id>` - Complete work
+- `bd dolt push` - Push changes to remote (run at session end)
 ## Active Technologies
 
 | Dependency | Version | Purpose |
@@ -121,7 +129,7 @@ All code must compile without errors. Run after every meaningful edit.
 ### Gate 2 — Lint Compliance
 
 ```powershell
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings -D clippy::pedantic
 ```
 
 The workspace sets `clippy::pedantic = "deny"`, `clippy::unwrap_used = "deny"`, and `clippy::expect_used = "deny"` via `[workspace.lints.clippy]` in `Cargo.toml`. Zero warnings allowed.
@@ -442,8 +450,7 @@ cargo test | Select-String "FAILED" | Remove-Item foo.txt
 
 ```json
 "chat.tools.terminal.autoApprove": {
-    ".specify/scripts/bash/": true,
-    ".specify/scripts/powershell/": true,
+    ".engram/": true,
     "/^cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
         "approve": true,
         "matchCommandLine": true
@@ -478,16 +485,7 @@ cargo test | Select-String "FAILED" | Remove-Item foo.txt
     },
     "New-Item": true,
     "Out-Null": true,
-    "cargo build": true,
-    "cargo check": true,
-    "cargo doc": true,
-    "cargo test": true,
-    "git commit": true,
-    "ForEach-Object": true,
-    "cargo clippy": true,
-    "cargo fmt": true,
-    "git add": true,
-    "git push": true
+    "ForEach-Object": true
 }
 ```
 <!-- MANUAL ADDITIONS END -->
