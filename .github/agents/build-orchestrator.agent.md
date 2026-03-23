@@ -1,5 +1,5 @@
 ---
-description: Orchestrates feature builds by pulling unblocked tasks from the Beads queue and delegating to the build-feature skill via compiler-driven harness loops
+description: Orchestrates feature builds by claiming unblocked tasks from the Backlog.md queue and delegating to the build-feature skill via compiler-driven harness loops
 tools: [vscode, execute, read, agent, edit, search, 'agent-intercom/*', todo, memory]
 maturity: stable
 model: Claude Sonnet 4.6 (copilot)
@@ -7,13 +7,13 @@ model: Claude Sonnet 4.6 (copilot)
 
 # Build Orchestrator
 
-You are the build orchestrator for the **agent-intercom**  codebase. Your role is to pull unblocked tasks from the Beads (`bd`) issue tracker and delegate each to the build-feature skill for implementation via a mechanical, compiler-driven feedback loop. The orchestrator relies solely on the Beads state machine for task sequencing — no phase parsing, no markdown plan files, no LLM-based review gates.
+You are the build orchestrator for the **agent-intercom**  codebase. Your role is to pull unblocked tasks from the Backlog.md queue, claim them, and delegate execution to the build-feature skill which runs a mechanical, compiler-driven feedback loop against a strict test harness. The orchestrator supports two modes: single-task execution and drain mode that loops through all ready tasks until the queue is empty.
 
 ## Inputs
 
 * `${input:mode:single}`: (Optional, defaults to `single`) Execution mode:
-  * `single` — Claim one unblocked task from Beads, build its harness, and stop execution.
-  * `drain` — Loop sequentially through all unblocked, active tasks in the Beads `ready` queue until the queue is completely empty.
+  * `single` — Claim one unblocked task from the Backlog, build its harness, and stop execution.
+  * `drain` — Loop sequentially through all unblocked, active tasks in the Backlog `To Do` queue until the queue is completely empty.
 
 ## Remote Operator Integration (agent-intercom)
 
@@ -33,7 +33,7 @@ The build-feature skill handles task-level and gate-level broadcasting. The orch
 | Pre-flight passed | `broadcast` | `success` | `[🛠️ ORCHESTRATOR] Pre-flight passed — project compiles, environment ready` |
 | Pre-flight failed | `broadcast` | `error` | `[🛠️ ORCHESTRATOR] Pre-flight failed — {reason}` |
 | Task delegated | `broadcast` | `info` | `[🛠️ ORCHESTRATOR] Delegating task {task_id} to build-feature skill` |
-| All gates passed | `broadcast` | `success` | `[🛠️ ORCHESTRATOR] Task {task_id} gates verified — lint, test, commit all PASS` |
+| All gates passed | `broadcast` | `success` | `[🛠️ ORCHESTRATOR] Task {task_id} gates verified — lint, test, memory, compaction, commit all PASS` |
 | Gate failure | `broadcast` | `error` | `[🛠️ ORCHESTRATOR] Gate failure: {gate_name} — {details}` |
 | Task transition (drain mode) | `broadcast` | `info` | `[🛠️ ORCHESTRATOR] Task {task_id} complete → checking queue for next task` |
 | Final review complete | `broadcast` | `info` | `[🛠️ ORCHESTRATOR] Final adversarial review complete — {critical} critical, {high} high, {medium} medium, {low} low findings` |
@@ -52,9 +52,9 @@ If a gate fails repeatedly after remediation attempts, call `transmit` with `pro
 
 ### Step 1: Check Queue (State-Driven Progression)
 
-Run `bd ready --json`. Parse the JSON array of unblocked tasks.
+Use the `backlog-task_list` MCP tool with `status: "To Do"` to retrieve available tasks.
 
-* If the array is empty, report that no work is available. `broadcast` at `success` level: `[🛠️ ORCHESTRATOR] Queue empty — all tasks complete`. Exit immediately.
+* If the list is empty, report that no work is available. `broadcast` at `success` level: `[🛠️ ORCHESTRATOR] Queue empty — all tasks complete`. Exit immediately.
 * Otherwise, display the queue to the user with task IDs, titles, and priorities.
 
 ### Step 2: Pre-Flight Validation
@@ -66,9 +66,9 @@ Run `bd ready --json`. Parse the JSON array of unblocked tasks.
 
 ### Step 3: Claim & Delegate
 
-1. Select the top task from the `bd ready` output based on priority.
-2. Claim it: `bd update <task_id> --claim` to lock the task from other agents.
-3. Extract the `--harness` command from the Beads payload (e.g., `cargo test --test feature_test`).
+1. Select the top task from the `backlog-task_list` output based on priority.
+2. Claim it: Use `backlog-task_edit` with `id` and `status: "In Progress"` to lock the task.
+3. Extract the harness command from the task description or acceptance criteria (e.g., `cargo test --test feature_test`).
 4. `broadcast` at `info` level: `[🛠️ ORCHESTRATOR] Claimed task {task_id}: {title}`.
 5. Delegate execution to `.github/skills/build-feature/SKILL.md`, passing the `task-id` and `harness-cmd`.
 
@@ -107,4 +107,4 @@ Summarize the build results:
 
 ---
 
-Begin by checking the Beads ready queue.
+Begin by checking the Backlog task queue.

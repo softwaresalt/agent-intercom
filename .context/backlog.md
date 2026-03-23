@@ -5,6 +5,7 @@ Features are sized for 1–3 day build cycles. Each feature should be independen
 ---
 
 - I think we need to address long running server reliability for both modes.
+- We also need, I think, a shim to enable copilot CLI to talk to agent-intercom since the CLI only supports stdio.
 
 ## 006 — ACP Event Handler Wiring
 

@@ -6,13 +6,13 @@ description: Shared agent-intercom development guidelines for custom agents.
 Last updated: 2026-03-18
 
 ## Issue Tracking
-This project uses **bd (beads)** for issue tracking.
-Run `bd prime` for workflow context.
-**Quick reference:**
-- `bd ready` - Find unblocked work
-- `bd create "Title" --type task --priority 2` - Create issue
-- `bd close <id>` - Complete work
-- `bd dolt push` - Push changes to remote (run at session end)
+This project uses **Backlog.md** for issue tracking via the Backlog MCP server.
+**Quick reference (MCP tools):**
+- `backlog-task_list` (status: "To Do") - Find available work
+- `backlog-task_create` - Create a task
+- `backlog-task_edit` (id, status: "Done") - Update task status
+- `backlog-task_complete` (id) - Complete a task
+- `backlog-task_search` (query) - Search tasks
 ## Active Technologies
 
 | Dependency | Version | Purpose |
@@ -168,7 +168,10 @@ Never write production code before the corresponding test exists and has been ob
 
 ### Crate-Level Attributes
 
-* `#![forbid(unsafe_code)]` — no unsafe anywhere (both `src/main.rs` and `ctl/main.rs`)
+* `#![forbid(unsafe_code)]` — no unsafe anywhere
+* `#![warn(clippy::pedantic)]` — pedantic lints enabled
+* `#![allow(clippy::missing_errors_doc)]`, `clippy::missing_panics_doc`, `clippy::module_name_repetitions` — suppressed for ergonomics
+* `.cargo/config.toml` sets `rustflags = ["-Dwarnings"]` globally
 * `[workspace.lints.rust]`: `unsafe_code = "deny"`, `missing_docs = "warn"`
 * `[workspace.lints.clippy]`: `pedantic = "deny"`, `unwrap_used = "deny"`, `expect_used = "deny"`
 
@@ -487,5 +490,19 @@ cargo test | Select-String "FAILED" | Remove-Item foo.txt
     "Out-Null": true,
     "ForEach-Object": true
 }
-```
+## MCP Server Registry
+The workspace uses multiple MCP servers with distinct responsibilities. Never call a tool on the wrong server — VS Code pre-registers them, but the agent must know which tool lives where.
+### `agent-engram` tools (Slack relay)
+| Tool | Purpose |
+|------|---------|
+| `ask_approval` | Submit a code diff for remote operator approval; blocks until approved/rejected |
+| `accept_diff` | Apply a previously approved diff to the local filesystem |
+| `check_auto_approve` | Query workspace auto-approve policy before asking for remote approval |
+| `forward_prompt` | Forward a continuation or clarification prompt to the operator via Slack |
+| `remote_log` | Send a non-blocking status message to the Slack channel |
+| `recover_state` | Retrieve last known session state from persistent storage |
+| `set_operational_mode` | Switch between `remote`, `local`, and `hybrid` modes at runtime |
+| `wait_for_instruction` | Place the agent in standby, polling for a resume signal from the operator |
+| `heartbeat` | Liveness signal; resets stall detection timer with optional progress snapshot |
+
 <!-- MANUAL ADDITIONS END -->

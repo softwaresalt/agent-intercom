@@ -40,10 +40,6 @@
       "approve": true,
       "matchCommandLine": true
     },
-    "/^bd (ready|create|update|close|show|list|stats|context|reopen|blocked|dep|claim|discover_tools|get_tool_info|admin|dolt)(\\s[^;|&`]*)?$/": {
-      "approve": true,
-      "matchCommandLine": true
-    },
     "Out-Null": true,
     "^gh(\\s[^;|&`]*)?$": {
       "approve": true,

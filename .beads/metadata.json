@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "server",
-  "dolt_database": "agent_intercom",
-  "project_id": "50e0ae95-e46f-4373-a294-1bc2eda38024"
-}

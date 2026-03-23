@@ -173,8 +173,9 @@ critical resources.
 1. **Harness before code**: Every feature MUST have a compiling but
    failing BDD test harness before implementation begins. The
    Harness Architect generates test files and structural stubs.
-2. **Beads-driven planning**: All task tracking MUST use Beads
-   (`bd ready`, `bd create`, `bd update`, `bd close`). Static
+2. **Backlog-driven planning**: All task tracking MUST use
+   Backlog.md via the Backlog MCP server (`task_list`,
+   `task_create`, `task_edit`, `task_complete`). Static
    markdown task lists are not permitted.
 3. **Branch per feature**: Each feature MUST be developed on a
    dedicated branch.

@@ -1,4 +1,4 @@
-# agent-intercom — Agent Instructions
+# Agent Instructions
 
 This file is read automatically by `copilot` CLI and other agent tools that
 support `AGENTS.md`. It defines the authoritative rules for working in this
@@ -88,6 +88,12 @@ other permissive mode. A terminal command is destructive if it:
 Required workflow: `auto_check` → `check_clearance` → execute only after
 `status: "approved"`. Permissive flags do NOT bypass this gate.
 
+This project uses **Backlog.md** for issue tracking via the Backlog MCP server.
+## Quick Reference (MCP Tools)
+- `backlog-task_list` (status: "To Do") — Find available work
+- `backlog-task_view` (id) — View task details
+- `backlog-task_edit` (id, status: "In Progress") — Claim work
+- `backlog-task_complete` (id) — Complete work
 ---
 
 ## Technical Constraints
@@ -228,7 +234,7 @@ cargo test 2>&1 | Out-File logs\test-results.txt
 ### Naming
 
 - Module files: `src/{module}/mod.rs` pattern for directories
-- Struct IDs: prefixed strings (`task:uuid`, `context:uuid`, `spec:uuid`)
+- Struct IDs: prefixed strings (`task:uuid`, `context:uuid`)
 - Status values: `snake_case` (`todo`, `in_progress`, `done`, `blocked`)
 - Default visibility: `pub(crate)` unless the item needs to be public API
 
@@ -274,9 +280,31 @@ cargo test 2>&1 | Out-File logs\test-results.txt
 ### Testing
 
 - TDD required: write tests first, verify they fail, then implement
-- Three test tiers in `tests/` directory (not inline)
-- Test DB: always use in-memory SQLite (`":memory:"`)
+- Three test tiers in `tests/` directory (not inline):
+  - `unit/` — isolated logic tests
+  - `contract/` — MCP tool response contract verification
+  - `integration/` — end-to-end flows with real SSE/DB
+- Test DB: always use in-memory SurrealDB
 - Use `serial_test` crate for tests requiring sequential execution
+
+---
+## Development Workflow
+1. **Harness before code**: Every feature MUST have a compiling but
+   failing BDD test harness before implementation begins. The
+   Harness Architect generates test files and structural stubs.
+2. **Backlog-driven planning**: All task tracking MUST use
+   Backlog.md via the Backlog MCP server (`task_list`,
+   `task_create`, `task_edit`, `task_complete`). Static
+   markdown task lists are not permitted.
+3. **Branch per feature**: Each feature MUST be developed on a
+   dedicated branch.
+4. **Contract-first design**: MCP tool schemas defined before implementation.
+   Changes to contracts require updating corresponding contract tests.
+5. **Commit discipline**: Each commit MUST be coherent and buildable.
+   Commit messages follow conventional commits format
+   (`feat:`, `fix:`, `docs:`, `test:`).
+6. **No dead code**: Placeholder modules MUST be replaced or removed before
+   a feature is considered complete.
 
 ---
 
@@ -288,7 +316,7 @@ directory removal, permanent content removal).
 
 ### Required Call Sequence
 
-```
+```text
 1. auto_check      → Is this auto-approved by workspace policy?
 2. check_clearance → Submit proposal; blocks until operator responds via Slack
 3. check_diff      → Execute only after status: "approved"
@@ -356,8 +384,9 @@ cargo test 2>&1 | Out-File target\out.txt   # wrong output dir — forbidden
 1. **Harness before code**: Every feature MUST have a compiling but
    failing BDD test harness before implementation begins. The
    Harness Architect generates test files and structural stubs.
-2. **Beads-driven planning**: All task tracking MUST use Beads
-   (`bd ready`, `bd create`, `bd update`, `bd close`). Static
+2. **Backlog-driven planning**: All task tracking MUST use
+   Backlog.md via the Backlog MCP server (`task_list`,
+   `task_create`, `task_edit`, `task_complete`). Static
    markdown task lists are not permitted.
 3. **Branch per feature**: Each feature MUST be developed on a
    dedicated branch.
@@ -369,90 +398,74 @@ cargo test 2>&1 | Out-File target\out.txt   # wrong output dir — forbidden
 6. **No dead code**: Placeholder modules MUST be replaced or removed before
    a feature is considered complete.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:d4f96305 -->
-## Issue Tracking with bd (beads)
+## Issue Tracking with Backlog.md
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+**IMPORTANT**: This project uses **Backlog.md** (via the Backlog MCP server) for ALL issue tracking. Do NOT use markdown TODOs, inline task lists, or other tracking methods.
 
-### Why bd?
+### Why Backlog.md?
 
-- Dependency-aware: Track blockers and relationships between issues
-- Git-friendly: Dolt-powered version control with native sync
-- Agent-optimized: JSON output, ready work detection, discovered-from links
+- Dependency-aware: Track blockers and relationships between tasks
+- MCP-native: Operates as an MCP server with structured tool calls
+- Agent-optimized: Milestone tracking, acceptance criteria, definition of done
 - Prevents duplicate tracking systems and confusion
 
-### Quick Start
+### Quick Start (MCP Tools)
 
-**Check for ready work:**
+**Find available work:**
 
-```bash
-bd ready --json
-```
+Use `backlog-task_list` with `status: "To Do"` to find tasks ready for work.
 
-**Create new issues:**
+**Create new tasks:**
 
-```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
-```
+Use `backlog-task_create` with `title`, `description`, `priority`, and optional `dependencies`.
 
 **Claim and update:**
 
-```bash
-bd update <id> --claim --json
-bd update bd-42 --priority 1 --json
-```
+Use `backlog-task_edit` with `id` and `status: "In Progress"` to claim a task.
 
 **Complete work:**
 
-```bash
-bd close bd-42 --reason "Completed" --json
-```
+Use `backlog-task_complete` with `id` to mark a task as done.
 
-### Issue Types
+### Task Statuses
 
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
+- `Draft` — Not yet ready for work
+- `To Do` — Ready and available
+- `In Progress` — Actively being worked on
+- `Done` — Completed
 
 ### Priorities
 
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
+- `high` — Critical work (security, data loss, broken builds, major features)
+- `medium` — Default priority (standard work items)
+- `low` — Polish, optimization, future ideas
 
 ### Workflow for AI Agents
 
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task atomically**: `bd update <id> --claim`
+1. **Check available work**: `backlog-task_list` with `status: "To Do"`
+2. **Claim your task**: `backlog-task_edit` with `status: "In Progress"`
 3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
+4. **Discover new work?** Create linked task:
+   - `backlog-task_create` with `title`, `description`, and `dependencies`
+5. **Complete**: `backlog-task_complete` with the task `id`
 
-### Auto-Sync
+### Additional Capabilities
 
-bd automatically syncs via Dolt:
-
-- Each write auto-commits to Dolt history
-- Use `bd dolt push`/`bd dolt pull` for remote sync
-- No manual export/import needed!
+- **Search tasks**: `backlog-task_search` with a query string
+- **View task details**: `backlog-task_view` with a task `id`
+- **Milestones**: `backlog-milestone_list`, `backlog-milestone_add`
+- **Documents**: `backlog-document_create`, `backlog-document_search`
+- **Definition of Done**: `backlog-definition_of_done_defaults_get`
 
 ### Important Rules
 
-- ✅ Use bd for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
+- ✅ Use Backlog.md MCP tools for ALL task tracking
+- ✅ Set task status to "In Progress" before starting work
+- ✅ Link discovered work with `dependencies`
+- ✅ Check `backlog-task_list` (status: "To Do") before asking "what should I work on?"
 - ❌ Do NOT create markdown TODO lists
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
-
-For more details, see README.md and docs/QUICKSTART.md.
 
 ## Landing the Plane (Session Completion)
 
@@ -460,13 +473,12 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 **MANDATORY WORKFLOW:**
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **File issues for remaining work** - Create tasks for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
+3. **Update issue status** - Complete finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd dolt push
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -481,3 +493,32 @@ For more details, see README.md and docs/QUICKSTART.md.
 - If push fails, resolve and retry until it succeeds
 
 <!-- END BEADS INTEGRATION -->
+
+<!-- BACKLOG.MD MCP GUIDELINES START -->
+
+<CRITICAL_INSTRUCTION>
+
+## BACKLOG WORKFLOW INSTRUCTIONS
+
+This project uses Backlog.md MCP for all task and project management activities.
+
+**CRITICAL GUIDANCE**
+
+- If your client supports MCP resources, read `backlog://workflow/overview` to understand when and how to use Backlog for this project.
+- If your client only supports tools or the above request fails, call `backlog.get_workflow_overview()` tool to load the tool-oriented overview (it lists the matching guide tools).
+
+- **First time working here?** Read the overview resource IMMEDIATELY to learn the workflow
+- **Already familiar?** You should have the overview cached ("## Backlog.md Overview (MCP)")
+- **When to read it**: BEFORE creating tasks, or when you're unsure whether to track work
+
+These guides cover:
+- Decision framework for when to create tasks
+- Search-first workflow to avoid duplicates
+- Links to detailed guides for task creation, execution, and finalization
+- MCP tools reference
+
+You MUST read the overview resource to understand the complete workflow. The information is NOT summarized here.
+
+</CRITICAL_INSTRUCTION>
+
+<!-- BACKLOG.MD MCP GUIDELINES END -->

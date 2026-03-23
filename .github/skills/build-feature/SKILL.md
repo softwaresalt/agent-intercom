@@ -1,13 +1,13 @@
 ---
 name: build-feature
-description: "Implements a requested feature by continuously looping a fast worker agent against a strict, compiling, but failing test harness until success is achieved."
+description: "Usage: Build feature {task-id} with harness {harness-cmd}. Implements a requested feature by continuously looping a fast worker agent against a strict, compiling, but failing test harness until success is achieved."
 version: 2.0
 maturity: stable
 input:
   properties:
     task-id:
       type: string
-      description: "The unique Beads task ID."
+      description: "The unique Backlog task ID."
     harness-cmd:
       type: string
       description: "The cargo test command defining the strict compiler harness boundary."
@@ -68,9 +68,8 @@ For **destructive operations** (file deletion, directory removal), route through
 
 1. Read the test file targeted by `${input:harness-cmd}`. Carefully read the embedded `// GIVEN`, `// WHEN`, `// THEN` BDD comments to fully internalize the human intent behind the test.
 2. Identify the domain structs, functions, and traits referenced in the test to locate the corresponding `src/` stubs containing `unimplemented!()` markers.
-3. Read the `src/` stub files to understand the exact function signatures, types, and module boundaries that the worker must implement within.
-4. Read `.github/copilot-instructions.md` and `.github/agents/rust-engineer.agent.md` for project coding standards and Rust-specific conventions.
-5. `broadcast` at `info` level: `[BUILD] Starting task {task-id}: {harness-cmd}` with a summary of the test scenarios and stub files.
+3. Read `.github/copilot-instructions.md` and `.github/agents/rust-engineer.agent.md` for project coding standards and Rust-specific conventions.
+4. `broadcast` at `info` level: `[BUILD] Starting task {task-id}: {harness-cmd}` with a summary of the test scenarios and stub files.
 
 ### Step 2: Mechanical Feedback Loop (Actor-Critic)
 
@@ -96,7 +95,7 @@ Execute the following loop with a **hard limit of 5 attempts**:
 
 4. **Circuit breaker**: If 5 attempts are exhausted without the harness passing:
    * `broadcast` at `error` level: `[BUILD] Circuit breaker — 5 attempts exhausted, task blocked`.
-   * Run `bd update ${input:task-id} --status blocked` to mark the task as blocked for human review.
+   * Use `backlog-task_edit` with `id: ${input:task-id}` and `status: "To Do"` to return the task for human review.
    * Halt execution. Do not retry automatically.
 
 ### Step 3: Verification & State Update
@@ -106,13 +105,20 @@ Once the isolated harness passes:
 1. **Workspace verification**: Run `cargo test` to verify no existing peripheral tests were broken.
    * If new failures appear, diagnose and fix them. Re-run until the full workspace test suite passes.
    * `broadcast` at `success` level: `[BUILD] Workspace tests pass — task {task-id} complete`.
-
 2. **Lint verification**: Run `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`. Fix any violations.
-
 3. **Commit**: Stage and commit validated changes:
    * `git add -A`
    * `git commit -m "feat: implement passing harness for ${input:task-id}"`
    * `broadcast` at `success` level: `[BUILD] Task {task-id} complete — commit {short_hash}`.
+4. **State update**: Mark the task complete in the Backlog:
+   * Use `backlog-task_complete` with `id: ${input:task-id}`.
 
-4. **State update**: Mark the task complete in Beads:
-   * `bd close ${input:task-id} --reason "Harness passes, workspace tests green"`
+## Troubleshooting
+
+
+### Tests pass locally but fail in CI
+Verify `rust-toolchain.toml` matches the CI configuration in `.github/workflows/ci.yml`. Check that the `[[test]]` entries in `Cargo.toml` include all external test files.
+### Circuit breaker triggered (5 failed attempts)
+When the 5-attempt hard limit is reached, the task is returned to the backlog for human review. Review the `stderr` output from each attempt to identify the root cause. Common issues include missing trait implementations, incorrect type signatures in stubs, or test assumptions that conflict with the codebase architecture.
+---
+Proceed by reading the harness test file and isolating context for the given task.
