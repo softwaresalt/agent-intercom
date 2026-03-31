@@ -1,0 +1,446 @@
+---
+id: TASK-007
+title: "ACP Correctness & Mobile"
+status: Done
+priority: medium
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - feature
+dependencies: []
+ordinal: 7000
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+# Feature Specification: ACP Correctness Fixes and Mobile Operator Accessibility
+
+**Feature Branch**: `007-acp-correctness-mobile`
+**Created**: 2026-03-08
+**Status**: Draft
+**Input**: ACP Correctness Fixes and Mobile Input Accessibility: Fix 6 targeted ACP correctness issues identified in adversarial review, plus research and conditionally implement mobile-accessible alternatives to Slack modal dialogs for operator input on iOS.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 — Reliable Operator Steering Delivery (Priority: P1)
+
+An operator is guiding an active ACP agent session by sending steering instructions through Slack. The operator expects that if a steering message fails to reach the agent, it will remain queued and be retried automatically rather than silently disappearing. Operators should never lose steering input due to a transient delivery error.
+
+**Why this priority**: Silent loss of steering instructions is a data integrity failure. Operators directing long-running autonomous agents rely on every instruction reaching the agent — a silently dropped instruction can cause the agent to take incorrect actions with no way for the operator to know their guidance was never received.
+
+**Independent Test**: Can be fully tested by simulating a steering delivery failure and verifying the message remains available in the queue, then succeeds on the next delivery attempt.
+
+**Acceptance Scenarios**:
+
+1. **Given** a queued steering message for an active session, **When** the message is successfully delivered to the agent, **Then** the message is marked as consumed and removed from the queue.
+2. **Given** a queued steering message for an active session, **When** delivery fails due to a transient error, **Then** the message remains in the queue with its unconsumed status preserved and is eligible for retry on the next delivery cycle.
+3. **Given** multiple queued steering messages, **When** one message fails delivery, **Then** only that message remains unconsumed; successfully delivered messages are correctly marked consumed.
+
+---
+
+### User Story 2 — Accurate ACP Session Capacity Enforcement (Priority: P1)
+
+An operator attempts to start a new ACP agent session when the configured maximum number of concurrent sessions is already active or being initialized. The system must accurately count all sessions (including those that are in the process of starting) against the configured limit and reject new requests when the limit is reached, preventing resource exhaustion.
+
+**Why this priority**: Incorrect capacity counting allows more sessions to start than the system is configured to handle, causing resource exhaustion, degraded performance, and unpredictable behavior in a server that manages multiple simultaneous autonomous agents. Each ACP session quota must apply only to ACP sessions, not to unrelated connection types.
+
+**Independent Test**: Can be fully tested by starting sessions up to the configured maximum and verifying that attempts to start additional sessions are rejected with a clear capacity error, including when sessions are in the process of being established.
+
+**Acceptance Scenarios**:
+
+1. **Given** the ACP session limit is set to N, **When** exactly N active or initializing ACP sessions exist, **Then** attempts to start an additional ACP session are rejected with a capacity-exceeded message.
+2. **Given** a mix of ACP and non-ACP connections, **When** the capacity check runs, **Then** only ACP sessions count toward the ACP session limit.
+3. **Given** a session that is in the `created` (initializing) state, **When** the capacity check runs, **Then** the initializing session is included in the session count.
+4. **Given** a session is terminated, **When** the capacity check runs afterward, **Then** the slot is available for a new session.
+
+---
+
+### User Story 3 — Live Workspace Routing for New ACP Sessions (Priority: P1)
+
+When an operator starts a new ACP agent session from Slack, the system determines which workspace directory the agent should operate in based on the current channel-to-workspace mappings. These mappings are updated by the server administrator without restarting the server. The system must always use the current, live mappings rather than the snapshot loaded at startup.
+
+**Why this priority**: Using stale workspace mappings causes sessions to operate in the wrong directory, which can cause agents to read and modify files in an unintended workspace. This is a data safety issue with potential for accidental data corruption in adjacent projects.
+
+**Independent Test**: Can be fully tested by updating the workspace mapping configuration, starting a new ACP session without restarting the server, and verifying the session uses the updated mapping.
+
+**Acceptance Scenarios**:
+
+1. **Given** a channel-to-workspace mapping is updated in the configuration, **When** an operator starts a new ACP session in that channel, **Then** the session is initialized with the workspace root from the updated mapping, not the startup snapshot.
+2. **Given** no mapping exists for a channel, **When** an operator starts a new ACP session in that channel, **Then** the system falls back to the default workspace root from global configuration.
+3. **Given** a mapping is removed from the configuration, **When** a session start is attempted in the now-unmapped channel, **Then** the session falls back to the global default workspace.
+
+---
+
+### User Story 4 — Mobile Operator Approval Workflow (Priority: P2)
+
+An operator is away from their desktop and receives a Slack notification that an ACP agent is requesting approval for a file operation or needs guidance to continue. The operator opens Slack on their iOS device and needs to approve, reject, or provide instructions. The approval and prompt response flows must work completely on mobile, including any input required from the operator.
+
+**Why this priority**: The primary value proposition of agent-intercom is enabling remote operator control of autonomous agents. If the operator cannot respond to agent requests from a mobile device, they are effectively unable to oversee running agents while away from a desktop, which defeats the remote management scenario.
+
+**Independent Test**: Can be fully tested by triggering an ACP clearance request and a continuation prompt, then responding to both using only the Slack iOS app — including any text input required for a "Refine" response.
+
+**Acceptance Scenarios**:
+
+1. **Given** an ACP agent sends a clearance request, **When** the operator views the approval message on Slack iOS, **Then** the operator can tap Accept or Reject and the agent receives the decision.
+2. **Given** an ACP agent sends a continuation prompt, **When** the operator views the prompt message on Slack iOS, **Then** the operator can tap Continue or Stop and the agent receives the decision.
+3. **Given** an ACP agent sends a continuation prompt requiring operator guidance text, **When** the operator taps Refine on Slack iOS, **Then** the operator can provide text input and the agent receives the guidance.
+4. **Given** a text input interaction that uses Slack modal dialogs, **When** the interaction is triggered on Slack iOS and modals are not supported, **Then** the system automatically falls back to a thread-reply input mechanism that is fully functional on mobile.
+5. **Given** a thread-reply fallback is active, **When** the operator replies in the session thread with their guidance, **Then** the system detects the reply, routes it to the waiting agent interaction, and confirms receipt in the thread.
+
+---
+
+### User Story 5 — Protocol Hygiene and Connection Safety (Priority: P2)
+
+Server administrators and connected agents operate with confidence that the system provides clear warnings when ambiguous or conflicting configuration is detected, and that internal identifiers are reliably unique so that messages are never misrouted between concurrent agent sessions.
+
+**Why this priority**: Silent ambiguity in connection configuration leads to unpredictable routing behavior that is difficult to diagnose. Identifier collisions cause agent messages to be delivered to the wrong session or silently lost, which is a correctness failure in a system managing concurrent autonomous agents.
+
+**Independent Test**: Can be fully tested by providing conflicting connection parameters and verifying a deprecation warning is returned, and by running concurrent sessions and verifying prompt correlation IDs never collide.
+
+**Acceptance Scenarios**:
+
+1. **Given** a connection request provides a `channel_id` query parameter (with or without `workspace_id`), **When** the connection is established, **Then** the `channel_id` parameter is silently ignored and only `workspace_id` is used for routing.
+2. **Given** multiple concurrent ACP sessions are active, **When** each session exchanges prompt messages with the server, **Then** no two sessions share a prompt correlation identifier, and responses are always delivered to the correct session.
+3. **Given** the server restarts and ACP sessions reconnect, **When** prompt exchanges resume, **Then** new correlation IDs do not collide with IDs that may have been used in the previous server instance.
+
+---
+
+### Edge Cases
+
+- What happens when a steering message is retried but the session has since terminated?
+- What happens when the workspace mapping configuration file is temporarily unavailable during a session start?
+- What happens if a thread-reply fallback is active and the operator sends multiple replies before the system processes the first?
+- What happens when the mobile fallback is triggered but the session thread has been deleted or archived in Slack?
+- What happens when capacity is at the limit but a session transitions from `created` to `active` concurrently with a new session start request?
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: System MUST only mark a steering message as consumed after it has been successfully delivered to the target agent session.
+- **FR-002**: System MUST preserve unconsumed steering messages in the queue when delivery fails, making them available for subsequent delivery attempts.
+- **FR-003**: System MUST count sessions in the `created` (initializing) state against the ACP concurrent session limit.
+- **FR-004**: System MUST apply the ACP session limit only to ACP protocol sessions, not to MCP or other connection types.
+- **FR-005**: *(Satisfied by existing implementation — T154 hot-reload lock in `handle_acp_session_start`)* System MUST resolve the workspace root for a new ACP session from the current live workspace mapping configuration, not from the startup snapshot.
+- **FR-006**: *(Satisfied by existing implementation — fallback to `default_workspace_root` in `handle_acp_session_start`)* System MUST fall back to the global default workspace root when no channel-to-workspace mapping matches the starting session's channel.
+- **FR-007**: System MUST NOT accept `channel_id` as a query parameter on the `/mcp` endpoint. `channel_id` is removed entirely — `workspace_id` is the only routing mechanism. The legacy `channel_id` query parameter has been removed from the implementation; any request supplying `channel_id` is rejected without routing.
+- **FR-008**: System MUST generate prompt correlation identifiers that are unique across all concurrent sessions and across server restarts.
+- **FR-009**: System MUST research and document whether Slack modal dialogs function correctly on the iOS Slack client, specifically for the `plain_text_input` element used in operator input flows.
+- **FR-010**: System MUST provide a non-modal input mechanism for all operator interactions that currently require text input, activated when modal dialogs are unavailable or when the mobile client surface is detected.
+- **FR-011**: System MUST detect operator replies in the session thread and route the reply content to the waiting agent interaction when the thread-reply fallback is active.
+- **FR-012**: System MUST confirm receipt of a thread-reply input by posting an acknowledgment in the session thread.
+- **FR-013**: System MUST apply the thread-reply fallback for both MCP and ACP operator input flows where text input is required.
+
+### Key Entities
+
+- **SteeringMessage**: A queued operator instruction targeted at a specific agent session; has a consumed flag that must only be set on successful delivery.
+- **SessionCapacity**: The configured maximum number of concurrent ACP sessions; enforced against all ACP sessions regardless of state (created, active).
+- **WorkspaceMapping**: The live channel-to-workspace-root mapping, hot-reloaded from configuration; the authoritative source for session workspace resolution.
+- **PromptCorrelationId**: A unique identifier assigned to each agent-server prompt exchange; must be globally unique across sessions and across server restarts.
+- **ThreadReplyInput**: An operator's free-text reply posted in a Slack session thread in response to an input request, used as a mobile-compatible alternative to modal dialog input.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: Zero steering messages are silently lost due to a delivery failure — every failed delivery leaves the message in a retryable state.
+- **SC-002**: Session capacity enforcement is accurate within one session: starting sessions at or above the limit always results in rejection; starting below the limit always succeeds (absent other failures).
+- **SC-003**: New ACP sessions always operate in the workspace directory that corresponds to the live configuration at session-start time, not the configuration at server-start time.
+- **SC-004**: All operator approval and prompt interactions on the feature are completable end-to-end using only the Slack iOS client.
+- **SC-005**: Prompt correlation identifiers are unique across 10,000 concurrent simulated prompt exchanges with zero collisions.
+- **SC-006**: The `/mcp` endpoint does not accept `channel_id` as a query parameter; only `workspace_id` is supported for connection routing.
+- **SC-007**: All existing 996+ automated tests continue to pass after changes; new tests are added covering each corrected behavior and the mobile fallback path.
+
+## Assumptions
+
+- F-09 (AcpDriver deregister_session resource leak) has already been fixed in commit `b402824` and is excluded from this feature's scope.
+- The mobile accessibility track (FR-009 through FR-013) is conditioned on F-15 research findings: if Slack modals fully work on iOS, only FR-009 is required; FR-010 through FR-013 are implemented only if research confirms modal input is broken on mobile.
+- The thread-reply fallback (FR-010 through FR-013) uses the existing Slack event handler infrastructure; no new Slack API scopes are required beyond those already granted.
+- Operator authentication for thread replies uses the existing authorized-user-ids guard already in place for all Slack event handlers.
+- Prompt correlation IDs use UUIDs rather than sequential counters to guarantee uniqueness across restarts without shared state.
+
+
+
+# Behavioral Matrix: ACP Correctness Fixes and Mobile Operator Accessibility
+
+**Input**: Design documents from `/specs/007-acp-correctness-mobile/`
+**Prerequisites**: spec.md (required), plan.md (required), data-model.md
+**Created**: 2026-03-08
+
+## Summary
+
+| Metric | Count |
+|---|---|
+| **Total Scenarios** | 36 |
+| Happy-path | 17 |
+| Edge-case | 10 |
+| Error | 3 |
+| Boundary | 3 |
+| Concurrent | 2 |
+| Security | 1 |
+
+**Non-happy-path coverage**: 52.8% (minimum 30% required) ✅
+
+---
+
+## Steering Message Delivery (F-06 / FR-001, FR-002)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S001 | Successful steering delivery marks consumed | 1 unconsumed steering message queued for active session; driver `send_prompt` succeeds | `flush_queued_messages` called on reconnect | Message delivered to agent via `send_prompt`; `mark_consumed` called | `consumed = 1` in DB; `StreamActivity` event emitted | happy-path |
+| S002 | Failed delivery preserves unconsumed status | 1 unconsumed steering message queued; driver `send_prompt` returns error | `flush_queued_messages` called on reconnect | Warning logged with session_id and message_id; `mark_consumed` NOT called | `consumed = 0` in DB; message eligible for retry on next reconnect | error |
+| S003 | Partial failure leaves only failed messages unconsumed | 3 unconsumed messages; message #2 `send_prompt` fails; #1 and #3 succeed | `flush_queued_messages` called on reconnect | Messages #1 and #3 delivered and marked consumed; #2 logged as failed | Messages #1,#3: `consumed = 1`; Message #2: `consumed = 0` | edge-case |
+| S004 | Retry on next reconnect delivers previously failed message | 1 message failed on first flush; session reconnects again | Second `flush_queued_messages` invocation | Message delivered on retry; `mark_consumed` called after success | `consumed = 1`; message fully delivered | happy-path |
+| S005 | Retry when session has since terminated | 1 unconsumed message; session status = `terminated` | `flush_queued_messages` called | `send_prompt` fails (session gone); message remains unconsumed; no crash | `consumed = 0`; function returns without panic | edge-case |
+| S006 | Empty queue is a no-op | No unconsumed messages for the session | `flush_queued_messages` called | Function returns immediately after query; no `send_prompt` calls | No DB changes; no events emitted | boundary |
+| S007 | mark_consumed fails after successful send | `send_prompt` succeeds; `mark_consumed` returns DB error | `flush_queued_messages` delivers message then marks | Warning logged for failed mark; message may be re-delivered on next flush | `consumed = 0` in DB; agent received message (potential duplicate) | edge-case |
+
+---
+
+## ACP Session Capacity Enforcement (F-07 / FR-003, FR-004)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S008 | Reject ACP start at capacity with active sessions | max_sessions = 2; 2 ACP sessions in `active` state | `/arc session-start <prompt>` | Error returned: "max concurrent ACP sessions reached (2/2)" | No new session created; existing sessions unaffected | happy-path |
+| S009 | Allow ACP start below capacity | max_sessions = 3; 1 ACP session in `active` state | `/arc session-start <prompt>` | Session created successfully; Slack thread posted | New session in `created` state; total ACP count = 2 | happy-path |
+| S010 | Created-state sessions counted against limit | max_sessions = 2; 1 `active` + 1 `created` ACP session | `/arc session-start <prompt>` | Error returned: capacity exceeded (2/2) | No new session created; `created` session counted | happy-path |
+| S011 | MCP sessions excluded from ACP count | max_sessions = 2; 3 MCP sessions active; 0 ACP sessions | `/arc session-start <prompt>` | Session created successfully | MCP sessions do not affect ACP capacity | happy-path |
+| S012 | Terminated session frees capacity slot | max_sessions = 2; 2 ACP sessions; 1 transitions to `terminated` | `/arc session-start <prompt>` | Session created successfully; capacity = 2/2 after create | New session created; terminated session not counted | happy-path |
+| S013 | Concurrent session starts at capacity boundary | max_sessions = 2; 1 ACP session active; 2 concurrent `/arc session-start` requests | Two simultaneous `handle_acp_session_start` calls | At most one succeeds; the other gets capacity-exceeded error | At most 2 ACP sessions exist (created + active) | concurrent |
+| S014 | max_sessions = 0 rejects all ACP starts | max_sessions = 0; no existing sessions | `/arc session-start <prompt>` | Error returned: capacity exceeded (0/0) | No session created | boundary |
+| S015 | Active, created, and paused states counted (LC-06) | max_sessions = 3; 1 `active` + 1 `paused` + 1 `terminated` ACP session | `/arc session-start <prompt>` | Session created; `active`, `created`, and `paused` ACP sessions counted; only `terminated`/`interrupted` excluded | New session in `created`; capacity used = 3/3 | edge-case |
+
+---
+
+## MCP Query Parameter Cleanup (F-10 / FR-007 — scope: remove channel_id)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S016 | workspace_id resolves channel from mapping | `workspace_id=my-repo` in URL; workspace mapping `my-repo → C_WORKSPACE` configured | MCP connection to `/mcp?workspace_id=my-repo` | Channel resolved to `C_WORKSPACE` via workspace mapping | IntercomServer created with `effective_channel = Some("C_WORKSPACE")` | happy-path |
+| S017 | No workspace_id — session runs without channel | No query parameters on `/mcp` URL | MCP connection to `/mcp` | Session created without Slack channel routing | IntercomServer created with `effective_channel = None` | happy-path |
+| S018 | channel_id param is silently ignored | `channel_id=C_DIRECT` in URL; no `workspace_id` | MCP connection to `/mcp?channel_id=C_DIRECT` | `channel_id` not extracted; session runs without channel | IntercomServer created with `effective_channel = None` (not `C_DIRECT`) | edge-case |
+| S019 | Both params — workspace_id used, channel_id ignored | `workspace_id=my-repo&channel_id=C_IGNORED` in URL | MCP connection to `/mcp?workspace_id=my-repo&channel_id=C_IGNORED` | Channel resolved from `workspace_id` only; `channel_id` not read | IntercomServer with `effective_channel` from workspace mapping | edge-case |
+| S020 | Unknown workspace_id — no channel, warning logged | `workspace_id=unknown-repo`; no matching mapping | MCP connection to `/mcp?workspace_id=unknown-repo` | Warning logged: "workspace_id not found in config"; session runs without channel | IntercomServer with `effective_channel = None` | error |
+| S021 | session_id extracted from query parameters | `session_id=sess-123&workspace_id=my-repo` in URL | MCP connection to `/mcp?session_id=sess-123&workspace_id=my-repo` | Both `session_id` and `workspace_id` extracted; channel resolved | IntercomServer linked to pre-created session | happy-path |
+
+---
+
+## Prompt Correlation ID Uniqueness (F-13 / FR-008)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S022 | Handshake IDs use UUID format | ACP session spawn | `send_initialize()`, `send_session_new()`, `send_prompt()` in handshake | IDs match pattern `"intercom-{purpose}-{uuid}"` (e.g., `intercom-init-550e8400-...`) | Handshake completes with unique IDs | happy-path |
+| S023 | Runtime prompt IDs use UUID format | Active ACP session; operator resolves clearance | `AcpDriver::resolve_clearance()` or `resolve_prompt()` | JSON-RPC `id` field is `"intercom-prompt-{uuid}"` | Response correctly routed to agent via session writer | happy-path |
+| S024 | 10,000 IDs with zero collisions | Generate 10,000 correlation IDs in a loop | Call ID generation function 10,000 times | All IDs are unique; set.len() == 10,000 | Zero duplicates detected | boundary |
+| S025 | Post-restart IDs don't collide with pre-restart | Generate IDs before simulated restart; generate IDs after | Two batches of ID generation with fresh UUID state | No overlap between pre- and post-restart ID sets | Zero collisions across restart boundary | edge-case |
+| S026 | Two concurrent sessions have distinct IDs | 2 ACP sessions spawned simultaneously | Both sessions perform handshake concurrently | Each session's handshake IDs are globally unique | No shared IDs between sessions; both handshakes complete | concurrent |
+
+---
+
+## Mobile Modal Research (F-15 / FR-009)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S027 | Research document produced with findings | Slack API docs, Block Kit reference, community reports | Desk research phase | Document at `research-f15-mobile-modals.md` with one of: (a) modals work, (b) input broken, (c) modals swallowed | Research findings gate F-16/F-17 implementation decision | happy-path |
+
+---
+
+## Thread-Reply Input Fallback (F-16 / FR-010–FR-012 — Conditional on F-15)
+
+| Scenario ID | Scenario Description | Input State / Data | Execution Trigger | Expected Output / Behavior | Expected System State / Exit Code | Category |
+|---|---|---|---|---|---|---|
+| S028 | Modal opens normally on desktop | Operator on desktop client; Refine button pressed | `handle_prompt_action` with `prompt_refine` action | `views.open` succeeds; modal displayed; oneshot resolved on submission | Modal context cached; pending resolution via `handle_view_submission` | happy-path |
+| S029 | Modal failure triggers thread-reply fallback | `views.open` returns error (mobile client or Slack API issue) | `handle_prompt_action` with `prompt_refine` action; `open_modal` fails | Fallback message posted in session thread: "Reply with your instructions" | `pending_thread_replies` entry created; modal context cleaned up | edge-case |
+| S030 | Thread reply captured and routed to waiting interaction | Pending thread-reply for `prompt_refine:{prompt_id}`; authorized user replies | `message` event in session thread from authorized user | Reply text extracted; oneshot resolved with operator's text | Prompt record updated with `Refine` decision and instruction text | happy-path |
+| S031 | Acknowledgment posted after thread reply | Operator reply captured and routed successfully | Thread-reply handler completes | "✅ Received your instructions" posted in session thread | Thread shows reply + acknowledgment; agent unblocked | happy-path |
+| S032 | Multiple replies — first captured, rest ignored | Pending thread-reply; operator sends 3 replies rapidly | Three `message` events in quick succession | First reply resolves the oneshot; subsequent replies are no-ops (oneshot already consumed) | Only first reply's text delivered to agent | edge-case |
+| S033 | Reply from unauthorized user rejected | Pending thread-reply; non-authorized user replies in thread | `message` event from user not in `authorized_user_ids` | Reply silently ignored (per FR-013/SC-009 authorization guard) | Pending thread-reply remains unresolved; authorized user can still reply | security |
+| S034 | Archived thread — graceful error | Pending thread-reply; session thread deleted/archived | Attempt to post fallback message in thread | Slack API returns error; warning logged; oneshot resolved with timeout/error | Agent receives timeout/error response; no crash | error |
+| S035 | Fallback works for both MCP and ACP prompts | MCP agent sends `transmit` prompt; ACP agent sends `PromptForwarded` | Both trigger `prompt_refine` action; both experience modal failure | Both fall back to thread-reply mechanism; both resolve correctly | Both agents receive operator instructions via thread reply | happy-path |
+| S036 | Modal timeout triggers fallback | `views.open` succeeds but no submission received within timeout | Modal submission timeout (e.g., 5 minutes) | Fallback message posted in thread; modal considered abandoned | `pending_thread_replies` entry created; modal context cleaned up | edge-case |
+
+---
+
+## Edge Case Coverage Checklist
+
+- [x] Malformed inputs and invalid arguments — S018 (ignored channel_id), S020 (unknown workspace_id)
+- [x] Missing dependencies and unavailable resources — S005 (terminated session), S034 (archived thread)
+- [x] State errors and race conditions — S013 (concurrent session starts), S007 (mark_consumed failure)
+- [x] Boundary values (empty, max-length, zero, negative) — S006 (empty queue), S014 (max_sessions=0), S024 (10,000 IDs)
+- [x] Permission and authorization failures — S033 (unauthorized thread reply)
+- [x] Concurrent access patterns — S013 (concurrent capacity), S026 (concurrent handshakes)
+- [x] Graceful degradation scenarios — S029 (modal fallback), S036 (modal timeout)
+
+## Cross-Reference Validation
+
+- [x] Every entity in `data-model.md` has at least one scenario covering its state transitions
+  - SteeringMessage: S001 (consumed=0→1), S002 (stays 0), S003 (partial)
+  - Session: S008–S015 (status + protocol_mode filtering)
+  - PendingParams: S016–S021 (workspace_id only)
+  - PromptCorrelationId: S022–S026 (UUID generation and uniqueness)
+  - ThreadReplyInput: S028–S036 (conditional entity, all states covered)
+- [x] No API contracts defined (internal changes only) — N/A
+- [x] Every user story in `spec.md` has corresponding behavioral coverage
+  - US1 (Steering): S001–S007
+  - US2 (Capacity): S008–S015
+  - US3 (Workspace): Already fixed (F-08 excluded) — no scenarios needed
+  - US4 (Mobile): S027–S036
+  - US5 (Protocol): S016–S026
+- [x] No scenario has ambiguous or non-deterministic expected outcomes
+
+## Notes
+
+- Scenario IDs are globally sequential (S001–S036) across all components
+- S028–S036 (Thread-Reply Fallback) are conditional on F-15 research outcome — if modals work on iOS, these scenarios are deferred
+- S013 (concurrent capacity) tests inherent SQLite serialization — the actual race window is narrow but the scenario validates correctness under contention
+- US3 scenarios omitted because F-08 (workspace resolution) is already fixed in the current codebase; the spec's FR-005/FR-006 are satisfied by existing code
+
+
+# Data Model: Feature 007 — ACP Correctness Fixes and Mobile Operator Accessibility
+
+**Feature**: 007-acp-correctness-mobile
+**Date**: 2026-03-08
+
+## Affected Entities
+
+This feature does not introduce new entities. It modifies the behavior of existing entities
+and adds a new repository query method. Below are the entities affected by each fix.
+
+### SteeringMessage (F-06)
+
+**Table**: `steering_message`
+**Module**: `src/models/steering.rs`, `src/persistence/steering_repo.rs`
+
+| Field | Type | Description |
+|---|---|---|
+| id | TEXT (PK) | UUID-based message identifier |
+| session_id | TEXT (FK) | Target session |
+| message | TEXT | Operator instruction text |
+| source | TEXT | Origin: `slack`, `ipc`, `command` |
+| consumed | INTEGER | 0 = unconsumed (queued), 1 = consumed (delivered) |
+| created_at | TEXT | ISO 8601 timestamp |
+
+**Behavioral change**: The `consumed` flag is now set ONLY after successful delivery via
+`send_prompt()`. Previously it was set unconditionally after the delivery attempt,
+causing silent message loss on transient errors.
+
+**State transition**:
+```
+Created (consumed=0) ──send_prompt OK──► Consumed (consumed=1)
+Created (consumed=0) ──send_prompt ERR──► Created (consumed=0)  [stays queued for retry]
+```
+
+---
+
+### Session (F-07)
+
+**Table**: `session`
+**Module**: `src/models/session.rs`, `src/persistence/session_repo.rs`
+
+| Field | Type | Relevant Values |
+|---|---|---|
+| status | TEXT | `created`, `active`, `paused`, `terminated`, `interrupted` |
+| protocol_mode | TEXT | `acp`, `mcp` |
+
+**New query**: `count_active_acp()` — counts sessions where
+`(status = 'active' OR status = 'created') AND protocol_mode = 'acp'`.
+
+**Behavioral change**: ACP session capacity check now includes `created` (initializing)
+sessions and filters by `protocol_mode = 'acp'`, preventing:
+1. Race condition where multiple sessions start concurrently past the limit
+2. MCP connections counting against the ACP session quota
+
+---
+
+### PendingParams / MCP Connection (F-10)
+
+**Type**: `Arc<Mutex<(Option<String>, Option<String>, Option<String>)>>`
+**Module**: `src/mcp/sse.rs`
+
+**Current**: 3-tuple `(channel_id, session_id, workspace_id)`
+**After**: 2-tuple `(session_id, workspace_id)` — `channel_id` slot removed
+
+The factory closure no longer reads or uses `raw_channel`. Channel resolution is
+exclusively via workspace mappings from the `workspace_id` parameter.
+
+---
+
+### PromptCorrelationId (F-13)
+
+**Location**: `src/acp/handshake.rs`, `src/driver/acp_driver.rs`
+
+**Current IDs**:
+- Handshake: static `"intercom-init-1"`, `"intercom-sess-1"`, `"intercom-prompt-1"`
+- Runtime: `PROMPT_COUNTER` (static AtomicU64 starting at 1) → `"intercom-prompt-{N}"`
+
+**After**:
+- Handshake: `"intercom-init-{uuid}"`, `"intercom-sess-{uuid}"`, `"intercom-prompt-{uuid}"`
+- Runtime: `"intercom-prompt-{uuid}"` (PROMPT_COUNTER removed)
+
+**Uniqueness guarantee**: UUID v4 provides 2^122 bits of randomness. Collision probability
+is negligible across any practical number of concurrent sessions and server restarts.
+
+---
+
+### ThreadReplyInput (F-16 — Conditional)
+
+**Not yet defined**. Will be designed during Phase 6 implementation only if F-15 research
+confirms that Slack modals are broken on iOS. Preliminary design:
+
+| Field | Type | Description |
+|---|---|---|
+| channel_id | String | Slack channel where the reply is expected |
+| thread_ts | String | Thread timestamp for scoping reply detection |
+| entity_type | String | `prompt_refine`, `wait_instruct`, `approval_reject` |
+| entity_id | String | The prompt_id, session_id, or request_id |
+| oneshot_tx | Sender | Channel to resolve the waiting interaction |
+
+Would be stored in `AppState::pending_thread_replies` (new field, conditional on F-16).
+
+
+
+
+---
+
+## Checklists
+
+# Specification Quality Checklist: ACP Correctness Fixes and Mobile Operator Accessibility
+
+**Purpose**: Validate specification completeness and quality before proceeding to planning
+**Created**: 2026-03-08
+**Feature**: [../spec.md](../spec.md)
+
+## Content Quality
+
+- [x] No implementation details (languages, frameworks, APIs)
+- [x] Focused on user value and business needs
+- [x] Written for non-technical stakeholders
+- [x] All mandatory sections completed
+
+## Requirement Completeness
+
+- [x] No [NEEDS CLARIFICATION] markers remain
+- [x] Requirements are testable and unambiguous
+- [x] Success criteria are measurable
+- [x] Success criteria are technology-agnostic (no implementation details)
+- [x] All acceptance scenarios are defined
+- [x] Edge cases are identified
+- [x] Scope is clearly bounded
+- [x] Dependencies and assumptions identified
+
+## Feature Readiness
+
+- [x] All functional requirements have clear acceptance criteria
+- [x] User scenarios cover primary flows
+- [x] Feature meets measurable outcomes defined in Success Criteria
+- [x] No implementation details leak into specification
+
+## Notes
+
+- F-09 explicitly excluded (already fixed in commit b402824)
+- Mobile track (FR-010 to FR-013) is conditional on F-15 research findings — spec captures this conditionality in the Assumptions section
+- All 13 functional requirements map to at least one acceptance scenario in the user stories
+- No clarification questions needed: the backlog (F-06 to F-17) provides sufficient specificity
+
+<!-- SECTION:DESCRIPTION:END -->

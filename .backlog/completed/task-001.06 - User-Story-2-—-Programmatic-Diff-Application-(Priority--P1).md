@@ -1,0 +1,40 @@
+---
+id: TASK-001.06
+title: "001 - User Story 2 — Programmatic Diff Application (Priority: P1)"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - task
+parent_id: TASK-001
+dependencies: []
+ordinal: 1060
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+**Goal**: After approval, server applies code changes to the local file system programmatically
+
+**Independent Test**: Submit diff via `ask_approval`, approve it, invoke `accept_diff` with the `request_id`, verify file written to disk with correct content
+
+### Tests (Constitution Principle III)
+
+- [X] T107 Write unit tests for diff application in `tests/unit/diff_tests.rs`: full-file write (new file, overwrite), unified diff patch (clean apply, failed apply), atomic write via tempfile, parent directory creation
+- [X] T108 Write contract tests for `accept_diff` tool in `tests/contract/accept_diff_tests.rs`: validate input/output schemas per mcp-tools.json; test `not_approved`, `already_consumed`, `path_violation`, `patch_conflict` error codes
+- [X] T109 Write integration test for approve→apply pipeline in `tests/integration/diff_apply_tests.rs`: submit diff → approve → apply → verify file on disk; test hash mismatch conflict detection with file mutation between proposal and application
+
+### Implementation for User Story 2
+
+- [X] T043 [US2] Implement file writing utility in `src/diff/writer.rs`: `write_full_file(path, content, workspace_root) -> Result<WriteSummary>` that validates path, creates parent directories if needed, writes to `tempfile::NamedTempFile` in the same directory, then `persist()` for atomic rename; return `{path, bytes_written}`
+- [X] T044 [US2] Implement diff/patch application utility in `src/diff/patcher.rs`: `apply_patch(path, unified_diff, workspace_root) -> Result<WriteSummary>` using `diffy::Patch::from_str` and `diffy::apply`; read existing file, apply patch, write result via `write_full_file`; handle patch failure with descriptive error
+- [X] T045 [US2] Implement `accept_diff` MCP tool handler in `src/mcp/tools/accept_diff.rs`: accept `request_id` and `force` per mcp-tools.json contract; look up `ApprovalRequest` by ID; validate status is `Approved` (return `not_approved` error otherwise); verify `consumed_at` is None (return `already_consumed` if set); recompute SHA-256 of current file and compare to `original_hash` — if mismatch and `force=false` return `patch_conflict`, if `force=true` log warning to Slack; determine full-file vs patch mode from `diff_content` format; apply via writer or patcher; mark request as `Consumed` with `consumed_at` timestamp; post confirmation to Slack; return `{status: applied, files_written}` per contract
+- [X] T046 [US2] Add tracing spans to `accept_diff` tool: span with `request_id`, `file_path`, `force` attributes; log hash comparison result; log write outcome
+
+**Checkpoint**: End-to-end remote workflow complete — agent proposes, operator approves, server writes files
+
+---
+
+<!-- SECTION:DESCRIPTION:END -->

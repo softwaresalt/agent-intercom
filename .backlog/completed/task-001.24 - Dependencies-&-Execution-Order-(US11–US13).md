@@ -1,0 +1,50 @@
+---
+id: TASK-001.24
+title: "001 - Dependencies & Execution Order (US11–US13)"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - task
+parent_id: TASK-001
+dependencies: []
+ordinal: 1240
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+### Phase Dependencies
+
+```text
+Phase 15 (US11) ─── depends on ──→ Phase 2 (Foundational) ✅ complete
+Phase 16 (US12) ─── depends on ──→ Phase 2 (Foundational) ✅ complete
+Phase 17 (US13) ─── depends on ──→ Phase 2 (Foundational) ✅ complete
+```
+
+### Recommended Execution Order
+
+```text
+Phase 17 (US13: Rename) → Phase 15 (US11: Env Vars) → Phase 16 (US12: Channel)
+```
+
+**Rationale**: Perform the rename first so that all new test files and documentation written for US11/US12 use the correct `monocoque-agent-rc` name from the start, avoiding double-editing.
+
+### Parallel Opportunities
+
+- T200–T203 (US11) can run in parallel with T204–T207 (US12) — different files
+- T208–T213 (US13 rename) must be sequential within the phase (Cargo.toml first, then source, then tests, then docs)
+- T214–T217 (US13 verification) must follow all rename tasks
+- T211 and T213 can run in parallel (different file sets)
+
+### Verification Gates
+
+| Phase | Gate | Command |
+|-------|------|---------|
+| 15 (US11) | All credential tests pass | `cargo test credential_loading` |
+| 16 (US12) | All channel override tests pass | `cargo test channel_override` |
+| 17 (US13) | Build + test + grep zero matches | `cargo build` then `cargo test` then `grep -r "agent.rem" src/ tests/ ctl/ Cargo.toml` |
+
+<!-- SECTION:DESCRIPTION:END -->

@@ -1,0 +1,50 @@
+---
+id: TASK-006.11
+title: "006 - Implementation Strategy"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - task
+parent_id: TASK-006
+dependencies: []
+ordinal: 6110
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+### MVP First (User Story 1 Only)
+
+1. Complete Phase 1: Setup
+2. Complete Phase 2: Foundational block extraction (**CRITICAL** — blocks all stories)
+3. Complete Phase 3: User Story 1 — ClearanceRequested handler
+4. **STOP and VALIDATE**: Trigger clearance request from ACP agent → Slack approval message appears
+5. Deploy/demo if ready — agents can now request file operation approval
+
+### Incremental Delivery
+
+1. Setup + Foundational → Shared block builders ready
+2. Add US1 → Test clearance flow independently → **MVP achievable** 🎯
+3. Add US2 → Test prompt flow independently → Full ACP human-in-the-loop model
+4. Add US3 → Test thread continuity → Polished operator experience
+5. Polish → Concurrent + lifecycle tests → Production-ready
+
+### File Change Summary
+
+| File | Phase(s) | Change Type |
+|------|----------|-------------|
+| src/slack/blocks.rs | 2 | Add extracted block builder functions (`pub(crate)`) |
+| src/mcp/tools/ask_approval.rs | 2 | Remove local builders; add import from `crate::slack::blocks` |
+| src/mcp/tools/forward_prompt.rs | 2 | Remove local builders; add import from `crate::slack::blocks` |
+| src/mcp/tools/util.rs | 2 | Re-export or remove `truncate_text` |
+| src/main.rs | 3, 4, 5 | Implement ClearanceRequested + PromptForwarded handlers + thread mgmt |
+| tests/unit/acp_event_wiring.rs | 2, 3, 4 | **New file**: 25 unit test scenarios |
+| tests/contract/acp_event_contract.rs | 3, 4 | **New file**: 17 contract test scenarios |
+| tests/integration/acp_event_integration.rs | 5, 6 | **New file**: 14 integration test scenarios |
+
+---
+
+<!-- SECTION:DESCRIPTION:END -->

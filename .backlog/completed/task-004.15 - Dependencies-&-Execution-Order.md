@@ -1,0 +1,59 @@
+---
+id: TASK-004.15
+title: "004 - Dependencies & Execution Order"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - task
+parent_id: TASK-004
+dependencies: []
+ordinal: 4150
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+### Phase Dependencies
+
+- **Phase 1 (Setup)**: No dependencies — start immediately
+- **Phase 2 (Foundational)**: Depends on Phase 1 — BLOCKS all user stories
+- **Phase 3-12 (User Stories)**: All depend on Phase 2 completion
+  - Phase 3 (Steering) can start immediately after Phase 2
+  - Phase 4 (Startup) can start in parallel with Phase 3
+  - Phase 5 (Inbox) can start in parallel with Phase 3
+  - Phase 6 (Modal) independent of other stories
+  - Phase 7 (SSE Disconnect) independent
+  - Phase 8 (Policy) independent
+  - Phase 9 (Audit + Failure) depends on Phase 1 T004-T005 (audit module)
+  - Phase 10 (Detail + Auto-Approve) independent
+  - Phase 11 (Ping Fallback + Drain) depends on Phase 3 (heartbeat changes)
+  - Phase 12 (Approval File Attachment) independent — modifies ask_approval.rs only
+- **Phase 13 (Polish)**: Depends on all desired user stories
+
+### User Story Dependencies
+
+- **US1 (Steering)**: After Phase 2 — no story dependencies
+- **US2 (Startup)**: After Phase 2 — no story dependencies
+- **US3 (Inbox)**: After Phase 2 — no story dependencies
+- **US4 (Modal)**: After Phase 2 — no story dependencies
+- **US5 (SSE Disconnect)**: After Phase 2 — no story dependencies
+- **US6+13 (Policy)**: After Phase 2 — no story dependencies
+- **US7+8 (Audit + Failure)**: After Phase 2 — no story dependencies
+- **US10+11 (Detail + Approve)**: After Phase 2 — no story dependencies
+- **US14 (Ping Fallback)**: After Phase 3 (shares heartbeat.rs changes)
+- **US15 (Queue Drain)**: After Phase 2 — no story dependencies
+- **US16 (Approval File Attachment)**: After Phase 2 — no story dependencies (modifies ask_approval.rs only)
+
+### Parallel Opportunities
+
+- Phase 1: T002-T005 all parallel (different files)
+- Phase 2: T007-T009 all parallel (different files)
+- Phase 3+: Most user stories can run in parallel after Phase 2
+- Within each story: test tasks marked [P] can run in parallel
+
+---
+
+<!-- SECTION:DESCRIPTION:END -->

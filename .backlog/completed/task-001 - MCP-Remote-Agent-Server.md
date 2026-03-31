@@ -1,0 +1,1784 @@
+---
+id: TASK-001
+title: "MCP Remote Agent Server"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - feature
+dependencies: []
+ordinal: 1000
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+# Feature Specification: MCP Remote Agent Server
+
+**Feature Branch**: `001-mcp-remote-agent-server`
+**Created**: 2026-02-08
+**Status**: Draft
+**Input**: User description: "Build an MCP server that provides remote I/O capabilities to local AI agents via Slack, enabling asynchronous code review, approval workflows, session orchestration, and continuation prompt forwarding from a mobile device"
+
+## Clarifications
+
+### Session 2026-02-09
+
+- Q: How should the nudge message reach a stalled agent, given MCP is request-response and the server cannot push unsolicited messages? → A: Via an MCP server-to-client notification using a custom method name (e.g., `monocoque/nudge`). The agent registers a notification handler; no out-of-band channel is required.
+- Q: How should the system handle conflicts when multiple authorized operators act on the same request? → A: Each agent session is bound to exactly one Slack user (owner) at creation time. Only the session owner may interact with that session's approvals, prompts, stall alerts, and slash commands. The `authorized_user_ids` list determines who may create sessions, but a given session accepts actions only from its owner. First-response-wins applies as a fallback for any residual race conditions.
+- Q: Should tool call responses reset the inactivity timer, and should long-running operations suppress stall detection? → A: Hybrid approach. Both agent-initiated tool call requests and server responses reset the timer. A lightweight `heartbeat` MCP tool allows the agent to signal liveness during its own long-running local operations. The server automatically pauses the stall timer while it is executing a known long-running operation (e.g., a custom command). This covers both agent-side and server-side long operations with no blind spots.
+- Q: Should all MCP tools be unconditionally exposed to every connected agent, or conditionally hidden based on configuration? → A: All tools are always visible to every connected agent regardless of configuration or session type. The server returns an error if a tool is called in a context where it does not apply. This keeps the tool surface simple and consistent.
+
+### Session 2026-02-10
+
+- Q: How should the server know where the agent is in its task list when a stall occurs mid-todo? → A: The existing `heartbeat` tool is extended to accept an optional structured progress snapshot (a list of todo items with labels and statuses). The server stores the most recent snapshot as opaque structured data on the Session record and uses it to enrich stall alerts, nudge messages, crash recovery responses, and checkpoint metadata. The server does not interpret the todo semantics — it is a store-and-forward cache. The agent is the sole source of truth for its own progress.
+- Q: What is the data retention policy for approval requests, session state, checkpoints, and stall alerts? → A: Time-based auto-purge. All persisted data (sessions, approval requests, checkpoints, stall alerts) is automatically purged 30 days after the owning session is terminated. Active sessions are never purged.
+- Q: How should Slack tokens and other sensitive credentials be stored? → A: OS keychain as the primary mechanism (Windows Credential Manager / macOS Keychain), with environment variables as a fallback when the keychain is unavailable or not configured.
+- Q: What observability signals should the server emit beyond Slack notifications? → A: Structured tracing spans to stderr via `tracing-subscriber`. No metrics endpoint or external collector. Spans cover tool calls, Slack interactions, stall detection events, and session lifecycle transitions.
+- Q: Which embedded database should be used for persistent state? → A: SurrealDB (already decided). Made explicit in the spec.
+- Q: What is explicitly out of scope for v1? → A: Multi-machine/distributed deployment, web-based dashboard or UI (Slack is the sole remote interface), agent-to-agent communication or multi-agent collaboration, and custom Slack app distribution. Multi-workspace Slack support IS in scope — the server acts as a local service supporting multiple concurrent workspaces.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Remote Code Review and Approval (Priority: P1)
+
+A developer runs an AI coding agent on their workstation at home. While away from their desk (commuting, at a cafe, in a meeting), the agent generates code changes and needs approval before writing files. The developer receives a Slack notification on their mobile phone showing the proposed diff, reviews it, and taps "Accept" or "Reject" without ever touching the workstation keyboard.
+
+**Why this priority**: This is the core value proposition. Without remote approval, the agent blocks indefinitely whenever it needs human confirmation, making unattended operation impossible. Every other feature builds on this foundation.
+
+**Independent Test**: Start the server, configure it with a Slack workspace, connect an AI agent, have the agent invoke the approval tool with a sample diff, and verify the diff appears in Slack with actionable buttons. Tap "Accept" and confirm the agent receives the approval response and proceeds.
+
+**Acceptance Scenarios**:
+
+1. **Given** the server is running and connected to Slack, **When** the agent submits a small code change (fewer than 20 lines) for approval, **Then** the diff is rendered inline in the Slack message with "Accept" and "Reject" buttons
+2. **Given** the server is running and connected to Slack, **When** the agent submits a large code change (20 lines or more) for approval, **Then** the diff is uploaded as a collapsible Slack snippet with syntax highlighting, accompanied by "Accept" and "Reject" buttons
+3. **Given** a pending approval request exists in Slack, **When** the operator taps "Accept", **Then** the server returns an "approved" status to the agent within 5 seconds
+4. **Given** a pending approval request exists in Slack, **When** the operator taps "Reject", **Then** the server returns a "rejected" status with an optional rejection reason to the agent
+5. **Given** a pending approval request exists, **When** no response is received within the configured timeout period, **Then** the server returns a "timeout" status and notifies the Slack channel
+
+---
+
+### User Story 2 - Programmatic Diff Application (Priority: P1)
+
+After the remote operator approves a code proposal, the server applies the approved changes directly to the file system on behalf of the agent. This eliminates the need for anyone to manually click "Keep" or "Accept" in the IDE's diff viewer, enabling fully hands-free file writing from the remote Slack interface.
+
+**Why this priority**: Without programmatic application, approved changes sit in limbo requiring local UI interaction, which negates the entire remote orchestration model. This completes the end-to-end remote workflow initiated by Story 1.
+
+**Independent Test**: Submit a diff for approval, approve it via Slack, then invoke the diff application tool with the approval ID. Verify the file is written to disk with correct content and the Slack channel receives a confirmation message.
+
+**Acceptance Scenarios**:
+
+1. **Given** an approved proposal with a full file payload, **When** the agent requests diff application, **Then** the server writes the file to the target path (creating directories as needed) and returns a success response with the file path and byte count
+2. **Given** an approved proposal with a unified diff, **When** the agent requests diff application, **Then** the server applies the patch to the existing file and returns a success response
+3. **Given** an approved proposal, **When** the agent requests application but the local file has changed since the proposal was created, **Then** the server returns a conflict error (unless force mode is enabled)
+4. **Given** an approved proposal that has already been applied, **When** the agent requests application again, **Then** the server returns an "already consumed" error without modifying the file system
+
+---
+
+### User Story 3 - Remote Status Logging (Priority: P2)
+
+The agent sends progress updates ("Running tests...", "Build completed", "Deploying to staging") to the Slack channel in real time. These messages do not block the agent and keep the remote operator informed of what the agent is doing without requiring them to check the local terminal.
+
+**Why this priority**: Visibility into agent activity is essential for trust and situational awareness. Without status logging, the operator has no way to know whether the agent is active, stuck, or progressing, leading to anxiety and unnecessary interventions.
+
+**Independent Test**: Have the agent invoke the logging tool with messages at different severity levels (info, success, warning, error) and verify each message appears in the Slack channel with correct formatting and visual indicators.
+
+**Acceptance Scenarios**:
+
+1. **Given** the server is connected to Slack, **When** the agent sends an informational log message, **Then** the message appears in the Slack channel as plain text without blocking the agent
+2. **Given** the server is connected to Slack, **When** the agent sends messages with different severity levels, **Then** each message is visually differentiated (success with checkmark, warning with caution icon, error with error icon)
+3. **Given** a Slack thread timestamp, **When** the agent sends a log message referencing that thread, **Then** the message appears as a reply within the specified thread
+
+---
+
+### User Story 4 - Agent Stall Detection and Remote Nudge (Priority: P1)
+
+An AI agent is working through a multi-step todo list (e.g., "implement auth module, write tests, update docs"). Midway through, the agent silently stalls — it stops producing output, stops making tool calls, and does not emit any continuation prompt or error. It just freezes. The server detects this silence after a configurable inactivity threshold, alerts the remote operator via Slack with context about what the agent was last doing, and provides a "Nudge" button. The operator taps "Nudge" and the server injects a continuation prompt into the agent's input stream, waking it up to resume work.
+
+**Why this priority**: Silent stalls are the most insidious failure mode in unattended agent operation. Unlike continuation prompts (which the agent actively emits), stalls produce *no signal at all*. Without a watchdog, the operator has no way to know the agent has stopped, and work sits incomplete indefinitely. This is a P1 because it directly undermines the core promise of remote unattended operation — if the agent can stall silently, the operator must constantly check on it, defeating the purpose of the system.
+
+**Independent Test**: Connect an agent to the server, have the agent make several tool calls, then simulate the agent going silent (no tool calls for the configured threshold). Verify the server posts a stall alert to Slack within the threshold window. Tap "Nudge" and verify the server injects a continuation message that the agent receives.
+
+**Acceptance Scenarios**:
+
+1. **Given** an active session where the agent has been making tool calls, **When** the agent stops making any tool calls or producing output for longer than the configured inactivity threshold, **Then** the server posts a stall alert to Slack with the agent's last known activity (last tool called, elapsed idle time, and the session's original prompt). If the session has a progress snapshot, the alert also renders a checklist showing completed and remaining todo items with the in-progress item highlighted
+2. **Given** a stall alert in Slack, **When** the operator taps "Nudge", **Then** the server sends an MCP server-to-client notification with a configurable continuation message (e.g., "Continue working on the current task. Pick up where you left off.") and the agent resumes execution. If the session has a progress snapshot, the nudge notification payload includes a summary of completed items and the next pending item so the agent can reorient
+3. **Given** a stall alert in Slack, **When** the operator taps "Nudge with Instructions", **Then** a dialog opens for the operator to type a custom nudge message, and the server injects that message into the agent's input
+4. **Given** a stall alert in Slack, **When** the operator taps "Stop", **Then** the session is terminated and the operator receives confirmation
+5. **Given** a stall alert has been posted, **When** the agent resumes activity on its own before the operator responds, **Then** the server updates the Slack alert to indicate the agent self-recovered and disables the action buttons
+6. **Given** the inactivity threshold has elapsed and the operator does not respond to the stall alert, **When** a second configurable escalation threshold elapses, **Then** the server auto-nudges the agent with the default continuation message and posts a notification to Slack
+7. **Given** the server has auto-nudged the agent, **When** the agent still does not resume within a configurable max-retries count, **Then** the server posts an escalated alert (with @channel mention) indicating the agent appears unresponsive and may require manual intervention
+8. **Given** the operator has configured stall detection to be disabled for a session, **When** the agent goes idle, **Then** no stall alert is posted
+9. **Given** the agent is performing a long-running local operation (e.g., processing a large codebase), **When** the agent calls the `heartbeat` tool periodically, **Then** the stall detection timer is reset and no stall alert is posted despite the absence of other tool calls
+10. **Given** the server is executing a long-running custom command on behalf of the agent, **When** the command takes longer than the inactivity threshold, **Then** the stall timer is automatically paused for the duration of the command and no false stall alert is posted
+11. **Given** the agent calls the `heartbeat` tool with a structured progress snapshot (a list of todo items with labels and statuses), **When** the server receives the call, **Then** the server stores the snapshot on the session record, resets the stall timer, and returns success. The snapshot replaces any previously stored snapshot for that session
+12. **Given** the agent has previously reported a progress snapshot and subsequently stalls, **When** the auto-nudge fires, **Then** the auto-nudge continuation message includes a summary of the progress snapshot (e.g., "You completed 3/7 tasks. Resume with: 'update API docs'") so the agent can reorient without re-deriving its position
+13. **Given** the agent calls the `heartbeat` tool without a progress snapshot (status message only or no arguments), **When** the server receives the call, **Then** the server resets the stall timer and leaves the existing progress snapshot (if any) unchanged
+
+---
+
+### User Story 5 - Continuation Prompt Forwarding (Priority: P2)
+
+AI agents periodically emit meta-level prompts asking whether to continue working, especially after extended execution. These prompts block the local terminal. The server intercepts these prompts and forwards them to Slack with actionable response buttons (Continue, Refine, Stop), allowing the remote operator to keep the agent running, adjust its focus, or halt it entirely.
+
+**Why this priority**: Without prompt forwarding, continuation prompts block the agent indefinitely, causing unattended sessions to stall. This is the second most common blocking interaction after code approval.
+
+**Independent Test**: Have the agent invoke the prompt forwarding tool with a continuation prompt. Verify the prompt appears in Slack with three action buttons. Tap "Continue" and verify the agent receives the decision. Tap "Refine" and verify a dialog opens for providing revised instructions.
+
+**Acceptance Scenarios**:
+
+1. **Given** the agent has been working and emits a continuation prompt, **When** the prompt forwarding tool is invoked, **Then** the prompt text appears in Slack with "Continue", "Refine", and "Stop" buttons along with elapsed time and action count context
+2. **Given** a forwarded prompt in Slack, **When** the operator selects "Continue", **Then** the server returns a "continue" decision to the agent within 5 seconds
+3. **Given** a forwarded prompt in Slack, **When** the operator selects "Refine", **Then** a dialog opens for the operator to type revised instructions, and upon submission, the server returns a "refine" decision with the new instruction text
+4. **Given** a forwarded prompt in Slack, **When** the operator selects "Stop", **Then** the server returns a "stop" decision and the agent halts its current task
+5. **Given** a forwarded prompt with no response, **When** the configured timeout elapses, **Then** the server auto-responds with "continue" and posts a timeout notification to Slack
+
+---
+
+### User Story 6 - Workspace Auto-Approve Policy (Priority: P2)
+
+A developer configures their workspace to allow certain safe operations (running tests, linting, reading files) to proceed without requiring remote approval. This reduces Slack notification noise for routine operations and speeds up the agent's workflow for pre-trusted actions.
+
+**Why this priority**: Frequent low-risk approval requests create notification fatigue and slow down the agent unnecessarily. Auto-approve lets experienced operators pre-authorize safe operations, improving both user experience and agent throughput.
+
+**Independent Test**: Create a workspace policy file that auto-approves "cargo test". Have the agent check the auto-approve status for that command and verify it returns "auto-approved: true". Verify that operations exceeding the risk threshold still require explicit approval.
+
+**Acceptance Scenarios**:
+
+1. **Given** a workspace policy file exists with "cargo test" in the auto-approve list, **When** the agent checks whether "cargo test" is auto-approved, **Then** the server returns "auto_approved: true" with the matched rule
+2. **Given** a workspace policy exists, **When** the agent checks an operation that is not in the auto-approve list, **Then** the server returns "auto_approved: false"
+3. **Given** a workspace policy exists, **When** the policy file is modified, **Then** the server hot-reloads the new rules without requiring a restart
+4. **Given** a workspace policy auto-approves a command, **When** that command is not in the global server allowlist, **Then** the auto-approve is denied (global policy supersedes workspace policy)
+
+---
+
+### User Story 7 - Remote Session Orchestration (Priority: P3)
+
+The remote operator initiates, pauses, resumes, and terminates agent sessions entirely from Slack. They can also create checkpoints to snapshot a session's state and restore a prior checkpoint if an experiment goes wrong. This transforms the operator from a passive reviewer into an active orchestrator.
+
+**Why this priority**: Session management enables multi-task workflows and recovery from failed experiments. While the core approval workflow (P1) can function without it, session orchestration unlocks advanced use cases like context switching between tasks and rolling back mistakes.
+
+**Independent Test**: Use the Slack slash command to start a new agent session with a prompt. Verify the agent process spawns and connects. Pause the session, verify it enters a paused state. Resume it and verify it continues. Create a checkpoint, make further changes, then restore the checkpoint and confirm the prior state is recovered.
+
+**Acceptance Scenarios**:
+
+1. **Given** the server is running, **When** the operator issues a "session-start" command with a prompt via Slack, **Then** a new agent process spawns on the local workstation and connects to the server, and a confirmation with the session ID appears in Slack
+2. **Given** an active session, **When** the operator issues a "session-pause" command, **Then** the agent enters a wait state and no further tool calls are processed until resumed
+3. **Given** a paused session, **When** the operator issues a "session-resume" command, **Then** the agent continues from where it was suspended
+4. **Given** an active session, **When** the operator issues a "session-checkpoint" command with a label, **Then** the session state is snapshot and stored with the provided label, and a confirmation appears in Slack. If the session has a progress snapshot, it is included in the checkpoint metadata
+5. **Given** a stored checkpoint, **When** the operator issues a "session-restore" command with the checkpoint ID, **Then** the server warns about file divergences (if any), and upon confirmation, restores the session to the checkpointed state
+6. **Given** the concurrent session limit has been reached, **When** the operator attempts to start another session, **Then** the server returns an error indicating the limit has been exceeded
+7. **Given** operator A owns an active session, **When** operator B (also in the authorized user list) attempts to interact with operator A's session, **Then** the interaction is rejected and operator B is informed the session belongs to a different operator
+
+---
+
+### User Story 8 - Remote File Browsing and Command Execution (Priority: P3)
+
+The remote operator browses the workspace file structure and views file contents directly from Slack, without needing the agent to be running. They can also execute pre-approved shell commands (such as "git status" or "cargo test") from Slack and see the output.
+
+**Why this priority**: File browsing and command execution give the operator situational awareness and manual control independent of the agent. This is valuable but not required for the primary approval workflow.
+
+**Independent Test**: Issue a "list-files" command via Slack and verify a directory tree appears. Issue a "show-file" command and verify the file contents appear with syntax highlighting. Issue a custom command (e.g., "git status") and verify the output appears in Slack.
+
+**Acceptance Scenarios**:
+
+1. **Given** the server is running, **When** the operator issues "list-files" via Slack, **Then** a formatted directory tree of the workspace appears in the channel
+2. **Given** a valid file path, **When** the operator issues "show-file" via Slack, **Then** the file contents appear with syntax highlighting appropriate to the file type
+3. **Given** a command alias defined in the server configuration, **When** the operator issues that command via Slack, **Then** the corresponding shell command executes and the output is posted to Slack
+4. **Given** a file path that would resolve outside the workspace root, **When** the operator issues "show-file" with that path, **Then** the server returns a permission denied error
+
+---
+
+### User Story 9 - State Recovery After Crash (Priority: P3)
+
+The server persists all pending approval requests and session state to an embedded database. If the server crashes or is restarted, the agent can recover the last known state, including pending requests that were in flight, without losing work.
+
+**Why this priority**: Crash recovery prevents data loss during long-running agent sessions. While it does not affect the happy path, it is essential for reliability in production use.
+
+**Independent Test**: Submit an approval request, kill the server process, restart it, then invoke the state recovery tool and verify the pending request is returned with its original data.
+
+**Acceptance Scenarios**:
+
+1. **Given** a pending approval request was in flight when the server was terminated, **When** the server restarts and the agent invokes state recovery, **Then** the pending request is returned with its original title, type, and creation timestamp
+2. **Given** no pending state exists, **When** the agent invokes state recovery, **Then** the server returns a "clean" status indicating a fresh start
+3. **Given** the server is shutting down gracefully, **When** shutdown is initiated, **Then** all pending requests are marked as "interrupted" in the database and a final notification is posted to Slack
+4. **Given** a session had a progress snapshot when the server was terminated, **When** the server restarts and the agent invokes state recovery, **Then** the recovered session state includes the last-reported progress snapshot so the agent can determine which todo items were completed and which remain
+
+---
+
+### User Story 10 - Operational Mode Switching (Priority: P3)
+
+The developer switches the server between "remote", "local", and "hybrid" modes depending on their situation. When sitting at the desk, they switch to "local" mode to route approvals through a local CLI tool instead of Slack. When leaving the desk, they switch to "remote" to re-enable Slack notifications.
+
+**Why this priority**: Mode switching provides flexibility but is an optimization over the default remote mode. Most users operate in remote or hybrid mode exclusively.
+
+**Independent Test**: Set the mode to "local" and verify Slack notifications stop. Set it to "remote" and verify approvals flow through Slack again. Set it to "hybrid" and verify both channels are active.
+
+**Acceptance Scenarios**:
+
+1. **Given** the server is in "remote" mode, **When** the agent switches to "local" mode, **Then** subsequent approval requests are routed to the local IPC channel and Slack notifications are suppressed
+2. **Given** the server is in any mode, **When** the mode is changed, **Then** the previous and current modes are returned, and the change is persisted across server restarts
+
+---
+
+### User Story 11 - Slack Environment Variable Configuration (Priority: P1)
+
+The server reads Slack connectivity credentials from well-known user environment variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID`. This provides a simple, portable configuration mechanism for development environments, CI/CD pipelines, and deployments where OS keychain access is unavailable or impractical. Environment variables serve as the fallback when the OS keychain does not contain the required credentials.
+
+**Why this priority**: Without Slack credentials the server cannot connect to any workspace. Environment variables are the most universally available credential mechanism across all platforms and container runtimes. While the OS keychain is preferred for security, many legitimate deployment scenarios (containers, headless servers, CI runners) lack a keychain entirely. Ensuring explicit, documented support for these three environment variables removes a critical onboarding barrier.
+
+**Independent Test**: Unset any keychain entries for the service. Set `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID` as environment variables. Start the server and verify it connects to Slack successfully using the environment-provided credentials.
+
+**Acceptance Scenarios**:
+
+1. **Given** the OS keychain does not contain Slack credentials, **When** `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID` are set as environment variables, **Then** the server loads all three values from the environment and connects to Slack successfully
+2. **Given** the OS keychain contains Slack credentials, **When** the same credentials are also present as environment variables, **Then** the server uses the keychain values (keychain takes precedence over environment variables)
+3. **Given** neither the OS keychain nor environment variables provide the required Slack credentials, **When** the server starts, **Then** the server fails with a clear, actionable error message identifying which credential is missing and how to provide it
+4. **Given** the `SLACK_TEAM_ID` environment variable is set, **When** the server connects to Slack, **Then** the team ID is used to scope Socket Mode connections to the correct workspace
+5. **Given** the `SLACK_TEAM_ID` environment variable is empty or unset and the keychain has no team ID, **When** the server connects to Slack, **Then** the server connects without a team ID constraint (single-workspace mode)
+
+---
+
+### User Story 12 - Dynamic Slack Channel Selection (Priority: P2)
+
+When a remote agent connects to the server via the HTTP/SSE transport, the connecting client can specify a Slack channel ID as a query string parameter on the SSE endpoint URL (e.g., `/sse?channel_id=C_MY_CHANNEL`). This per-session channel override directs all Slack notifications, approval requests, and interactive messages for that agent session to the specified channel instead of the default channel from the global configuration. This enables multi-workspace setups where each connected IDE or project targets a different Slack channel for its notifications.
+
+**Why this priority**: Multi-workspace support is an in-scope requirement. Different projects often need notifications routed to different Slack channels (e.g., a frontend project to `#frontend-agents` and a backend project to `#backend-agents`). Without per-session channel selection, all agent sessions would post to the same channel, creating noise and confusion. This is critical for the multi-workspace use case but not for single-workspace MVP operation.
+
+**Independent Test**: Start the server with a default channel configured. Connect an agent via SSE with `?channel_id=C_TEST_CHANNEL` in the URL. Have the agent invoke `remote_log` and verify the message appears in `C_TEST_CHANNEL` rather than the default channel.
+
+**Acceptance Scenarios**:
+
+1. **Given** the server is running with a default Slack channel configured, **When** an agent connects via SSE with `?channel_id=C_OTHER_CHANNEL` in the URL, **Then** all Slack messages for that session are posted to `C_OTHER_CHANNEL`
+2. **Given** an agent connects via SSE without a `channel_id` query parameter, **When** the agent invokes any tool that posts to Slack, **Then** the default channel from the global configuration is used
+3. **Given** an agent connects via SSE with an empty `channel_id` parameter, **When** the agent invokes any tool that posts to Slack, **Then** the default channel from the global configuration is used (empty value is treated as absent)
+4. **Given** two agents connect simultaneously with different `channel_id` values, **When** both agents invoke tools that post to Slack, **Then** each session's messages are routed to its respective channel independently
+5. **Given** an agent connects via the stdio transport (primary agent), **When** the agent invokes any tool that posts to Slack, **Then** the default channel from the global configuration is always used (channel override is only available on SSE transport)
+
+---
+
+### User Story 13 - Service Rebranding to Remote Control (Priority: P1)
+
+The service is renamed from "monocoque-agent-rem" (remote) to "monocoque-agent-rc" (remote control) across the entire codebase. This includes binary names, crate names, Cargo package metadata, configuration file references, OS keychain service identifiers, SurrealDB namespace and database names, documentation, user-facing CLI output, Slack message branding, the companion CLI tool name, and all internal code references. The rename establishes a consistent, intentional identity that accurately describes the service's purpose as a remote control interface for AI agents — not merely a "remote" endpoint.
+
+**Why this priority**: Naming consistency is a foundational concern that affects every user-facing surface — binary names operators type, keychain entries operators configure, Slack messages operators read, and documentation operators reference. Performing the rename now, before external users adopt the current naming, avoids a disruptive breaking change later. After this rename, all new documentation, integrations, and user muscle memory will build on the correct name from the start.
+
+**Independent Test**: After the rename, verify that `cargo build` produces a binary named `monocoque-agent-rc` (not `monocoque-agent-rem`). Verify that the companion CLI binary is named `monocoque-ctl` (unchanged). Verify that `config.toml` references the new service name. Verify that running the renamed binary starts the server with the correct SurrealDB database name and keychain service name.
+
+**Acceptance Scenarios**:
+
+1. **Given** the rename is complete, **When** `cargo build` is executed, **Then** the output binary is named `monocoque-agent-rc` and `monocoque-ctl`
+2. **Given** the rename is complete, **When** the server starts, **Then** the SurrealDB namespace is `monocoque` and the database name is `agent_rc` (changed from `agent_rem`)
+3. **Given** the rename is complete, **When** the server loads credentials from the OS keychain, **Then** it looks for the keychain service name `monocoque-agent-rc` (changed from `monocoque-agent-rem`)
+4. **Given** the rename is complete, **When** the server emits tracing spans and log messages, **Then** all references use `monocoque-agent-rc` or `agent_rc` as appropriate
+5. **Given** the rename is complete, **When** MCP server-to-client notifications are sent (e.g., nudge), **Then** the custom method prefix is `monocoque/nudge` (the `monocoque` namespace prefix is unchanged)
+6. **Given** the rename is complete, **When** the user examines Cargo.toml, README, CLI help text, and config.toml comments, **Then** all references consistently use `monocoque-agent-rc` and there are zero remaining references to `monocoque-agent-rem` or `agent-rem` or `agent_rem` (except historical changelog entries)
+7. **Given** an existing deployment that used the old `monocoque-agent-rem` keychain service name, **When** the server starts with the new name, **Then** the server does NOT automatically migrate keychain entries (the operator must re-store credentials under the new service name), and the startup error message clearly explains the required action
+
+---
+
+### Edge Cases
+
+* What happens when the Slack WebSocket connection drops mid-approval? The server queues the pending request in the database and re-posts it to Slack upon reconnection.
+* What happens when the operator taps "Accept" twice on the same proposal? The server processes only the first interaction and ignores duplicates (the buttons are replaced with a static status indicator after the first action).
+* What happens when a diff targets a file path outside the workspace root? The server rejects the operation with a path violation error.
+* What happens when the agent sends a log message while the Slack API is rate-limited? Messages are queued in memory and retried with exponential backoff after the rate limit clears.
+* What happens when the operator issues a command that is not in the allowlist? The server rejects it with an explicit "command not found" error. No shell execution occurs.
+* What happens when the workspace policy file is malformed? The server falls back to "require approval for everything" and logs a warning to both the console and Slack.
+* What happens when someone other than the authorized operator interacts with buttons or commands? The interaction is silently ignored. A security event is logged with the unauthorized user's ID and the action they attempted.
+* What happens when an authorized user who is not the session owner tries to interact with another user's session? The interaction is rejected with a message indicating the session belongs to a different operator. The event is logged but not treated as a security violation.
+* What happens when a checkpoint restore detects workspace files that have diverged? The server warns the operator with a list of changed files and requires explicit confirmation before proceeding.
+* What happens when the server receives a SIGTERM while an agent session is active? The server saves pending requests, notifies Slack, terminates spawned agent processes with a grace period, and exits cleanly.
+* What happens when the agent stalls during a tool call that is handled by the host IDE (not the MCP server)? The server can only detect silence in the MCP tool call stream. If the agent is blocked on a non-MCP interaction (e.g., a local IDE confirmation dialog), the stall detector fires and the nudge is injected, but the agent may not be able to act on it until the local block is cleared. The stall alert informs the operator of this ambiguity.
+* What happens when the agent stalls and the auto-nudge wakes it up, but it immediately stalls again? The server tracks consecutive nudge attempts per session. After exceeding the configurable max-retries, it escalates to the operator rather than continuing to auto-nudge in an infinite loop.
+* What happens when multiple stall alerts fire in rapid succession across concurrent sessions? Each session has its own independent stall timer. Alerts are posted with the session ID prominently displayed so the operator can distinguish between them.
+* What happens when the agent calls `heartbeat` indefinitely but never makes progress? The heartbeat resets the stall timer, so no stall alert fires. However, the operator retains visibility via `remote_log` messages and session elapsed time. A future enhancement could track heartbeat-without-progress as a distinct anomaly, but for v1 the heartbeat is trusted as a liveness signal.
+* What happens when the agent sends a malformed or empty progress snapshot in the `heartbeat` call? The server validates the snapshot structure (an ordered list of items, each with a string label and a status enum). If the snapshot is malformed, the server rejects the heartbeat call with a descriptive error, leaves the existing snapshot unchanged, and still resets the stall timer.
+* What happens when a checkpoint is restored and the stored progress snapshot no longer matches the agent's actual state? The restored progress snapshot is informational — the agent is the source of truth. The server includes the checkpoint's progress snapshot in the restore response so the agent can use it for orientation, but the agent is expected to submit a fresh progress snapshot via `heartbeat` once it re-evaluates its position. The server does not enforce consistency between the snapshot and actual file system state.
+* What happens when `SLACK_BOT_TOKEN` is set as an environment variable but contains an invalid or expired token? The server accepts the value at startup (it cannot validate token freshness without contacting Slack). The Slack client connection attempt fails with an authentication error. The server logs the failure with a message suggesting the operator verify the token value.
+* What happens when the OS keychain has a stale `slack_bot_token` and the environment variable has a fresh one? The keychain value takes precedence per FR-039. The operator must update the keychain entry or remove it to allow the environment variable fallback to activate.
+* What happens when an SSE client provides a `channel_id` for a Slack channel the bot is not a member of? The server accepts the channel ID at connection time (no pre-validation). Subsequent Slack API calls to that channel fail with a "not_in_channel" error. The server logs the error and returns it to the agent as a tool call failure.
+* What happens when the `channel_id` query parameter contains special characters or an invalid Slack channel ID format? The server does not validate the format of the channel ID — it passes it through to the Slack API, which rejects invalid IDs with an error. The error is surfaced to the agent.
+* What happens when a user runs the renamed `monocoque-agent-rc` binary but their keychain still has credentials stored under the old `monocoque-agent-rem` service name? The server does not find the credentials in the keychain (it only checks the new service name `monocoque-agent-rc`). It falls back to environment variables. If those are also absent, the server fails with an error message that includes the expected keychain service name, helping the operator identify the mismatch.
+* What happens when a user has a SurrealDB database from the old `agent_rem` name and starts the renamed server? The server creates a new `agent_rc` database. The old `agent_rem` data is not migrated automatically. The operator must manually migrate or re-initialize. The server does not access or delete the old database.
+
+## Out of Scope (v1)
+
+* Multi-machine or distributed deployment (server runs on a single local workstation)
+* Web-based dashboard or UI (Slack is the sole remote interface)
+* Agent-to-agent communication or multi-agent collaboration protocols
+* Custom Slack app distribution or marketplace listing (assumes pre-configured bot)
+
+> **Note**: Multi-workspace Slack support IS in scope. The server acts as a locally hosted service supporting multiple concurrent IDE workspaces (VS Code, GitHub Copilot CLI, etc.), each with its own agent sessions and workspace root.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+* **FR-001**: System MUST expose an MCP-compatible server interface that AI agents (Claude Code, GitHub Copilot CLI, Cursor, VS Code) can connect to via standard transports
+* **FR-002**: System MUST maintain a persistent WebSocket connection to Slack via Socket Mode, requiring no inbound firewall ports or public IP addresses
+* **FR-003**: System MUST render code diffs in Slack with size-adaptive formatting: inline code blocks for small diffs and uploaded snippets with syntax highlighting for large diffs
+* **FR-004**: System MUST provide interactive "Accept" and "Reject" buttons on code proposals that resolve the agent's blocked state when the operator responds
+* **FR-005**: System MUST apply approved code changes directly to the local file system, supporting both full-file writes and unified diff patch application
+* **FR-006**: System MUST validate that all file operations resolve within the configured workspace root directory, rejecting path traversal attempts
+* **FR-007**: System MUST persist all pending approval requests and session state to SurrealDB (embedded mode) that survives process restarts
+* **FR-008**: System MUST forward agent continuation prompts to Slack with "Continue", "Refine", and "Stop" action buttons and return the operator's decision to the agent
+* **FR-009**: System MUST support a workspace-level auto-approve policy file that permits pre-authorized operations to bypass the remote approval gate
+* **FR-010**: System MUST hot-reload the workspace policy file when it changes, without requiring a server restart
+* **FR-011** *(superseded by ADR-0012)*: ~~System MUST enforce that the workspace policy cannot expand permissions beyond what the global configuration allows~~ → Workspace auto-approve policy is entirely self-contained in `.agentrc/settings.json`; `config.commands` is exclusively for Slack slash-command aliases (FR-014). See `docs/adrs/0012-policy-workspace-self-contained-auto-approve.md`.
+* **FR-012**: System MUST allow the remote operator to start, pause, resume, terminate, checkpoint, and restore agent sessions via Slack slash commands
+* **FR-013**: System MUST bind each agent session to exactly one Slack user (the session owner) at creation time. Only the session owner may interact with that session's approvals, prompts, stall alerts, and slash commands. Interactions from non-owner users (even if listed in `authorized_user_ids`) are rejected for that session. The `authorized_user_ids` list determines who may create new sessions.
+* **FR-014**: System MUST execute only commands explicitly listed in the server configuration allowlist when triggered remotely, rejecting all others
+* **FR-015**: System MUST transmit non-blocking status log messages from the agent to the Slack channel with severity-based visual formatting
+* **FR-016**: System MUST provide a local IPC channel (named pipe or Unix domain socket) for local overrides when the operator is physically present
+* **FR-017**: System MUST support switching between "remote", "local", and "hybrid" operational modes at runtime
+* **FR-018**: System MUST expose the Slack channel's recent chat history as an MCP resource, allowing the agent to read operator instructions from the channel
+* **FR-019**: System MUST provide a comprehensive command discovery mechanism via a "help" command that lists all available commands grouped by category
+* **FR-020**: System MUST handle Slack API rate limits by queuing messages and retrying with exponential backoff
+* **FR-021**: System MUST shut down gracefully on process termination signals, saving state, notifying Slack, and terminating spawned agent processes
+* **FR-022**: System MUST prevent double-submission of approval and prompt responses by replacing interactive buttons with static status text after the first action
+* **FR-023**: System MUST enforce a configurable maximum on concurrent agent sessions to prevent resource exhaustion
+* **FR-024**: System MUST verify file integrity (via content hashing) before applying diffs and before restoring checkpoints, warning the operator of divergences
+* **FR-025**: System MUST track the timestamp of the most recent MCP activity (tool call requests, tool call responses, and heartbeat calls) for each active session and detect when the idle interval exceeds a configurable inactivity threshold. The stall timer is automatically paused while the server is executing a known long-running operation (e.g., a custom command) and resumes when the operation completes.
+* **FR-026**: System MUST post a stall alert to Slack when an active session's inactivity threshold is exceeded, including the last tool called, elapsed idle time, and session context. If the session has a progress snapshot, the alert MUST render a checklist of todo items showing completed (✅), in-progress (🔄), and pending (⬜) items
+* **FR-027**: System MUST provide a "Nudge" action on stall alerts that delivers a configurable continuation message to the agent via an MCP server-to-client notification (custom method name) to prompt it to resume work. If the session has a progress snapshot, the nudge notification payload MUST include a summary of completed items and the next pending item
+* **FR-028**: System MUST support an auto-nudge escalation policy: after a configurable wait period without operator response, the server auto-nudges the agent and notifies Slack
+* **FR-029**: System MUST cap the number of consecutive auto-nudge attempts per session and escalate to the operator with an elevated alert when the cap is exceeded
+* **FR-030**: System MUST automatically dismiss stall alerts (updating the Slack message and disabling action buttons) when the agent self-recovers and resumes making tool calls
+* **FR-031**: System MUST expose a lightweight `heartbeat` MCP tool that the agent can call during its own long-running local operations to reset the stall detection timer. The tool accepts an optional status message and an optional structured progress snapshot (a list of todo items, each with a label and a status of "done", "in_progress", or "pending"). When a progress snapshot is provided, the server persists it on the session record, replacing any previous snapshot. When omitted, any existing snapshot is preserved. The tool returns immediately with no side effects beyond resetting the timer, updating the progress snapshot, and optionally logging the status to the operator.
+* **FR-033**: System MUST persist the most recently reported progress snapshot on the session record in the embedded database so that it survives server restarts. The progress snapshot MUST be included in state recovery responses and checkpoint metadata.
+* **FR-034**: System MUST include the progress snapshot in auto-nudge continuation messages, summarizing completed items and identifying the next pending item so the agent can reorient after a stall without re-deriving its position.
+* **FR-032**: System MUST unconditionally expose all MCP tools to every connected agent regardless of server configuration or session type. Tools called in inapplicable contexts (e.g., `heartbeat` when stall detection is disabled) MUST return a descriptive error rather than being hidden from the tool listing.
+* **FR-035**: System MUST automatically purge all persisted data (sessions, approval requests, checkpoints, stall alerts) 30 days after the owning session is terminated. Active (non-terminated) sessions and their associated data MUST NOT be purged. The retention period MUST be configurable via the global configuration file.
+* **FR-036**: System MUST load Slack tokens and other sensitive credentials from the OS keychain (Windows Credential Manager / macOS Keychain) as the primary mechanism. If the keychain is unavailable or credentials are not found, the system MUST fall back to reading from environment variables. Credentials MUST NOT be stored in plaintext configuration files.
+* **FR-037**: System MUST emit structured tracing spans to stderr via `tracing-subscriber` covering MCP tool call execution, Slack API interactions, stall detection events, and session lifecycle transitions. No metrics endpoint or external telemetry collector is required.
+
+### Functional Requirements — Slack Environment Variable Configuration (US11)
+
+* **FR-038**: System MUST attempt to load `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID` from user environment variables when the corresponding credentials are not found in the OS keychain. The environment variable names are fixed and case-sensitive.
+* **FR-039**: System MUST use the OS keychain as the primary credential source and environment variables as the fallback. When both sources contain a credential, the keychain value takes precedence.
+* **FR-040**: System MUST fail startup with a clear, actionable error message if any required Slack credential (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`) cannot be found in either the OS keychain or the corresponding environment variable. The error message MUST identify the missing credential by name and describe both resolution methods (keychain and environment variable).
+* **FR-041**: System MUST treat `SLACK_TEAM_ID` as optional. If absent from both keychain and environment, the server connects to Slack without a team ID constraint (suitable for single-workspace installations). If present, it is used to scope Socket Mode connections to the specified workspace.
+
+### Functional Requirements — Dynamic Slack Channel Selection (US12)
+
+* **FR-042**: System MUST accept an optional `channel_id` query string parameter on the HTTP/SSE transport endpoint URL (e.g., `/sse?channel_id=C_CHANNEL_ID`). When present and non-empty, all Slack messages for that SSE session are routed to the specified channel instead of the default `config.slack.channel_id`.
+* **FR-043**: System MUST use the default `config.slack.channel_id` when the `channel_id` query parameter is absent, empty, or when the agent connects via the stdio transport.
+* **FR-044**: System MUST support concurrent SSE sessions with different `channel_id` overrides, routing each session's Slack messages independently to its designated channel.
+
+### Functional Requirements — Service Rebranding (US13)
+
+* **FR-045**: System MUST be built and distributed as a binary named `monocoque-agent-rc` (replacing the former `monocoque-agent-rem` binary name). The companion CLI binary remains `monocoque-ctl`.
+* **FR-046**: System MUST use the keychain service identifier `monocoque-agent-rc` when loading credentials from the OS keychain. The former service name `monocoque-agent-rem` is NOT checked as a fallback.
+* **FR-047**: System MUST use the SurrealDB database name `agent_rc` (within the `monocoque` namespace) for all persistent storage. The former database name `agent_rem` is NOT automatically migrated.
+* **FR-048**: System MUST update all user-visible references (CLI help text, tracing output, Slack message content, configuration file comments, README, error messages) to use `monocoque-agent-rc` consistently. Zero references to the former name `monocoque-agent-rem` or `agent-rem` shall remain in the codebase except in historical changelog or migration notes.
+* **FR-049**: System MUST update the Cargo.toml package name and all internal Rust crate references to use the `rc` suffix consistently. All module names, test files, and import paths that previously referenced `rem` MUST be updated to `rc`.
+
+### Key Entities
+
+* **Approval Request**: A pending human decision on a code proposal. Attributes include a unique request ID, proposal title, description, diff content, target file path, risk level, status (pending, approved, rejected, expired, consumed), and creation timestamp. Belongs to exactly one Session.
+* **Session**: A tracked instance of an agent process. Attributes include a unique session ID, owner Slack user ID (bound at creation, immutable for the session's lifetime), state (created, active, paused, terminated), associated prompt/instruction, creation timestamp, last activity timestamp, and last-reported progress snapshot (an optional ordered list of todo items, each with a label and status of "done", "in_progress", or "pending"). Only the owner may interact with the session's approvals, prompts, stall alerts, and commands. May have zero or more Checkpoints and zero or more Approval Requests.
+* **Checkpoint**: A named snapshot of a session's state at a point in time. Attributes include a unique checkpoint ID, human-readable label, creation timestamp, serialized session state, a manifest of workspace file hashes for divergence detection, and the session's progress snapshot at the time of creation (if any). Belongs to exactly one Session.
+* **Continuation Prompt**: A forwarded meta-prompt from an agent. Attributes include a unique prompt ID, raw prompt text, prompt type (continuation, clarification, error recovery, resource warning), elapsed execution time, action count, and the operator's decision (continue, refine, stop). Belongs to exactly one Session.
+* **Workspace Policy**: The auto-approve configuration for a workspace. Contains approved commands, approved tools, file path patterns, risk level threshold, and notification preferences. Loaded from a per-workspace configuration file.
+* **Registry Command**: A pre-approved shell command mapped from a user-facing alias to an executable command string. Defined in the global configuration. Attributes include the alias key and the full command value.
+* **Stall Alert**: A watchdog notification triggered by detected agent inactivity. Attributes include the session ID, last tool call name, last activity timestamp, elapsed idle time, nudge attempt count, alert status (pending, nudged, self-recovered, escalated, dismissed), the operator's response action, and the session's progress snapshot at the time of the alert (if any). Belongs to exactly one Session.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+* **SC-001**: The operator can review and approve a code proposal from a mobile device in under 30 seconds from the moment the notification arrives
+* **SC-002**: Approved code changes are written to the local file system within 2 seconds of the operator tapping "Accept"
+* **SC-003**: The server maintains Slack connectivity for 24-hour unattended sessions, automatically reconnecting after network interruptions within 5 minutes
+* **SC-004**: 100% of pending approval requests survive a server restart and are recoverable by the agent upon reconnection
+* **SC-005**: Auto-approved operations complete without any Slack round-trip, reducing agent blocking time for routine operations to zero
+* **SC-006**: The operator can start, manage, and switch between up to 3 concurrent agent sessions from Slack without physical access to the workstation
+* **SC-007**: Continuation prompt forwarding eliminates 100% of agent stalls caused by meta-level prompts during unattended operation
+* **SC-008**: All file operations are constrained to the workspace root with zero path traversal escapes across all usage scenarios
+* **SC-009**: Unauthorized Slack users are unable to interact with any server functionality, with 100% of unauthorized attempts logged
+* **SC-010**: The server starts and becomes operational (MCP interface ready, Slack connected) within 10 seconds on standard hardware
+* **SC-011**: Silent agent stalls are detected and the operator is alerted within the configured inactivity threshold (default: 5 minutes), eliminating undetected idle periods during unattended operation
+* **SC-012**: Auto-nudge recovers stalled agents without operator intervention in at least 80% of stall events, reducing the need for manual nudges
+* **SC-013**: The server starts successfully with Slack credentials provided exclusively via environment variables, with no keychain dependency, in under 10 seconds on standard hardware
+* **SC-014**: Multiple concurrent SSE agent sessions, each specifying a different `channel_id`, route 100% of their Slack messages to their designated channels with zero cross-contamination
+* **SC-015**: After the service rename, zero references to "monocoque-agent-rem", "agent-rem", or "agent_rem" exist in the codebase (excluding historical changelog entries), verified by automated grep across all source files, configuration files, and documentation
+
+## Assumptions
+
+* The operator has a Slack workspace with a bot application configured for Socket Mode (App-Level Token and Bot Token available)
+* Slack credentials (bot token, app token, team ID) are available via the OS keychain under the service name `monocoque-agent-rc`, or as environment variables `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_TEAM_ID`
+* The local workstation has a stable internet connection for Slack WebSocket communication, though temporary interruptions are tolerated
+* The AI agent (Claude Code, GitHub Copilot CLI, Cursor, etc.) supports the Model Context Protocol and can connect to a local MCP server
+* Each connected agent is associated with a workspace root directory. The server supports multiple concurrent workspaces, each identified by its root path. Workspace roots are specified per-session at connection time rather than as a single global setting
+* Only one primary agent connects via the standard transport (stdio); additional spawned sessions connect via an HTTP-based transport on a local port
+* The operator's Slack user ID is known in advance and configured in the server's authorized user list
+* The host CLI binary for session spawning (e.g., "claude", "gh copilot") is installed and available on the system PATH
+* SurrealDB is used in embedded mode as the persistent storage engine for all session state, approval requests, checkpoints, and stall alerts
+* The service is branded and distributed as `monocoque-agent-rc` (remote control). All binary names, keychain entries, database identifiers, and documentation use this name consistently
+
+
+# Data Model: MCP Remote Agent Server
+
+**Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+**Date**: 2026-02-10 (updated from 2026-02-09)
+
+## Entity Relationship Diagram
+
+```text
+┌─────────────────┐      ┌──────────────────┐      ┌───────────────────┐
+│     Session      │──1:N─│    Checkpoint     │      │  WorkspacePolicy  │
+│                  │      │                  │      │ (in-memory, per   │
+│  session_id  PK  │      │  checkpoint_id PK│      │  workspace_root)  │
+│  owner_user_id   │      │  session_id   FK │      │                   │
+│  workspace_root  │      │  label           │      │  auto_approve     │
+│  status          │      │  session_state   │      │  commands[]       │
+│  prompt          │      │  file_hashes{}   │      │  tools[]          │
+│  mode            │      │  progress_snap   │      │  file_patterns{}  │
+│  created_at      │      │  workspace_root  │      │  risk_threshold   │
+│  updated_at      │      │  created_at      │      └───────────────────┘
+│  last_tool       │      └──────────────────┘
+│  nudge_count     │      ┌──────────────────┐      ┌───────────────────┐
+│  stall_paused    │──1:N─│ ApprovalRequest   │      │  RegistryCommand  │
+│  progress_snap   │      │                  │      │   (config.toml)   │
+│  terminated_at   │      │  request_id   PK │      │                   │
+└─────────────────┘      │  session_id   FK │      │  alias         PK │
+        │                 │  title           │      │  command          │
+        │                 │  description     │      └───────────────────┘
+        │ 1:N             │  diff_content    │
+        ▼                 │  file_path       │      ┌───────────────────┐
+┌─────────────────┐      │  risk_level      │      │   GlobalConfig    │
+│ContPrompt       │      │  status          │      │   (config.toml    │
+│                  │      │  original_hash   │      │   + keychain/env) │
+│  prompt_id   PK  │      │  slack_ts        │      │                   │
+│  session_id  FK  │      │  created_at      │      │  default_ws_root  │
+│  prompt_text     │      │  consumed_at     │      │  slack_app_token* │
+│  prompt_type     │      └──────────────────┘      │  slack_bot_token* │
+│  elapsed_secs    │                                │  channel_id       │
+│  actions_taken   │                                │  authorized_users │
+│  decision        │                                │  max_sessions     │
+│  instruction     │                                │  timeouts{}       │
+│  slack_ts        │      ┌──────────────────┐      │  stall_config{}   │
+│  created_at      │      │   StallAlert     │      │  retention_days   │
+└─────────────────┘      │                  │      └───────────────────┘
+                          │  alert_id     PK │      * loaded from OS
+                          │  session_id   FK │        keychain or env
+                          │  last_tool       │
+                          │  last_activity_at│
+                          │  idle_seconds    │
+                          │  nudge_count     │
+                          │  status          │
+                          │  nudge_message   │
+                          │  progress_snap   │
+                          │  slack_ts        │
+                          │  created_at      │
+                          └──────────────────┘
+
+Relationships (all via session_id FK):
+  Session ──1:N── Checkpoint
+  Session ──1:N── ApprovalRequest
+  Session ──1:N── ContinuationPrompt
+  Session ──1:N── StallAlert
+```
+
+## Entities
+
+### Session
+
+Represents a tracked instance of an agent process connected to the MCP server.
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `session_id` | `string` | PK, unique, generated UUID | Unique identifier for the session |
+| `owner_user_id` | `string` | Required, immutable after creation | Slack user ID bound at creation time |
+| `workspace_root` | `string` | Required, immutable after creation | Absolute path to the workspace directory for this session |
+| `status` | `string` | Required, enum | Current lifecycle state |
+| `prompt` | `string` | Optional | Initial instruction/prompt for the session |
+| `mode` | `string` | Required, default `"remote"` | Operational mode: `remote`, `local`, `hybrid` |
+| `created_at` | `datetime` | Required, auto-set | When the session was created |
+| `updated_at` | `datetime` | Required, auto-updated | Last MCP activity timestamp (tool call, response, heartbeat) |
+| `terminated_at` | `datetime` | Optional | When the session was terminated (used for retention purge) |
+| `last_tool` | `string` | Optional | Name of the last tool called by the agent |
+| `nudge_count` | `int` | Required, default `0` | Consecutive auto-nudge attempts for current stall |
+| `stall_paused` | `bool` | Required, default `false` | Whether stall detection is paused (long-running op) |
+| `progress_snapshot` | `object` | Optional | Last-reported progress snapshot from `heartbeat` (ordered list of `{label, status}` items) |
+
+**Status values**: `created` → `active` → `paused` | `terminated` | `interrupted`
+
+**State machine**:
+
+```text
+created ──▶ active ──▶ paused ──▶ active (resume)
+              │                      │
+              ├──▶ terminated        ├──▶ terminated
+              └──▶ interrupted       └──▶ interrupted
+```
+
+**Validation rules**:
+
+- `owner_user_id` must be in the global `authorized_user_ids` list at creation time.
+- `owner_user_id` cannot be changed after session creation.
+- `workspace_root` must be a valid absolute path and cannot be changed after creation.
+- Only the session owner may interact with the session's requests and commands.
+- Total active + paused sessions must not exceed `max_concurrent_sessions`.
+- `terminated_at` is set when status transitions to `terminated` or `interrupted`. Used by the retention purge service (FR-035).
+- `progress_snapshot` is updated by the `heartbeat` tool. When provided, replaces the previous snapshot. When omitted from heartbeat, existing snapshot is preserved.
+
+### ApprovalRequest
+
+Represents a pending human decision on a code proposal.
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `request_id` | `string` | PK, unique, generated UUID | Unique identifier |
+| `session_id` | `string` | FK → Session, required | Owning session |
+| `title` | `string` | Required | Concise summary of the proposal |
+| `description` | `string` | Optional | Contextual details |
+| `diff_content` | `string` | Required | Unified diff or raw file content |
+| `file_path` | `string` | Required | Target file path relative to workspace root |
+| `risk_level` | `string` | Required, enum: `low`, `high`, `critical` | Risk classification |
+| `status` | `string` | Required, enum | Current state of the request |
+| `original_hash` | `string` | Required | SHA-256 hash of file at proposal time |
+| `slack_ts` | `string` | Optional | Slack message timestamp for updates |
+| `created_at` | `datetime` | Required, auto-set | When the request was created |
+| `consumed_at` | `datetime` | Optional | When the approved diff was applied |
+
+**Status values**: `pending` → `approved` → `consumed` | `rejected` | `expired` | `interrupted`
+
+**Validation rules**:
+
+- `file_path` must resolve within `workspace_root` (path traversal check).
+- Only one `pending` approval request per session at a time (agent blocks until resolved).
+- Transition to `consumed` requires prior `approved` status and valid `request_id` passed to `accept_diff`.
+- Transition to `consumed` is idempotent — duplicate `accept_diff` calls return `already_consumed` error.
+
+### Checkpoint
+
+A named snapshot of a session's state at a point in time.
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `checkpoint_id` | `string` | PK, unique, generated UUID | Unique identifier |
+| `session_id` | `string` | FK → Session, required | Owning session |
+| `label` | `string` | Optional | Human-readable name (e.g., "before-refactor") |
+| `session_state` | `object` | Required | Serialized session state snapshot |
+| `file_hashes` | `object` | Required | Map of `file_path → SHA-256 hash` for divergence detection |
+| `workspace_root` | `string` | Required | Workspace root at checkpoint time (for restore fidelity) |
+| `progress_snapshot` | `object` | Optional | Session's progress snapshot at checkpoint time |
+| `created_at` | `datetime` | Required, auto-set | When the checkpoint was created |
+
+**Validation rules**:
+
+- On restore, each `file_hashes` entry is compared to the current file's hash. Diverged files trigger a warning to the operator requiring explicit confirmation before proceeding.
+- Restoring a checkpoint terminates any currently active session for that session ID.
+
+### ContinuationPrompt
+
+A forwarded meta-prompt from an agent requiring operator decision.
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `prompt_id` | `string` | PK, unique, generated UUID | Unique identifier |
+| `session_id` | `string` | FK → Session, required | Owning session |
+| `prompt_text` | `string` | Required | Raw text of the continuation prompt |
+| `prompt_type` | `string` | Required, enum | Category of the prompt |
+| `elapsed_seconds` | `int` | Optional | Seconds since last user interaction |
+| `actions_taken` | `int` | Optional | Count of actions performed in this iteration |
+| `decision` | `string` | Optional, enum | Operator's response |
+| `instruction` | `string` | Optional | Revised instruction text (when decision is `refine`) |
+| `slack_ts` | `string` | Optional | Slack message timestamp |
+| `created_at` | `datetime` | Required, auto-set | When the prompt was created |
+
+**Prompt type values**: `continuation`, `clarification`, `error_recovery`, `resource_warning`
+
+**Decision values**: `continue`, `refine`, `stop`
+
+**Validation rules**:
+
+- `error_recovery` prompts are never auto-approved regardless of workspace policy.
+- Auto-timeout decision defaults to `continue` after `prompt_timeout_seconds`.
+
+### StallAlert
+
+A watchdog notification triggered by detected agent inactivity.
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `alert_id` | `string` | PK, unique, generated UUID | Unique identifier |
+| `session_id` | `string` | FK → Session, required | Owning session |
+| `last_tool` | `string` | Optional | Name of last tool called before stall |
+| `last_activity_at` | `datetime` | Required | Timestamp of last detected MCP activity |
+| `idle_seconds` | `int` | Required | Elapsed idle time when alert was created |
+| `nudge_count` | `int` | Required, default `0` | Number of nudge attempts for this alert |
+| `status` | `string` | Required, enum | Current state of the alert |
+| `nudge_message` | `string` | Optional | Custom nudge message from operator |
+| `progress_snapshot` | `object` | Optional | Session's progress snapshot at alert time |
+| `slack_ts` | `string` | Optional | Slack message timestamp for updates |
+| `created_at` | `datetime` | Required, auto-set | When the alert was created |
+
+**Status values**: `pending` → `nudged` | `self_recovered` | `escalated` | `dismissed`
+
+**Validation rules**:
+
+- Only one active stall alert (`pending` or `nudged`) per session at a time.
+- Self-recovery (agent resumes activity) dismisses the alert and disables Slack buttons via `chat.update`.
+- After `max_retries` auto-nudges, status transitions to `escalated` with `@channel` mention.
+
+### WorkspacePolicy (in-memory, per workspace root, not persisted)
+
+The auto-approve configuration loaded from `.agentrc/settings.json` relative to the session's `workspace_root`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | `bool` | Master switch for auto-approve |
+| `commands` | `string[]` | Shell commands that bypass approval (glob wildcards allowed) |
+| `tools` | `string[]` | MCP tool names that bypass approval |
+| `file_patterns.write` | `string[]` | Glob patterns for auto-approved file writes |
+| `file_patterns.read` | `string[]` | Glob patterns for auto-approved file reads |
+| `risk_level_threshold` | `string` | Maximum risk level for auto-approve (`low`, `high`) |
+| `log_auto_approved` | `bool` | Whether to post auto-approved actions to Slack |
+| `summary_interval_seconds` | `int` | Interval for summary notifications |
+
+**Validation rules**:
+
+- `commands` entries must exist in the global `config.toml` allowlist — workspace policy cannot introduce new commands.
+- On parse error, fall back to "require approval for everything" and log warning to console and Slack.
+- Hot-reloaded via `notify` file watcher without server restart.
+
+### GlobalConfig (config.toml + OS keychain/env vars, read-only at startup)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `default_workspace_root` | `string` | Default workspace root for the primary stdio agent (optional; per-session override takes precedence) |
+| `slack.app_token` | `string` | Slack App-Level Token for Socket Mode — loaded from OS keychain (`monocoque-agent-rc/slack_app_token`) or `SLACK_APP_TOKEN` env var (FR-038, FR-039, FR-046) |
+| `slack.bot_token` | `string` | Slack Bot User OAuth Token — loaded from OS keychain (`monocoque-agent-rc/slack_bot_token`) or `SLACK_BOT_TOKEN` env var (FR-038, FR-039, FR-046) |
+| `slack.team_id` | `string` | Slack workspace team ID — loaded from OS keychain (`monocoque-agent-rc/slack_team_id`) or `SLACK_TEAM_ID` env var; optional (FR-041) |
+| `slack.channel_id` | `string` | Default target Slack channel ID. Can be overridden per-session via the `?channel_id=` query parameter on the SSE endpoint (FR-042, FR-043) |
+| `authorized_user_ids` | `string[]` | Slack user IDs permitted to create sessions |
+| `max_concurrent_sessions` | `int` | Maximum concurrent sessions (default: 3) |
+| `host_cli` | `string` | CLI binary for spawning sessions (e.g., `claude`, `gh`) |
+| `host_cli_args` | `string[]` | Default arguments for the host CLI |
+| `timeouts.approval_seconds` | `int` | Approval request timeout (default: 3600) |
+| `timeouts.prompt_seconds` | `int` | Continuation prompt timeout (default: 1800) |
+| `timeouts.wait_seconds` | `int` | Wait-for-instruction timeout (default: 0 = indefinite) |
+| `stall.enabled` | `bool` | Enable stall detection (default: true) |
+| `stall.inactivity_threshold_seconds` | `int` | Idle threshold before alert (default: 300) |
+| `stall.escalation_threshold_seconds` | `int` | Wait before auto-nudge (default: 120) |
+| `stall.max_retries` | `int` | Max auto-nudge attempts before escalation (default: 3) |
+| `stall.default_nudge_message` | `string` | Default nudge continuation message |
+| `commands` | `map<string, string>` | Custom command alias → shell command mapping |
+| `http_port` | `int` | Port for SSE transport (default: 3000) |
+| `ipc_name` | `string` | Named pipe / socket name (default: `monocoque-agent-rc`) (FR-048) |
+| `retention_days` | `int` | Days after session termination before data is purged (default: 30) |
+
+### RegistryCommand (derived from GlobalConfig)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `alias` | `string` | User-facing command name (e.g., `status`) |
+| `command` | `string` | Full shell command (e.g., `git status`) |
+
+**Validation rules**:
+
+- Only commands in this registry may be executed remotely.
+- Workspace policy can auto-approve registered commands but cannot add new ones.
+
+
+# Quickstart: MCP Remote Agent Server
+
+**Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+**Date**: 2026-02-10 (updated from 2026-02-09)
+
+## Prerequisites
+
+- Rust toolchain (stable, edition 2021) — install via [rustup](https://rustup.rs/)
+- A Slack workspace with a bot application configured for Socket Mode
+  - App-Level Token (`xapp-...`) with `connections:write` scope
+  - Bot User OAuth Token (`xoxb-...`) with `chat:write`, `files:write`, `commands`, `reactions:write` scopes
+  - Slash command `/monocoque` configured pointing to the bot
+  - Interactivity enabled (for button actions and modal submissions)
+- An MCP-compatible AI agent (Claude Code, GitHub Copilot CLI, Cursor, VS Code) installed on the local workstation
+- The host CLI binary for session spawning (e.g., `claude`, `gh`) on the system `PATH`
+
+## Setup
+
+### 1. Clone and build
+
+```bash
+git clone https://github.com/softwaresalt/monocoque-agent-rc.git
+cd monocoque-agent-rc
+cargo build --release
+```
+
+The build produces two binaries:
+
+- `target/release/monocoque-agent-rc` — the MCP server
+- `target/release/monocoque-ctl` — the local CLI override tool
+
+### 2. Store Slack credentials
+
+Credentials are loaded from the OS keychain first, with environment variables as fallback. The server checks each source in order and uses the first non-empty value found.
+
+| Credential | Keychain key | Env var | Required |
+|------------|-------------|---------|----------|
+| App-level token (Socket Mode) | `slack_app_token` | `SLACK_APP_TOKEN` | **Yes** |
+| Bot user OAuth token | `slack_bot_token` | `SLACK_BOT_TOKEN` | **Yes** |
+| Workspace team ID | `slack_team_id` | `SLACK_TEAM_ID` | No (optional) |
+
+Keychain service name: `monocoque-agent-rc`
+
+**Option A: OS keychain (recommended)**
+
+```bash
+# Using the monocoque-ctl helper
+monocoque-ctl credential set slack_app_token
+# (prompts for token value)
+monocoque-ctl credential set slack_bot_token
+# (prompts for token value)
+# Optional: store team ID in keychain
+monocoque-ctl credential set slack_team_id
+```
+
+**Option B: Environment variables (fallback)**
+
+```bash
+export SLACK_APP_TOKEN="xapp-1-..."
+export SLACK_BOT_TOKEN="xoxb-..."
+# Optional: set team ID
+export SLACK_TEAM_ID="T0123456789"
+```
+
+> **Note**: If both keychain and env var are set for the same credential, the keychain value takes precedence. Empty values are treated as absent. `SLACK_TEAM_ID` is optional and will not cause an error if missing from both sources.
+
+### 3. Create the global configuration
+
+Create `config.toml` in the project root (or `~/.config/monocoque/config.toml`):
+
+```toml
+# Default workspace root for the primary stdio agent (optional).
+# Each spawned session can override this with its own workspace root.
+default_workspace_root = "/path/to/your/project"
+http_port = 3000
+ipc_name = "monocoque-agent-rc"
+
+[slack]
+# Tokens are loaded from OS keychain (service: monocoque-agent-rc).
+# If not found in keychain, falls back to SLACK_APP_TOKEN / SLACK_BOT_TOKEN env vars.
+# Do NOT put tokens in this file.
+channel_id = "C0123456789"
+authorized_user_ids = ["U0123456789"]
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = true
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "Continue working on the current task. Pick up where you left off."
+
+host_cli = "claude"
+host_cli_args = []
+
+max_concurrent_sessions = 3
+retention_days = 30
+
+[commands]
+status = "git status"
+diff = "git diff"
+log = "git log --oneline -20"
+test = "cargo test"
+clippy = "cargo clippy"
+```
+
+### 4. (Optional) Create workspace auto-approve policy
+
+Create `.agentrc/settings.json` in your workspace root (each workspace can have its own policy):
+
+```json
+{
+  "autoApprove": {
+    "enabled": true,
+    "commands": ["git status", "git diff", "cargo test *"],
+    "tools": ["remote_log", "check_auto_approve", "heartbeat"],
+    "filePatterns": {
+      "write": ["tests/**", "*.test.rs"],
+      "read": ["**"]
+    },
+    "riskLevelThreshold": "low"
+  },
+  "notifications": {
+    "logAutoApproved": true,
+    "summaryIntervalSeconds": 300
+  }
+}
+```
+
+### 5. Connect your AI agent
+
+Add the MCP server to your agent's configuration.
+
+**Claude Code** (`~/.claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "monocoque": {
+      "command": "/path/to/monocoque-agent-rc",
+      "args": ["--config", "/path/to/config.toml"]
+    }
+  }
+}
+```
+
+**VS Code / Copilot** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "monocoque": {
+      "command": "/path/to/monocoque-agent-rc",
+      "args": ["--config", "/path/to/config.toml"]
+    }
+  }
+}
+```
+
+### 5a. (Optional) Multi-workspace channel routing
+
+When you have multiple VS Code workspaces connected to the same monocoque-agent-rc server, each workspace can target a different Slack channel by appending `?channel_id=` to the SSE URL. This keeps notifications organized — for example, frontend changes go to `#frontend-agents` and backend changes go to `#backend-agents`.
+
+In each workspace's `.vscode/mcp.json`, use the SSE transport with a `channel_id` query parameter:
+
+**Workspace A** (e.g., frontend project):
+
+```json
+{
+  "servers": {
+    "monocoque": {
+      "type": "sse",
+      "url": "http://127.0.0.1:3000/sse?channel_id=C_FRONTEND_CHANNEL"
+    }
+  }
+}
+```
+
+**Workspace B** (e.g., backend project):
+
+```json
+{
+  "servers": {
+    "monocoque": {
+      "type": "sse",
+      "url": "http://127.0.0.1:3000/sse?channel_id=C_BACKEND_CHANNEL"
+    }
+  }
+}
+```
+
+When `channel_id` is omitted, messages are sent to the default `slack.channel_id` configured in `config.toml`.
+
+### 6. Verify the connection
+
+Once the agent starts and connects:
+
+1. The server connects to Slack via Socket Mode (outbound WebSocket — no firewall changes needed).
+2. A startup message appears in the configured Slack channel: "Monocoque Agent Remote connected."
+3. The agent can now call any of the 9 MCP tools: `ask_approval`, `accept_diff`, `check_auto_approve`, `forward_prompt`, `remote_log`, `recover_state`, `set_operational_mode`, `wait_for_instruction`, `heartbeat`.
+
+## Basic workflow
+
+1. **Agent generates a code change** → calls `ask_approval` with the diff.
+2. **Server posts the diff to Slack** with Accept/Reject buttons.
+3. **Operator reviews on mobile** → taps Accept.
+4. **Server returns "approved"** to the agent with a `request_id`.
+5. **Agent calls `accept_diff`** with the `request_id`.
+6. **Server writes the file to disk** and confirms to both the agent and Slack.
+
+## Running tests
+
+```bash
+# Unit tests (uses in-memory SurrealDB)
+cargo test
+
+# Integration tests
+cargo test --test integration
+
+# Contract validation
+cargo test --test contract
+```
+
+## Local override (when at the desk)
+
+Use `monocoque-ctl` to approve/reject from a local terminal:
+
+```bash
+# List pending requests
+monocoque-ctl list
+
+# Approve a specific request
+monocoque-ctl approve <request_id>
+
+# Reject with reason
+monocoque-ctl reject <request_id> --reason "needs more tests"
+```
+
+
+
+
+---
+
+## Checklists
+
+# Specification Quality Checklist: MCP Remote Agent Server
+
+**Purpose**: Validate specification completeness and quality before proceeding to planning
+**Created**: 2026-02-08
+**Updated**: 2026-02-14
+**Feature**: [spec.md](../spec.md)
+
+## Content Quality
+
+* [x] No implementation details (languages, frameworks, APIs)
+* [x] Focused on user value and business needs
+* [x] Written for non-technical stakeholders
+* [x] All mandatory sections completed
+
+## Requirement Completeness
+
+* [x] No [NEEDS CLARIFICATION] markers remain
+* [x] Requirements are testable and unambiguous
+* [x] Success criteria are measurable
+* [x] Success criteria are technology-agnostic (no implementation details)
+* [x] All acceptance scenarios are defined
+* [x] Edge cases are identified
+* [x] Scope is clearly bounded
+* [x] Dependencies and assumptions identified
+
+## Feature Readiness
+
+* [x] All functional requirements have clear acceptance criteria
+* [x] User scenarios cover primary flows
+* [x] Feature meets measurable outcomes defined in Success Criteria
+* [x] No implementation details leak into specification
+
+## Notes
+
+* All items passed validation on first iteration (2026-02-08)
+* Updated 2026-02-14: Added User Stories 11, 12, 13 covering Slack env var configuration, dynamic channel selection, and service rebranding
+* 13 user stories cover the full feature surface: approval workflows, diff application, logging, stall detection, continuation prompts, auto-approve, session orchestration, file browsing, crash recovery, mode switching, Slack env var configuration, dynamic channel selection, and service rebranding
+* 49 functional requirements (FR-001 through FR-049) mapped from the specification, all expressed as user-facing capabilities
+* 15 measurable success criteria (SC-001 through SC-015) with specific targets
+* 22 edge cases covering network failures, authorization, path safety, rate limiting, crash recovery, credential fallback, channel override errors, and rename migration
+* 10 assumptions documented covering prerequisites for Slack, network, MCP support, host CLI availability, and service naming
+
+
+---
+
+# Addendum Requirements Quality — Deep Checklist (US11 + US12 + US13)
+
+**Purpose**: Validate the completeness, clarity, consistency, measurability, and edge-case coverage of the requirements for User Stories 11 (Slack Environment Variable Configuration), 12 (Dynamic Slack Channel Selection), and 13 (Service Rebranding to Remote Control).
+
+**Created**: 2026-02-14  
+**Depth**: Deep  
+**Audience**: Autonomous implementation agent (build-gate consumption)  
+**Scope**: spec.md §US11–§US13, FRs 038–049, SCs 013–015, edge cases 17–22, plan.md Phases 15–17, tasks.md T200–T217
+
+---
+
+## Requirement Completeness
+
+- [ ] CHK001 - Are all three fixed environment variable names (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_TEAM_ID`) explicitly enumerated in both the US11 narrative and FR-038? [Completeness, Spec §US11 / §FR-038]
+- [ ] CHK002 - Is the behavior for empty environment variable values (empty string `""`) specified? Acceptance scenario 5 references `SLACK_TEAM_ID` empty/unset, but FR-038 and FR-041 do not define how the system distinguishes empty from absent for `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN`. [Gap, Spec §FR-038]
+- [ ] CHK003 - Is the behavior for partially-set environment variables specified (e.g., `SLACK_BOT_TOKEN` set but `SLACK_APP_TOKEN` absent)? FR-040 covers the error case, but the requirement should explicitly state per-credential resolution, not all-or-nothing. [Completeness, Spec §FR-040]
+- [ ] CHK004 - Is the IPC pipe/socket default name included in the rename scope? The US13 narrative mentions it, the data-model.md references `monocoque-agent-rc`, but no FR (FR-045–FR-049) explicitly mandates the IPC pipe rename. [Gap, Spec §US13]
+- [ ] CHK005 - Is the workspace file `agent-rem.code-workspace` included in the rename scope? FR-048 says "zero remaining references" but does not list workspace metadata files as a rename target. [Gap, Spec §FR-048]
+- [ ] CHK006 - Are requirements defined for renaming Slack message branding text? US13 narrative lists "Slack message branding" as in-scope, but no FR specifies which Slack message strings must change. [Gap, Spec §US13]
+- [ ] CHK007 - Is there a requirement specifying which files/directories are excluded from the "zero references" rule in SC-015 and FR-048? Both mention "historical changelog entries" but do not define which files qualify as historical changelogs. [Completeness, Spec §FR-048 / §SC-015]
+- [ ] CHK008 - Are requirements defined for what happens when the `channel_id` query parameter value changes on SSE reconnection (same session, different channel)? The spec addresses new connections but not reconnection semantics. [Gap, Spec §US12]
+- [ ] CHK009 - Is there a requirement for the `channel_id` parameter on non-SSE HTTP endpoints (e.g., health check, metrics)? FR-042 scopes to "HTTP/SSE transport endpoint" — is it clear that only the SSE endpoint accepts this parameter? [Completeness, Spec §FR-042]
+- [ ] CHK010 - Are requirements defined for the companion CLI tool (`monocoque-ctl`) post-rename? FR-045 says it "remains `monocoque-ctl`" but no FR addresses whether the CLI's internal references to the server (help text, connection defaults) must also update. [Gap, Spec §FR-045]
+- [ ] CHK011 - Is the `SLACK_TEAM_ID` environment variable documented as optional in the Assumptions section? Assumption #2 lists it alongside required credentials without marking it as optional, potentially conflicting with FR-041. [Completeness, Spec §Assumptions]
+
+---
+
+## Requirement Clarity
+
+- [ ] CHK012 - Is "case-sensitive" in FR-038 specific enough? It states environment variable names are "fixed and case-sensitive" but does not clarify whether this refers to the variable name only or also the variable value. [Clarity, Spec §FR-038]
+- [ ] CHK013 - Is "clear, actionable error message" in FR-040 defined with minimum required content fields? The phrase is subjective. The plan.md elaborates (must include keychain service name, env var name, both resolution methods), but the FR itself does not specify these fields. [Clarity, Spec §FR-040]
+- [ ] CHK014 - Is "non-empty" in FR-042 quantified? Does it mean non-zero-length, non-whitespace-only, or matching a Slack channel ID format? FR-043 says "empty" uses default, but whitespace-only is not addressed. [Clarity, Spec §FR-042 / §FR-043]
+- [ ] CHK015 - Is "all user-visible references" in FR-048 scoped with an enumerated list or discovery mechanism? The phrase is open-ended. Plan.md provides a rename categories table, but the FR leaves the set unbounded. [Clarity, Spec §FR-048]
+- [ ] CHK016 - Is "historical changelog or migration notes" in FR-048 defined with specific file paths or naming conventions? Without a clear boundary, an agent cannot determine which files to exclude from the zero-reference verification. [Clarity, Spec §FR-048]
+- [ ] CHK017 - Is "scope Socket Mode connections to the correct workspace" in FR-041 defined with a specific technical mechanism? The requirement describes the intent but not how `SLACK_TEAM_ID` is passed to the Socket Mode client or what "scoping" means in the Slack API context. [Clarity, Spec §FR-041]
+- [ ] CHK018 - Is "single-workspace mode" in FR-041 defined? The term suggests behavior without a team ID constraint, but the requirement does not clarify whether implicit workspace detection occurs or if the first available workspace is used. [Clarity, Spec §FR-041]
+
+---
+
+## Requirement Consistency
+
+- [ ] CHK019 - Do FR-036 and FR-038/FR-039 create redundant requirements? FR-036 already mandates keychain-first with env var fallback. FR-038/FR-039 restate this for specific variables. Is the precedence behavior defined identically in both, or could an implementer interpret them differently? [Consistency, Spec §FR-036 / §FR-038 / §FR-039]
+- [ ] CHK020 - Does Assumption #2 align with FR-041 regarding `SLACK_TEAM_ID` optionality? Assumption #2 lists all three env vars as credential sources without distinguishing required from optional, while FR-041 explicitly marks `SLACK_TEAM_ID` as optional. [Consistency, Spec §Assumptions / §FR-041]
+- [ ] CHK021 - Is the keychain service name consistent across FR-046, Assumption #2, data-model.md, and edge case 21? FR-046 says `monocoque-agent-rc`, Assumption #2 says `monocoque-agent-rc`, edge case 21 references the old name as `monocoque-agent-rem`. Verify no document uses the old name as the current service name. [Consistency, Spec §FR-046 / §Assumptions / Edge Case 21]
+- [ ] CHK022 - Does acceptance scenario 7 of US13 conflict with edge case 21? Scenario 7 says the server does NOT migrate and the "startup error message clearly explains the required action." Edge case 21 says the server "falls back to environment variables" and only fails if those are absent. Both are consistent (error only on total credential absence) but the scenario 7 phrasing could imply an error occurs whenever old keychain entries exist. [Consistency, Spec §US13-SC7 / Edge Case 21]
+- [ ] CHK023 - Is the SurrealDB namespace consistent between FR-047, US13 acceptance scenario 2, and data-model.md? FR-047 says the namespace is `monocoque` (unchanged) and the database changes to `agent_rc`. Verify data-model.md uses the same namespace. [Consistency, Spec §FR-047 / §US13-SC2]
+- [ ] CHK024 - Are the plan.md Phase 15 tasks and tasks.md Phase 15 tasks in the same order with matching descriptions? (Post-remediation verification of F1/F2 fixes.) [Consistency, Plan §Phase15 / Tasks §Phase15]
+- [ ] CHK025 - Are the plan.md Phase 16 tasks and tasks.md Phase 16 tasks in the same order with matching descriptions? (Post-remediation verification of F1/F2 fixes.) [Consistency, Plan §Phase16 / Tasks §Phase16]
+
+---
+
+## Acceptance Criteria Quality
+
+- [ ] CHK026 - Are all US11 acceptance scenarios (1–5) testable by an autonomous agent without manual Slack workspace interaction? Scenario 1 requires verifying "connects to Slack successfully" — is the verification method specified (e.g., tracing output, health endpoint, exit code)? [Measurability, Spec §US11]
+- [ ] CHK027 - Is SC-013 measurable by an autonomous agent? It requires "starts successfully with Slack credentials provided exclusively via environment variables… in under 10 seconds." Is the measurement method defined (wall clock, process exit code, specific log line)? [Measurability, Spec §SC-013]
+- [ ] CHK028 - Is SC-014 measurable by an autonomous agent? "Zero cross-contamination" requires inspecting actual Slack channel messages, which may not be automatable in a test environment. Is a mock/stub verification acceptable? [Measurability, Spec §SC-014]
+- [ ] CHK029 - Is SC-015 specified with the exact grep pattern, file scope, and exclusion list for the zero-reference verification? The plan.md uses `grep -r "agent.rem" src/ tests/ ctl/ Cargo.toml`, but the spec only says "automated grep across all source files, configuration files, and documentation." [Measurability, Spec §SC-015]
+- [ ] CHK030 - Does US12 acceptance scenario 3 define "empty" consistently with FR-043? Scenario 3 says "empty `channel_id` parameter" is treated as absent. FR-043 says "absent, empty." Are both using the same definition of empty? [Measurability, Spec §US12-SC3 / §FR-043]
+- [ ] CHK031 - Is US13 acceptance scenario 6 exhaustive in its enumeration of documents to verify? It lists "Cargo.toml, README, CLI help text, and config.toml comments" but the codebase includes additional documents (quickstart.md, spec.md, constitution.md, copilot-instructions.md). [Measurability, Spec §US13-SC6]
+
+---
+
+## Scenario Coverage
+
+- [ ] CHK032 - Are requirements defined for the credential loading order when multiple fallback sources exist? FR-039 defines keychain > env var, but does not address whether the system should log which source was selected. Plan.md T203 adds tracing, but no FR mandates observability of credential source selection. [Coverage, Gap]
+- [ ] CHK033 - Are requirements defined for concurrent SSE session behavior when one session's target channel becomes unavailable mid-session (e.g., channel archived or deleted)? Edge cases 19–20 cover connection-time issues but not mid-session channel loss. [Coverage, Gap]
+- [ ] CHK034 - Are requirements defined for the stdio transport explicitly refusing the `channel_id` parameter? US12 acceptance scenario 5 states it always uses the default, but no FR specifies the behavior or whether an error/warning is surfaced when a stdio agent attempts to set a channel override. [Coverage, Spec §US12-SC5]
+- [ ] CHK035 - Are recovery/rollback requirements defined for a partially-completed rename (US13)? If the rename fails midway (e.g., after Cargo.toml but before test files), is there a defined recovery procedure? [Coverage, Gap]
+- [ ] CHK036 - Are requirements defined for backward compatibility of the `config.toml` file after the rename? If a user has an existing config.toml referencing `monocoque-agent-rem`, does the server reject it, warn, or silently accept it? [Coverage, Gap]
+- [ ] CHK037 - Are requirements for DM channels (`D`-prefixed) and group channels (`G`-prefixed) as `channel_id` values specified? FR-042 uses a `C_CHANNEL_ID` example, which may imply only public channels. Edge case 20 says "invalid Slack channel ID format" is passed through, but does not clarify whether non-`C`-prefixed IDs are valid. [Coverage, Spec §FR-042 / Edge Case 20]
+
+---
+
+## Edge Case Coverage
+
+- [ ] CHK038 - Is the behavior for environment variables containing leading/trailing whitespace defined? An env var like `SLACK_BOT_TOKEN=" xoxb-... "` could cause authentication failures. No FR or edge case addresses whitespace handling. [Edge Case, Gap]
+- [ ] CHK039 - Is the behavior for multiple `channel_id` query parameters on a single SSE URL defined (e.g., `/sse?channel_id=C1&channel_id=C2`)? Plan.md T207 mentions "first wins" but no FR specifies this. [Edge Case, Gap]
+- [ ] CHK040 - Is the behavior for environment variables set to the literal string "null", "undefined", or "none" specified? These are common placeholder values that could bypass empty-string checks. [Edge Case, Gap]
+- [ ] CHK041 - Is old-to-new migration of IPC pipe/socket names covered as an edge case? A running process using the old pipe name while the new binary uses the new name could cause connection failures for the CLI tool. [Edge Case, Gap]
+- [ ] CHK042 - Are edge cases defined for the rename interacting with in-flight SurrealDB data? If the server is restarted mid-rename with some files using old names and some new, is the database behavior defined? [Edge Case, Gap]
+- [ ] CHK043 - Is the edge case defined for `channel_id` containing URL-encoded characters (e.g., `%23` for `#`)? Plan.md T207 mentions URL-encoded values but no FR or edge case addresses this. [Edge Case, Gap]
+- [ ] CHK044 - Is the edge case of keychain entries existing under BOTH old (`monocoque-agent-rem`) and new (`monocoque-agent-rc`) service names addressed? FR-046 says the old name is not checked, but if both exist, the operator may be confused about which credentials are active. [Edge Case, Gap]
+
+---
+
+## Non-Functional Requirements Coverage
+
+- [ ] CHK045 - Are performance requirements specified for credential loading (US11)? SC-013 defines a 10-second startup threshold, but is the credential loading portion of startup bounded separately? [Non-Functional, Gap]
+- [ ] CHK046 - Are security requirements for environment variable credential exposure specified? FR-036 prohibits plaintext config files, but environment variables are visible via `/proc/*/environ` on Linux and `Get-Process` on Windows. Is this risk acknowledged or mitigated? [Non-Functional, Gap]
+- [ ] CHK047 - Are observability requirements for the `channel_id` override documented as FRs? Plan.md T203 adds tracing for credential loading, but no FR mandates logging when a `channel_id` override is applied to a session. [Non-Functional, Gap]
+- [ ] CHK048 - Are the accessibility/discoverability requirements for the `?channel_id=` parameter defined? Is it documented in MCP server metadata, help output, or Slack help command? [Non-Functional, Gap]
+
+---
+
+## Dependencies & Assumptions Coverage
+
+- [ ] CHK049 - Is Assumption #10 (service branded as `monocoque-agent-rc`) traceable to FRs 045–049? Does each FR derive from this assumption, and is the assumption updated post-rename (not still referencing the old name)? [Traceability, Spec §Assumptions / §FR-045–049]
+- [ ] CHK050 - Is the dependency between Phase 17 (rename) and Phases 15/16 explicitly documented in the spec, or only in plan.md? The recommended execution order (Phase 17 first) is in plan.md and tasks.md but the spec itself does not mandate rename-first sequencing. [Dependencies, Gap]
+- [ ] CHK051 - Is the assumption that `slack-morphism` supports `team_id` scoping in Socket Mode documented? FR-041 requires team ID scoping, but no assumption validates that the chosen SDK (`slack-morphism 2.17`) supports this capability. [Assumption, Gap]
+- [ ] CHK052 - Is the assumption that Slack channel IDs passed via `channel_id` are pre-validated by the caller documented? Edge cases 19–20 describe pass-through behavior (no server-side validation), but no explicit assumption states this design choice. [Assumption, Gap]
+
+---
+
+## Cross-Reference Traceability
+
+- [ ] CHK053 - Does every FR in §US11 (FR-038–FR-041) have at least one corresponding acceptance scenario in the US11 narrative? Map each FR to its scenario(s) and identify any FR without scenario coverage. [Traceability, Spec §US11]
+- [ ] CHK054 - Does every FR in §US12 (FR-042–FR-044) have at least one corresponding acceptance scenario in the US12 narrative? [Traceability, Spec §US12]
+- [ ] CHK055 - Does every FR in §US13 (FR-045–FR-049) have at least one corresponding acceptance scenario in the US13 narrative? [Traceability, Spec §US13]
+- [ ] CHK056 - Does every edge case (17–22) trace to at least one FR or acceptance scenario? Identify any orphan edge cases that lack FR backing. [Traceability, Spec §Edge Cases]
+- [ ] CHK057 - Does every task in tasks.md (T200–T217) trace to at least one FR with a correct FR reference? (Post-remediation verification of F4 fix — T203 should reference FR-036, not FR-040.) [Traceability, Tasks §Phase15–17]
+- [ ] CHK058 - Does every SC (SC-013–SC-015) have at least one FR and at least one task that support its achievement? [Traceability, Spec §SC-013–015 / Tasks §T200–T217]
+
+---
+
+## Ambiguities & Conflicts
+
+- [ ] CHK059 - Is the term "credentials" used consistently? FR-036 uses "Slack tokens and other sensitive credentials," FR-038 uses "credentials," FR-040 uses "required Slack credential." Does the scope of "credentials" always refer to the same set of values? [Ambiguity, Spec §FR-036 / §FR-038 / §FR-040]
+- [ ] CHK060 - Does the phrase "falls back to reading from environment variables" in FR-036 conflict with the per-credential fallback semantics of FR-039? FR-036 could be read as all-or-nothing fallback, while FR-039 specifies per-credential precedence. [Conflict, Spec §FR-036 / §FR-039]
+- [ ] CHK061 - Is there an implicit requirement for migration documentation (from old name to new name) that is not captured as a FR or task? Edge cases 21–22 describe operator-facing consequences but no FR or task requires producing migration guidance documentation. [Ambiguity, Gap]
+- [ ] CHK062 - Does FR-049's scope ("all internal Rust crate references") include or exclude the `hve-core` library crate under `lib/`? The rename categories in plan.md do not list `lib/hve-core` as a target. [Ambiguity, Spec §FR-049 / Plan §Phase17]
+
+
+---
+
+# Specification Quality Checklist: MCP Remote Agent Server (Deep)
+
+**Purpose**: Exhaustive requirements quality validation across all user stories, functional requirements, edge cases, and success criteria — pre-planning gate for the spec author
+**Created**: 2026-02-09
+**Triaged**: 2026-02-11 — Rapid triage pass against spec, data-model, research, and contracts
+**Feature**: [spec.md](../spec.md)
+
+## Requirement Completeness
+
+- [x] CHK001 - Are requirements defined for the primary agent's session creation and initial handshake when connecting via stdio transport? [Completeness, Gap] — **Resolved**: Clarifications 2026-02-10 defines multi-workspace with default_workspace_root. T031 auto-creates and activates a default session on first tool call for stdio-connected agents. Assumption §5 bounds to one primary stdio agent.
+- [x] CHK002 - Are requirements specified for what happens when no workspace policy file (`.agentrc/settings.json`) exists at all? [Completeness, Gap] — **Resolved**: Edge Cases §6 ("workspace policy file is malformed → fallback to require approval for everything"). Research §9 confirms: absent file = deny-all default. T061 implements this.
+- [x] CHK003 - Is a requirement defined for the initial operational mode at server startup? [Completeness, Gap] — **Resolved**: Data-model Session entity defines `mode` with default `"remote"`. Hardcoded default, not configurable per spec intent.
+- [x] CHK004 - Are requirements defined for the `help` command's output when no custom registry commands are configured? [Completeness, Spec §FR-019] — **Resolved during implementation**: Help lists built-in commands; custom commands section is omitted when empty. Minor UX detail.
+- [x] CHK005 - Are requirements specified for agent disconnection handling (stdio pipe closes, SSE connection drops)? [Completeness, Gap] — **Accepted gap, deferred to Phase 14**: Transport-level disconnect is handled by rmcp SDK (EOF on stdio, connection close on SSE). Session transitions to interrupted status. Stall timer stops.
+- [x] CHK006 - Are requirements specified for the server's behavior when the SurrealDB embedded database file is corrupted or unreadable on startup? [Completeness, Gap] — **Accepted gap, deferred to Phase 14**: Server exits with AppError::Db on startup failure. No automatic recovery for v1. User deletes corrupted DB directory to reset.
+- [x] CHK007 - Are requirements defined for maximum diff size limits passed to `ask_approval`? [Completeness, Gap] — **Resolved during implementation**: Slack file upload API handles large diffs (up to 1 GB). Inline rendering capped at 20 lines (Story 1 AS-1/AS-2). No explicit size limit needed for v1.
+- [x] CHK008 - Are requirements specified for the `monocoque-ctl` local CLI binary's command surface and communication protocol? [Completeness, Gap] — **Resolved**: T088 defines the CLI commands: `list`, `approve <id>`, `reject <id> [--reason]`, `resume [instruction]`, `mode <remote|local|hybrid>`, `credential set <key>`. IPC protocol via interprocess named pipe/Unix socket.
+- [x] CHK009 - Are multi-file diff requirements fully specified for `ask_approval` and `accept_diff`? [Completeness, Spec §FR-003/FR-005] — **Accepted partial coverage**: mcp-tools.json ask_approval `file_path` description says "additional paths extracted from unified diff headers." Multi-file acceptance scenarios deferred to Phase 14 polish.
+- [x] CHK010 - Are requirements defined for concurrent `ask_approval` calls from the same session? [Completeness, Gap] — **Resolved**: Data-model ApprovalRequest validation rules state "only one pending approval request per session at a time (agent blocks until resolved)." Implementation returns error for concurrent calls.
+- [x] CHK011 - Are requirements specified for the `wait_for_instruction` tool's interaction with stall detection? [Completeness, Gap] — **Resolved during implementation**: `wait_for_instruction` pauses stall timer (agent is intentionally idle). Timer resumes on resume signal. Logically consistent with FR-025.
+- [x] CHK012 - Are requirements defined for log message ordering guarantees when multiple `remote_log` calls are made in rapid succession? [Completeness, Gap] — **Resolved by architecture**: Messages enqueued via tokio mpsc channel (FIFO), delivered in order by the rate-limited sender task. Ordering is guaranteed by the queue.
+- [x] CHK013 - Are requirements specified for how the server handles Slack channel archival or deletion while running? [Completeness, Gap] — **Accepted gap, deferred to Phase 14**: Slack API returns channel_not_found error; mapped to AppError::Slack and logged. No auto-recovery for v1.
+
+## Requirement Clarity
+
+- [x] CHK014 - Is "small diff" quantified consistently across the spec? [Clarity, Spec §FR-003] — **Confirmed consistent**: Story 1 AS-1 says "fewer than 20 lines." Research §2 says "< 20 lines." No conflicting definitions in contracts or plan.
+- [x] CHK015 - Is "configured timeout period" in Story 1 AS-5 traceable to a specific configuration key? [Clarity, Spec §US-1] — **Resolved**: data-model GlobalConfig.timeouts.approval_seconds (default 3600). Cross-reference is implicit but unambiguous from data-model and mcp-tools.json.
+- [x] CHK016 - Is "within 5 seconds" in Story 1 AS-3 and Story 5 AS-2 a requirement on server processing time or end-to-end latency including Slack network round-trip? [Clarity, Spec §US-1/US-5] — **Accepted ambiguity**: Interpreted as server-side processing time (button press received → oneshot resolved → response returned to agent). Network latency is external and unmeasured.
+- [x] CHK017 - Is the `risk_level` enum fully defined with clear criteria for when each level applies? [Clarity, Spec §FR-003] — **Resolved**: mcp-tools.json ask_approval defines risk_level as an agent-specified input parameter with default "low." The agent determines risk classification; the server routes based on the declared level.
+- [x] CHK018 - Are the specific visual indicators for `remote_log` severity levels defined? [Clarity, Spec §FR-015] — **Resolved**: Research §2 and tasks T026/T055 define: info ℹ️, success ✅, warning ⚠️, error ❌. Block Kit builders implement these.
+- [x] CHK019 - Is "wait state" for `session-pause` defined precisely? [Clarity, Spec §FR-012] — **Resolved during implementation**: Paused sessions reject tool calls with a descriptive error (not buffered). Agent receives error response and must wait for resume.
+- [x] CHK020 - Is the "the session's original prompt" in the stall alert requirements clearly defined as always present? [Clarity, Spec §FR-026] — **Resolved**: data-model Session.prompt is `Option<String>`. When null, stall alert omits the prompt context section. Implementation detail.
+- [x] CHK021 - Is "standard hardware" in SC-010 quantified with specific baseline specifications? [Clarity, Spec §SC-010] — **Accepted ambiguity**: Reasonable interpretation is a modern developer workstation (4+ cores, 8+ GB RAM, SSD). Not worth formalizing for v1 of a single-workstation tool.
+
+## Requirement Consistency
+
+- [x] CHK022 - Are the ApprovalRequest status values consistent between the Key Entities section and the data model? [Consistency, Spec §Key Entities] — **Resolved**: `interrupted` is an intentional addition in data-model for crash recovery (FR-021/US-9). Spec Key Entities lists the user-visible statuses; `interrupted` is an internal server-side state. No conflict.
+- [x] CHK023 - Are Session status values consistent between the spec's Key Entities and the data model's state machine? [Consistency, Spec §Key Entities] — **Resolved**: Same rationale as CHK022. `interrupted` is an internal crash-recovery state added in data-model. Spec Key Entities correctly shows user-visible states.
+- [x] CHK024 - Is the session owner binding behavior consistent between FR-013 and the edge case for "authorized user who is not the session owner"? [Consistency, Spec §FR-013] — **Confirmed compatible**: FR-013 says interactions are "rejected." Edge case says "logged but not treated as a security violation." These are complementary: rejection is the action, non-violation is the classification. No conflict.
+- [x] CHK025 - Are timeout behaviors consistent across all blocking tools? [Consistency, Spec §FR-004/FR-008] — **Confirmed by design**: Each tool has intentionally different timeout semantics matching its use case. ask_approval → `timeout` (requires re-submission). forward_prompt → auto-`continue` (safe default). wait_for_instruction → configurable/indefinite. Consistent with operator expectations.
+- [x] CHK026 - Is the auto-approve behavior for `forward_prompt` consistent with FR-032? [Consistency, Spec §FR-009/FR-032] — **Confirmed compatible**: FR-032 means tools are always *listed*. Auto-approve affects whether a tool's *action* requires Slack confirmation. These are orthogonal: visibility vs. authorization. No conflict.
+- [x] CHK027 - Are the "first-response-wins" semantics in the Clarifications section consistent with FR-022's double-submission prevention? [Consistency, Spec §Clarifications/FR-022] — **Confirmed complementary**: FR-022 is UI-level prevention (replace buttons after first click). First-response-wins is server-level handling (oneshot channel resolves once). Defense in depth, not contradiction.
+
+## Acceptance Criteria Quality
+
+- [x] CHK028 - Can SC-001 ("under 30 seconds from notification arrival") be objectively measured given network variability? [Measurability, Spec §SC-001] — **Accepted**: Measured as elapsed time from Slack button press event receipt (server-side) to agent receiving tool response. Network latency to the operator's device is external.
+- [x] CHK029 - Can SC-003 ("24-hour sessions, reconnecting within 5 minutes") be verified in a test environment? [Measurability, Spec §SC-003] — **Accepted**: Testable via integration test with mock network interruption. slack-morphism handles reconnection internally. Long-running stability is an operational concern, not a gate for implementation.
+- [x] CHK030 - Can SC-012 ("80% of stall events") be verified without a statistically significant sample size? [Measurability, Spec §SC-012] — **Accepted**: For v1, verified qualitatively: auto-nudge fires → agent resumes within inactivity threshold = success. Formal statistical measurement deferred to production telemetry.
+- [x] CHK031 - Is Story 7 AS-5 ("warns about file divergences") testable without specifying the warning format and confirmation mechanism? [Measurability, Spec §US-7] — **Resolved during implementation**: Slack message with diverged file list and Confirm/Cancel buttons per T071. UX detail resolved at implementation time.
+- [x] CHK032 - Are the stall detection acceptance scenarios (Story 4 AS-1 through AS-10) independently testable without requiring a real stalled agent? [Measurability, Spec §US-4] — **Resolved**: Tests mock the stall condition by controlling the tokio timer directly. T110/T112 define the test approach: unit tests manipulate timer, integration tests simulate silence.
+
+## Scenario Coverage
+
+- [x] CHK033 - Are requirements defined for the server's behavior when Slack Socket Mode authentication fails on startup? [Coverage, Exception Flow, Gap] — **Resolved during implementation**: Server exits with AppError::Slack on authentication failure. Error message includes the failing token type. Implementation-obvious behavior.
+- [x] CHK034 - Are requirements defined for the sequence: `ask_approval` → timeout → agent retries with same diff? [Coverage, Alternate Flow, Gap] — **Resolved during implementation**: Each ask_approval creates a new ApprovalRequest with a new request_id. The same diff can be resubmitted. Previous timed-out request stays in Expired status.
+- [x] CHK035 - Are requirements defined for checkpoint restore when the referenced session is currently active (not terminated)? [Coverage, Alternate Flow, Spec §FR-012] — **Resolved**: data-model Checkpoint validation rules state "restoring a checkpoint terminates any currently active session for that session ID." Active session is terminated before restore.
+- [x] CHK036 - Are requirements defined for `accept_diff` when the target file does not exist but the diff is a unified patch (not a full-file write)? [Coverage, Exception Flow, Gap] — **Resolved during implementation**: Unified diff against non-existent file returns AppError::Diff with descriptive message. Full-file write mode creates the file. T044/T107 cover this.
+- [x] CHK037 - Are requirements defined for the `session-start` command when the configured `host_cli` binary is not found on PATH? [Coverage, Exception Flow, Gap] — **Resolved during implementation**: T068 spawner returns AppError::Config with "host CLI not found" when the binary is missing. Assumption §7 documents the prerequisite.
+- [x] CHK038 - Are requirements defined for what happens when a spawned agent session (SSE transport) fails to connect back to the server? [Coverage, Exception Flow, Gap] — **Accepted gap, deferred to Phase 14**: Spawned process has a connection timeout (implementation default: 30s). On failure, session transitions to Terminated and Slack is notified.
+- [x] CHK039 - Are requirements defined for operator actions on an expired/timed-out approval request? [Coverage, Alternate Flow, Gap] — **Resolved**: Timeout handler (T040) updates Slack message to replace buttons with "timed out" status text, same as FR-022 pattern. Operator sees static message, can't act.
+- [x] CHK040 - Are recovery flow requirements defined for when `accept_diff` partially succeeds on a multi-file proposal (some files written, some fail)? [Coverage, Recovery Flow, Gap] — **Accepted gap, deferred to Phase 14**: v1 processes files sequentially; failure stops processing and returns error with list of successfully written files. No rollback for v1.
+
+## Edge Case Coverage
+
+- [x] CHK041 - Is behavior defined when the operator sends a Slack message to the channel that is not a slash command? [Edge Case, Gap] — **Resolved**: FR-018 exposes channel history as an MCP resource. Free-text messages are visible via the resource but not processed as commands. Only slash commands trigger server actions.
+- [x] CHK042 - Is behavior defined when the `workspace_root` path does not exist at server startup? [Edge Case, Gap] — **Resolved**: config.rs validate() canonicalizes workspace_root and returns AppError::Config if the path doesn't exist. Already implemented.
+- [x] CHK043 - Is behavior defined when `accept_diff` targets a path where the parent directory is read-only or permissions prevent writing? [Edge Case, Gap] — **Resolved during implementation**: IO error from tempfile::persist() or fs::create_dir_all() maps to AppError::Diff. Descriptive error returned to agent.
+- [x] CHK044 - Is behavior defined for `session-checkpoint` when no files exist in the workspace? [Edge Case, Gap] — **Resolved**: Empty file_hashes map is valid. Checkpoint is created with an empty manifest. No special handling needed.
+- [x] CHK045 - Is behavior defined when the Slack API returns an error for `chat.update` when dismissing a stall alert after self-recovery? [Edge Case, Gap] — **Resolved during implementation**: chat.update failure is logged as warning via tracing. Alert status is still updated in DB. Slack UI may show stale buttons but server state is correct.
+- [x] CHK046 - Is behavior defined when two concurrent sessions both trigger stall alerts simultaneously? [Edge Case, Spec §Edge Cases] — **Resolved**: Edge Cases §13 explicitly covers this: "each session has its own independent stall timer. Alerts are posted with the session ID prominently displayed." Alerts are interleaved (not batched), rate-limited by the Slack message queue.
+- [x] CHK047 - Is behavior defined when the agent calls `set_operational_mode("local")` but no IPC listener is active or `monocoque-ctl` is not installed? [Edge Case, Gap] — **Resolved during implementation**: Mode switch succeeds (it's a routing preference). If no IPC client connects, blocking tools time out normally. monocoque-ctl availability is not validated at mode-switch time.
+
+## Non-Functional Requirements
+
+- [x] CHK048 - Are memory consumption requirements defined beyond the stated constraint of "< 200 MB at steady state"? [NFR, Gap] — **Accepted**: Plan mentions < 200 MB as a monitoring target. Not formalized as a gate for v1. SurrealDB embedded + tokio runtime baseline is well under this.
+- [x] CHK049 - Are logging/observability requirements defined for the server's own operational telemetry? [NFR, Gap] — **Resolved**: FR-037 defines structured tracing spans to stderr. Research §13 details span coverage. RUST_LOG env var controls verbosity. --log-format json flag for machine consumption. Already implemented in main.rs.
+- [x] CHK050 - Are data retention requirements specified for the SurrealDB embedded database? [NFR, Gap] — **Resolved**: FR-035 defines 30-day auto-purge after session termination. data-model GlobalConfig.retention_days (default 30). T023 implements the retention service.
+- [x] CHK051 - Are requirements specified for the server's CPU/resource usage during idle periods (no active sessions)? [NFR, Gap] — **Accepted**: Minimal footprint: tokio runtime idle, Slack WebSocket keep-alive (~1 ping/30s), no stall timers when no sessions active. Not worth formalizing for v1.
+- [x] CHK052 - Are upgrade/migration requirements defined for the SurrealDB schema when the server version is updated? [NFR, Gap] — **Accepted**: Research §3 defines startup DDL with IF NOT EXISTS for idempotent migrations. Schema evolution across major versions is out of scope for v1.
+- [x] CHK053 - Are requirements defined for the maximum number of historical sessions, checkpoints, and approval records the server must support? [NFR, Gap] — **Resolved**: Bounded by retention_days (default 30 days) via FR-035 auto-purge. With max 3 concurrent sessions, historical data volume is inherently small.
+
+## Security Requirements
+
+- [x] CHK054 - Are requirements defined for how Slack tokens (`app_token`, `bot_token`) are stored and protected? [Security, Gap] — **Resolved**: FR-036 defines OS keychain as primary, env vars as fallback. Research §10 details the keyring crate API. Plaintext config explicitly rejected by FR-036. T006 implements this.
+- [x] CHK055 - Are requirements defined for command injection prevention beyond `shlex` escaping in the command dispatcher? [Security, Spec §FR-014] — **Resolved**: FR-014 is deny-by-default — only commands in the allowlist execute. Commands are pre-defined strings in config.toml, not user-composed. No shell interpolation of user input.
+- [x] CHK056 - Are requirements defined for rate limiting on the MCP tool surface to prevent abuse by a malicious or misconfigured agent? [Security, Gap] — **Accepted gap, deferred to Phase 14**: v1 trusts connected agents (single-workstation deployment). Slack rate limiting (FR-020) bounds downstream impact. MCP-level rate limiting is a future enhancement.
+- [x] CHK057 - Are requirements defined for the security boundary of the SSE/HTTP transport used by spawned sessions? [Security, Gap] — **Accepted**: Bound to 127.0.0.1 only (localhost). Single-workstation deployment model. No authentication for v1; network boundary is the security boundary.
+- [x] CHK058 - Are the security logging requirements complete for all security-relevant events? [Security, Spec §Edge Cases] — **Resolved**: FR-037 tracing spans cover tool calls, Slack interactions, and session lifecycle. Research §13 explicitly lists path traversal attempts, policy evaluation decisions, and credential loading source. Implementation adds tracing spans per task.
+
+## Dependencies and Assumptions
+
+- [x] CHK059 - Is the assumption that "only one primary agent connects via stdio" validated with a requirement for what happens if two agents attempt stdio connections? [Assumption, Spec §Assumptions] — **Resolved**: stdio transport is a single process stdin/stdout stream — OS-level constraint prevents concurrent connections. Not a server-enforced limit.
+- [x] CHK060 - Is the dependency on the `host_cli` binary versioned or compatibility-bounded? [Dependency, Spec §Assumptions] — **Accepted**: No version enforcement for v1. Assumption §7 documents the prerequisite. Host CLI compatibility testing is the operator's responsibility.
+- [x] CHK061 - Is the dependency on Slack's Block Kit API versioned or documented? [Dependency, Gap] — **Accepted**: Slack API is backward-compatible by design. slack-morphism crate version (2.17) pins the SDK. No minimum Slack API version needed.
+- [x] CHK062 - Is the assumption that MCP agents support server-to-client notifications validated? [Assumption, Spec §Clarifications] — **Resolved**: Research §5 documents the fallback: if custom notifications are dropped by stdio transport, fall back to notify_logging_message with structured nudge data.
+
+## Ambiguities and Conflicts
+
+- [x] CHK063 - Is the term "session state" in checkpoint requirements unambiguously defined? [Ambiguity, Spec §Key Entities] — **Resolved**: data-model Checkpoint.session_state is defined as `serde_json::Value` containing server-side session metadata (status, mode, prompt, nudge_count, etc.). Does NOT include agent in-memory context or conversation history. Boundary is clear from the data model.
+- [x] CHK064 - Does "the agent resumes execution" (Story 4 AS-2) mean the agent acts on the nudge notification, or merely that the server sent the notification? [Ambiguity, Spec §US-4] — **Resolved**: Clarifications 2026-02-09 states nudge is delivered via MCP notification. Server guarantees delivery, not resumption. SC-012 (80% recovery) acknowledges not all nudges succeed. "Resumes execution" means the agent is expected to, but the server's obligation is delivery.
+- [x] CHK065 - Are "spawned agent processes" in FR-021 limited to `session-start` processes, or does this include the primary stdio agent? [Ambiguity, Spec §FR-021] — **Resolved**: FR-021 scope is processes spawned by the server (session-start). The primary stdio agent is external (connected by the user, not spawned by the server). Server sends SIGTERM only to its own children. Stdio transport closure signals shutdown to the primary agent.
+
+
+
+
+---
+
+## Contracts
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Remote Agent Server — Resource Contracts",
+  "description": "MCP resource definitions exposed by the monocoque-agent-rc server. Resources provide read-only context to connected agents.",
+
+  "resources": {
+    "slack://channel/{id}/recent": {
+      "description": "Recent chat history from the configured Slack channel. Allows the agent to read operator instructions posted directly in the channel.",
+      "uriTemplate": "slack://channel/{id}/recent",
+      "parameters": {
+        "id": {
+          "type": "string",
+          "description": "Slack channel ID (e.g., 'C0123456789'). Must match the channel_id configured in config.toml."
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of messages to retrieve"
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ts": {
+                  "type": "string",
+                  "description": "Slack message timestamp"
+                },
+                "user": {
+                  "type": "string",
+                  "description": "Slack user ID of the message author"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Message text content"
+                },
+                "thread_ts": {
+                  "type": "string",
+                  "description": "Thread timestamp if the message is a reply, null otherwise"
+                }
+              },
+              "required": ["ts", "user", "text"]
+            }
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more messages are available beyond the limit"
+          }
+        },
+        "required": ["messages", "has_more"]
+      },
+      "security": "Only messages from the configured channel_id are returned. Bot messages included. File uploads represented by text summary only."
+    }
+  },
+
+  "notifications": {
+    "monocoque/nudge": {
+      "description": "Server-to-client notification sent when the server detects an agent stall and needs to prompt the agent to resume work. Delivered via CustomNotification on the MCP transport.",
+      "direction": "server-to-client",
+      "params": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session that triggered the stall alert"
+          },
+          "message": {
+            "type": "string",
+            "description": "Continuation message (default or custom from operator)"
+          },
+          "nudge_count": {
+            "type": "integer",
+            "description": "How many nudges have been sent for this stall event"
+          },
+          "idle_seconds": {
+            "type": "integer",
+            "description": "How long the agent has been idle"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["operator", "auto"],
+            "description": "Whether the nudge was triggered by operator action or auto-escalation"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Progress snapshot from the session at nudge time. Includes summary of completed items and next pending item so the agent can reorient.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "status": { "type": "string", "enum": ["done", "in_progress", "pending"] }
+              },
+              "required": ["label", "status"]
+            }
+          }
+        },
+        "required": ["session_id", "message"]
+      }
+    }
+  },
+
+  "slashCommands": {
+    "description": "Slack slash commands handled by the server's command dispatcher. All invoked via /monocoque <command> [args].",
+    "commands": {
+      "help": {
+        "args": "[category]",
+        "description": "List all available commands, optionally filtered by category"
+      },
+      "sessions": {
+        "args": "",
+        "description": "List all tracked sessions with state, timestamps, and last activity"
+      },
+      "session-start": {
+        "args": "<prompt>",
+        "description": "Start a new agent session with the given initial prompt"
+      },
+      "session-clear": {
+        "args": "[session_id]",
+        "description": "Terminate and clean up a session (defaults to active session)"
+      },
+      "session-pause": {
+        "args": "[session_id]",
+        "description": "Pause a running session"
+      },
+      "session-resume": {
+        "args": "[session_id]",
+        "description": "Resume a paused session"
+      },
+      "session-checkpoint": {
+        "args": "[session_id] [label]",
+        "description": "Create a named checkpoint of the current session state"
+      },
+      "session-restore": {
+        "args": "<checkpoint_id>",
+        "description": "Restore a previously checkpointed session"
+      },
+      "session-checkpoints": {
+        "args": "[session_id]",
+        "description": "List all checkpoints, optionally filtered by session"
+      },
+      "list-files": {
+        "args": "[path] [--depth N]",
+        "description": "List workspace directory contents (default depth: 3)"
+      },
+      "show-file": {
+        "args": "<path> [--lines START:END]",
+        "description": "Display file contents with syntax highlighting"
+      }
+    }
+  }
+}
+
+
+---
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Remote Agent Server — Tool Contracts",
+  "description": "JSON-RPC tool definitions exposed by the agent-intercom MCP server. Each tool follows the MCP tool calling convention: the agent sends a tools/call request with the tool name and arguments, and the server returns a result with content blocks.",
+
+  "tools": {
+    "check_clearance": {
+      "description": "Submit a code proposal for remote operator approval via Slack. Blocks until the operator responds or the timeout elapses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Concise summary of the proposal (e.g., 'Create Auth Middleware')"
+          },
+          "description": {
+            "type": "string",
+            "description": "Contextual details about the proposed change"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Standard unified diff or raw file content proposed by the agent"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Target file path relative to workspace_root. For multi-file diffs, this is the primary file; additional paths are extracted from unified diff headers."
+          },
+          "risk_level": {
+            "type": "string",
+            "enum": ["low", "high", "critical"],
+            "default": "low",
+            "description": "Risk classification. 'high' and 'critical' trigger additional alerting (e.g., @channel mention)."
+          }
+        },
+        "required": ["title", "diff", "file_path"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["approved", "rejected", "timeout", "error"]
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Unique identifier. Pass to check_diff to apply approved changes. Absent when status=error."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional rejection note from the operator (only present when status=rejected)"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why check_clearance failed without blocking."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when status=error)"
+          }
+        },
+        "required": ["status"]
+      }
+    },
+
+    "check_diff": {
+      "description": "Apply previously approved code changes to the local file system. Validates approval status, checks file integrity, and performs atomic writes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "description": "Unique identifier of the approved proposal returned by ask_approval"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, overwrite the target file even if local content has diverged since proposal creation. Logs a warning to Slack."
+          }
+        },
+        "required": ["request_id"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["applied", "error"]
+          },
+          "files_written": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "bytes": { "type": "integer" }
+              }
+            }
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["request_not_found", "not_approved", "already_consumed", "path_violation", "patch_conflict", "invalid_diff"],
+            "description": "Present only when status=error"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description"
+          }
+        },
+        "required": ["status"]
+      }
+    },
+
+    "auto_check": {
+      "description": "Query the workspace auto-approve policy to determine whether an operation can bypass the remote approval gate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "description": "Name of the tool or command to check (e.g., 'write_file', 'cargo test')"
+          },
+          "context": {
+            "type": "object",
+            "description": "Additional metadata (target file path, risk level) for fine-grained policy evaluation",
+            "properties": {
+              "file_path": { "type": "string" },
+              "risk_level": { "type": "string", "enum": ["low", "high", "critical"] }
+            }
+          }
+        },
+        "required": ["tool_name"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "auto_approved": { "type": "boolean" },
+          "matched_rule": {
+            "type": "string",
+            "description": "The rule key that matched, or null if not auto-approved"
+          }
+        },
+        "required": ["auto_approved"]
+      }
+    },
+
+    "transmit": {
+      "description": "Forward an agent-generated continuation prompt to the remote operator via Slack. Blocks until the operator responds or the timeout elapses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt_text": {
+            "type": "string",
+            "description": "Raw text of the continuation prompt emitted by the agent"
+          },
+          "prompt_type": {
+            "type": "string",
+            "enum": ["continuation", "clarification", "error_recovery", "resource_warning"],
+            "default": "continuation",
+            "description": "Category of the prompt for tailored rendering"
+          },
+          "elapsed_seconds": {
+            "type": "integer",
+            "description": "Seconds since last user interaction"
+          },
+          "actions_taken": {
+            "type": "integer",
+            "description": "Count of actions performed in this iteration"
+          }
+        },
+        "required": ["prompt_text"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["error"],
+            "description": "Present only on early error (no Slack channel or Slack service unavailable)"
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["continue", "refine", "stop"],
+            "description": "Operator decision. Present only on the success path."
+          },
+          "instruction": {
+            "type": "string",
+            "description": "Revised instruction text (present only when decision=refine)"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why transmit failed without blocking."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when status=error)"
+          }
+        }
+      }
+    },
+
+    "broadcast": {
+      "description": "Send a non-blocking status log message to the Slack channel. Does not block agent execution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Log message to post"
+          },
+          "level": {
+            "type": "string",
+            "enum": ["info", "success", "warning", "error"],
+            "default": "info",
+            "description": "Controls visual presentation in Slack"
+          },
+          "thread_ts": {
+            "type": "string",
+            "description": "Slack thread timestamp to post as a reply. When omitted, posts as top-level message."
+          }
+        },
+        "required": ["message"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "posted": { "type": "boolean" },
+          "ts": {
+            "type": "string",
+            "description": "Message timestamp for threading"
+          }
+        },
+        "required": ["posted", "ts"]
+      }
+    },
+
+    "reboot": {
+      "description": "Retrieve the last known state from the persistent database. Called by the agent on startup to check for interrupted sessions or pending requests.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Specific session to recover. When omitted, returns the most recently active session."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["recovered", "clean"]
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Recovered session ID, or null if clean"
+          },
+          "pending_requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "request_id": { "type": "string" },
+                "type": { "type": "string", "enum": ["approval", "prompt"] },
+                "title": { "type": "string" },
+                "created_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          },
+          "last_checkpoint": {
+            "type": "object",
+            "properties": {
+              "checkpoint_id": { "type": "string" },
+              "label": { "type": "string" },
+              "created_at": { "type": "string", "format": "date-time" }
+            },
+            "description": "Most recent checkpoint, or null if none"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Last-reported progress snapshot from the recovered session, or null if none was reported. Allows the agent to determine which tasks were completed and which remain.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "status": { "type": "string", "enum": ["done", "in_progress", "pending"] }
+              },
+              "required": ["label", "status"]
+            }
+          }
+        },
+        "required": ["status"]
+      }
+    },
+
+    "switch_freq": {
+      "description": "Switch the server between remote, local, and hybrid operational modes at runtime.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["remote", "local", "hybrid"],
+            "description": "Target mode. 'remote': Slack only. 'local': IPC only, Slack suppressed. 'hybrid': both channels, first response wins."
+          }
+        },
+        "required": ["mode"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "previous_mode": { "type": "string", "enum": ["remote", "local", "hybrid"] },
+          "current_mode": { "type": "string", "enum": ["remote", "local", "hybrid"] }
+        },
+        "required": ["previous_mode", "current_mode"]
+      }
+    },
+
+    "standby": {
+      "description": "Place the agent in standby, polling for a resume signal or new command from the operator via Slack.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "default": "Agent is idle and awaiting instructions.",
+            "description": "Status message displayed in Slack while waiting"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "default": 0,
+            "description": "Maximum wait time. 0 = indefinite."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["resumed", "timeout", "error"]
+          },
+          "instruction": {
+            "type": "string",
+            "description": "New instruction text from operator, or null if bare resume"
+          },
+          "error_code": {
+            "type": "string",
+            "enum": ["no_channel", "slack_unavailable"],
+            "description": "Present only when status=error. Indicates why standby failed without blocking."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error description (only present when status=error)"
+          }
+        },
+        "required": ["status"]
+      }
+    },
+
+    "ping": {
+      "description": "Lightweight liveness signal. Resets the stall detection timer during long-running local operations. Optionally accepts a structured progress snapshot (ordered list of todo items with labels and statuses) that the server stores on the session record for enriching stall alerts, nudge messages, and crash recovery. Returns immediately.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status_message": {
+            "type": "string",
+            "description": "Optional status update logged to the operator (e.g., 'Processing large codebase...')"
+          },
+          "progress_snapshot": {
+            "type": "array",
+            "description": "Optional ordered list of todo items. When provided, replaces any previously stored snapshot on the session. When omitted, existing snapshot is preserved.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Human-readable task description"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["done", "in_progress", "pending"],
+                  "description": "Current status of the task"
+                }
+              },
+              "required": ["label", "status"]
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "acknowledged": { "type": "boolean" },
+          "session_id": { "type": "string" },
+          "stall_detection_enabled": {
+            "type": "boolean",
+            "description": "Whether stall detection is active for this session"
+          }
+        },
+        "required": ["acknowledged"]
+      }
+    }
+  }
+}
+
+<!-- SECTION:DESCRIPTION:END -->

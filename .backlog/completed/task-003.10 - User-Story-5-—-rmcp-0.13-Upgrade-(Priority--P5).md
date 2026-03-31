@@ -1,0 +1,53 @@
+---
+id: TASK-003.10
+title: "003 - User Story 5 — rmcp 0.13 Upgrade (Priority: P5)"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - task
+parent_id: TASK-003
+dependencies: []
+ordinal: 3100
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+**Goal**: The MCP SDK dependency is upgraded from rmcp 0.5 to 0.13.0. The Streamable HTTP transport replaces the removed SSE transport. Both HTTP and stdio transports work. All existing functionality is preserved.
+
+**Independent Test**: `cargo test` passes with rmcp 0.13.0. Manual verification that HTTP and stdio transports work with MCP clients.
+
+**Scenarios covered**: S057–S062
+
+### Tests for User Story 5 ⚠️
+
+> **NOTE: Write tests FIRST. Some existing integration tests will need rewiring for the new transport API.**
+
+- [x] T094 [P] [US5] Write integration test verifying StreamableHttpService on `/mcp` endpoint accepts HTTP POST and returns tool list in `tests/integration/` (S057)
+- [x] T095 [P] [US5] Write integration test verifying stdio transport still works with rmcp 0.13 in `tests/integration/` (S058)
+- [x] T096 [P] [US5] Write integration test verifying old `/sse` endpoint returns redirect or 410 Gone in `tests/integration/` (S060)
+- [x] T097 [P] [US5] Write integration test verifying concurrent MCP connections are handled independently in `tests/integration/` (S061)
+- [x] T098 [P] [US5] Write integration test verifying graceful handling of dropped connections in `tests/integration/` (S062)
+- [x] T099 [US5] Run tests and confirm new transport assertions FAIL (red gate)
+
+### Implementation for User Story 5
+
+- [x] T100 [US5] Update `Cargo.toml`: change rmcp version from `0.5` to `0.13.0`, change feature from `transport-sse-server` to `transport-streamable-http-server` (FR-028)
+- [x] T101 [US5] Rewrite `src/mcp/sse.rs` — replace `SseServer`/`SseServerConfig` with `StreamableHttpService`, implement `SessionManager` trait (or use `LocalSessionManager`), replace `/sse` + `/message` two-endpoint model with single `/mcp` POST endpoint (FR-031) — **CRITICAL: this is a complete rewrite**
+- [x] T102 [US5] Add backward-compatible route: mount redirect from `/sse` to `/mcp` with deprecation header in `src/mcp/sse.rs` (Design Decision D-003)
+- [x] T103 [US5] Update `src/mcp/handler.rs`: adapt `AgentRcServer` (or successor) to rmcp 0.13 `ServerHandler` trait, handle any new required methods (FR-029)
+- [x] T104 [US5] Update tool registration to use rmcp 0.13 patterns (`ToolRouter` / proc macros / new API) in `src/mcp/handler.rs` (FR-030)
+- [x] T105 [US5] Verify `src/mcp/transport.rs` stdio transport compiles and works with rmcp 0.13 (FR-031)
+- [x] T106 [P] [US5] Update `src/mcp/resources/` resource providers to compile with rmcp 0.13 type changes
+- [x] T107 [US5] Update all integration tests that use SSE transport setup in `tests/integration/` to use new StreamableHttpService transport
+- [x] T108 [US5] Run full `cargo test` suite — all unit, contract, and integration tests pass (FR-032) (S059) — EXIT GATE for Phase 8
+- [x] T109 [US5] Run `cargo clippy -- -D warnings` and confirm zero warnings with rmcp 0.13 (SC-007)
+
+**Checkpoint**: rmcp 0.13 upgrade complete. Both HTTP (Streamable) and stdio transports working. All tests pass. Zero clippy warnings.
+
+---
+
+<!-- SECTION:DESCRIPTION:END -->

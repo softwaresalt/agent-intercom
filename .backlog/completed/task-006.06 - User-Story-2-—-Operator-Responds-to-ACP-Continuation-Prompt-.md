@@ -1,0 +1,41 @@
+---
+id: TASK-006.06
+title: "006 - User Story 2 — Operator Responds to ACP Continuation Prompt (Priority: P1)"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - task
+parent_id: TASK-006
+dependencies: []
+ordinal: 6060
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+**Goal**: Wire the `PromptForwarded` event handler to register pending prompts with `AcpDriver`, persist `ContinuationPrompt` records to the database, and post interactive prompt messages to Slack with Continue/Refine/Stop buttons.
+
+**Independent Test**: Start an ACP session, trigger a prompt forwarding event, observe the Slack prompt message with prompt type label and text, click a response button, and verify the agent receives the operator's decision.
+
+**Functional Requirements**: FR-004, FR-005, FR-006, FR-009, FR-010, FR-012
+
+### Tests for User Story 2 ⚠️
+
+> **TDD: Write these tests FIRST. Verify they compile and FAIL before proceeding to implementation (T014).**
+
+- [x] T012 [P] [US2] Write unit tests in tests/unit/acp_event_wiring.rs for: (a) prompt_type parse-or-default semantics — "continuation"→Continuation, "clarification"→Clarification, "error_recovery"→ErrorRecovery, "resource_warning"→ResourceWarning, unknown "custom_agent_query"→Continuation, empty ""→Continuation (S024–S029); (b) PromptForwarded→ContinuationPrompt field mapping — session_id direct copy, prompt_text direct copy, prompt_type→parsed enum, elapsed_seconds=None (ACP-specific), actions_taken=None (ACP-specific), decision=None, instruction=None, slack_ts=None (S056)
+- [x] T013 [P] [US2] Write contract tests in tests/contract/acp_event_contract.rs for PromptForwarded handler pipeline with mock Slack/DB: standard continuation type (S010), clarification type with icon+label (S011), error_recovery type (S012), resource_warning type (S013), missing session→warn log+discard+no side effects (S014), Slack unavailable→persist+register+skip post (S015), DB persistence failure→warn+continue+driver registered (S016), empty prompt_text (S017)
+
+### Implementation for User Story 2
+
+- [x] T014 [US2] Implement `AgentEvent::PromptForwarded` match arm in src/main.rs `run_acp_event_consumer` (replacing current no-op log at line ~788): (1) look up session via `SessionRepo::find_by_id(session_id)`, if not found emit `warn!` with session_id and `continue`; (2) emit `info!` tracing span with session_id, event type "PromptForwarded", and prompt_id (FR-014); (3) parse `prompt_type` string to `PromptType` enum using case-sensitive matching per FR-012 — only lowercase `"continuation"`, `"clarification"`, `"error_recovery"`, `"resource_warning"` recognized, all others default to `PromptType::Continuation`; (4) construct `ContinuationPrompt::new(session_id, prompt_text, prompt_type, None, None)` with elapsed_seconds=None and actions_taken=None, persist via `PromptRepo::create(&prompt)` — on DB failure emit `warn!` and skip remaining steps for this event; (5) register with `AcpDriver::register_prompt_request(session_id, prompt.id)` using DB-generated prompt ID (consistent with T010 pattern); (6) build Slack blocks via `crate::slack::blocks::build_prompt_blocks(prompt_text, prompt_type, None, None, prompt.id)`; (7) if Slack configured and `thread_ts=None`, use `post_message_direct()` and save returned ts as session thread anchor (D2 conditional posting); if `thread_ts` exists, use `enqueue()`; if Slack not configured, emit `warn!` and skip; (8) wrap all fallible operations in warn-and-continue error handling (D3)
+- [x] T015 [US2] Run quality gates — verify all US2 unit tests (S024–S029, S056) and contract tests (S010–S017) pass: `cargo check && cargo clippy -- -D warnings && cargo fmt --all -- --check && cargo test`
+
+**Checkpoint**: PromptForwarded events produce interactive prompt messages in Slack. User Stories 1 AND 2 independently testable.
+
+---
+
+<!-- SECTION:DESCRIPTION:END -->

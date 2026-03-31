@@ -1,0 +1,25 @@
+sources:
+  - type: code
+    language: rust
+    path: src
+  - type: tests
+    language: rust
+    path: tests
+  - type: spec
+    language: markdown
+    path: specs
+  - type: docs
+    language: markdown
+    path: docs
+  - type: context
+    language: markdown
+    path: .context
+  - type: instructions
+    language: markdown
+    path: .github
+  - type: memory
+    language: markdown
+    path: .copilot-tracking
+  - type: memory
+    language: markdown
+    path: .backlog

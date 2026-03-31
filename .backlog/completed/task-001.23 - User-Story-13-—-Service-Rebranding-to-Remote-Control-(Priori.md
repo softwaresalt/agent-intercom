@@ -1,0 +1,49 @@
+---
+id: TASK-001.23
+title: "001 - User Story 13 — Service Rebranding to Remote Control (Priority: P1)"
+status: Done
+priority: high
+assignee: []
+created_date: '2026-03-27 22:39'
+labels:
+  - task
+parent_id: TASK-001
+dependencies: []
+ordinal: 1230
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+**Goal**: Rename all references from `monocoque-agent-rem` / `agent_rem` to `monocoque-agent-rc` / `agent_rc` across the entire codebase.
+
+**Independent Test**: After rename, `cargo build` produces `monocoque-agent-rc`, `cargo test` passes, grep finds zero remaining `agent.rem` references in non-changelog files.
+
+### Rename Categories
+
+| Pattern to find | Replace with |
+|----------------|--------------|
+| `monocoque-agent-rem` | `monocoque-agent-rc` |
+| `monocoque_agent_rem` | `monocoque_agent_rc` |
+| `agent_rem` (SurrealDB database) | `agent_rc` |
+| `agent-rem` (documentation, workspace file) | `agent-rc` |
+
+### Implementation for User Story 13
+
+- [X] T208 [US13] Rename `Cargo.toml`: update `[package] name` from `monocoque-agent-rem` to `monocoque-agent-rc` and `[[bin]] name` from `monocoque-agent-rem` to `monocoque-agent-rc`
+- [X] T209 [US13] Rename source code references in `src/`: update `monocoque-agent-rem` and `monocoque_agent_rem` to `monocoque-agent-rc` and `monocoque_agent_rc` across `src/main.rs`, `src/config.rs`, `src/persistence/db.rs`, `src/mcp/handler.rs`, `src/mcp/resources/slack_channel.rs`
+- [X] T210 [US13] Rename CLI references in `ctl/main.rs`: update `monocoque-agent-rem` / `monocoque_agent_rem` to `monocoque-agent-rc` / `monocoque_agent_rc`
+- [X] T211 [P] [US13] Rename `config.toml` references: update comments and default values referencing `monocoque-agent-rem` to `monocoque-agent-rc`
+- [X] T212 [US13] Rename test references in `tests/`: update all `monocoque_agent_rem` crate references to `monocoque_agent_rc` (~75 occurrences across all test files)
+- [X] T213 [P] [US13] Rename documentation references: update `README.md`, `specs/001-mcp-remote-agent-server/quickstart.md`, all `specs/**/*.md` files, `.specify/memory/constitution.md`, `.github/copilot-instructions.md`, `agent-rem.code-workspace`
+- [X] T214 [US13] Verify compilation: run `cargo build` and confirm binary is named `monocoque-agent-rc`
+- [X] T215 [US13] Verify tests: run `cargo test` and confirm all tests pass with renamed crate
+- [X] T216 [US13] Verify naming consistency: grep the entire workspace for `agent.rem` (regex) and confirm zero matches in non-changelog files (SC-015)
+- [X] T217 [US13] Run `cargo clippy -- -D warnings` and confirm zero warnings
+
+**Checkpoint**: Full rename complete — binary, crate, keychain, DB, IPC, docs all use `monocoque-agent-rc`. Zero `agent-rem` / `agent_rem` references remain.
+
+---
+
+<!-- SECTION:DESCRIPTION:END -->
