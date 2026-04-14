@@ -1,0 +1,366 @@
+schema_version: "1.0.0"
+generated_at: "2026-04-14T06:08:11Z"
+workspace_path: "D:/Source/GitHub/agent-intercom"
+
+languages:
+  primary: "Rust"
+  version: "2021"
+  secondary:
+    - "TypeScript"
+    - "PowerShell"
+
+frameworks:
+  list:
+    - "axum 0.8"
+    - "rmcp 0.13"
+    - "slack-morphism 2.17"
+    - "sqlx 0.8"
+    - "tokio 1.37"
+  mcp_sdk: "rmcp"
+  mcp_transport: "streamable-http"
+
+primary_stack_pack: "mcp-server"
+stack_packs:
+  - "mcp-server"
+  - "api-service"
+  - "cli-tool"
+
+build:
+  tool: "cargo"
+  command: "cargo build"
+  check_command: "cargo check --all-targets"
+
+test:
+  runner: "cargo test"
+  command: "cargo test"
+  directory: "tests/"
+
+lint:
+  tool: "clippy"
+  command: "cargo clippy --all-targets -- -D warnings -D clippy::pedantic"
+
+format:
+  tool: "rustfmt"
+  command: "cargo fmt --all"
+  check_command: "cargo fmt --all -- --check"
+  fix_command: "cargo fmt --all"
+
+ci:
+  platform: "GitHub Actions"
+  pipeline_steps:
+    - "checkout"
+    - "install-toolchain"
+    - "cargo-cache"
+    - "fmt-check"
+    - "clippy"
+    - "test-unit-contract"
+    - "test-integration"
+    - "cargo-audit"
+  quality_gates:
+    - name: "fmt"
+      command: "cargo fmt --all -- --check"
+    - name: "clippy"
+      command: "cargo clippy --all-targets -- -D warnings -D clippy::pedantic"
+    - name: "test"
+      command: "cargo test"
+    - name: "audit"
+      command: "cargo audit"
+  notes: "GitHub Actions CI with lint → test-unit → test-integration → audit pipeline. Concurrency cancel-in-progress enabled."
+
+structure:
+  source_layout: "src/"
+  test_layout: "tests/ (unit/, contract/, integration/ tiers)"
+  doc_layout: "docs/"
+
+runtime_surfaces:
+  web_ui: false
+  public_api: true
+  background_jobs: true
+  browser_tooling:
+    - "playwright"
+  deployment_manifests: []
+
+strict_safety_signals:
+  - "Public API surface at /mcp endpoint"
+  - "Security-sensitive credential handling via keyring crate"
+  - "Path traversal protection in diff/path_safety.rs"
+  - "SQLite schema management in persistence/schema.rs"
+  - "Session-bound authorization guard in slack/events.rs"
+
+release_observability_signals:
+  - "Public API runtime surface (MCP HTTP transport)"
+  - "Background job surfaces (stall detection, child monitoring, Slack Socket Mode)"
+  - "CI/CD pipeline with lint, test, and audit gates"
+
+conventions:
+  code_style:
+    formatter: "rustfmt"
+    formatter_config: "rustfmt.toml (max_width=100, edition=2021)"
+    linter: "clippy"
+    linter_strictness: "pedantic deny, unwrap_used deny, expect_used deny"
+    unsafe_policy: "#![forbid(unsafe_code)]"
+    visibility_default: "pub(crate)"
+    error_pattern: "Result<T, AppError>"
+    doc_comment_style: "/// doc comments on all public items"
+  git:
+    commit_style: "conventional commits (feat:, fix:, docs:, test:)"
+    branch_strategy: "branch per feature"
+    pr_template: false
+    issue_templates: false
+  documentation:
+    api_docs: "rustdoc"
+    adrs: "docs/adrs/ (numbered 0001-0013)"
+    changelog: false
+    readme: true
+
+harness_recommendations:
+  preset: "full"
+  project_description: "MCP remote agent server that enables human operators to review and approve AI agent code changes via Slack, with support for workspace policy enforcement, stall detection, and session lifecycle management"
+  capability_packs:
+    - "agent-intercom"
+    - "agent-engram"
+    - "backlogit"
+    - "browser-verification"
+    - "strict-safety"
+    - "adversarial-review"
+  install_layers:
+    - "foundation"
+    - "instructions"
+    - "workflow"
+    - "review"
+    - "runtime"
+    - "backlog"
+    - "knowledge"
+    - "overlays"
+  recommendation_reasons:
+    preset:
+      - "Mature Rust project with 91 source files and 130 test files across three test tiers"
+      - "Extensive CI/CD pipeline with lint, unit, contract, integration, and audit gates"
+      - "Multiple integration points (MCP SDK, Slack, SQLite, IPC, file watching)"
+      - "Existing harness already at high operational maturity with agents, skills, and review personas"
+    capability_packs:
+      - item: "agent-intercom"
+        because: "This IS the agent-intercom project — .intercom/settings.json, MCP server in .vscode/mcp.json, and AGENTS.md all reference intercom workflows"
+        signals:
+          - ".intercom/settings.json exists with full tool configuration"
+          - ".vscode/mcp.json has agent-intercom MCP server configured"
+          - "AGENTS.md has extensive intercom instructions for heartbeat, broadcast, approval routing"
+      - item: "agent-engram"
+        because: "Engram is actively installed with code-graph indexing, MCP server configured, and registry present"
+        signals:
+          - ".engram/ directory with code-graph/, db/, registry.yaml"
+          - ".vscode/mcp.json has engram MCP server with stdio transport"
+      - item: "backlogit"
+        because: "Backlogit is the active backlog tool with MCP integration, queue/archive structure, and rich status values"
+        signals:
+          - ".backlogit/ directory with config.yaml, queue/, archive/"
+          - ".vscode/mcp.json has backlogit MCP server configured"
+          - "Status values: queued, active, blocked, review, done, accepted, rejected, archived"
+      - item: "browser-verification"
+        because: "Playwright is present in tests/visual/ for browser-based visual testing"
+        signals:
+          - "tests/visual/playwright.config.ts"
+          - "tests/visual/package.json with Playwright dependencies"
+      - item: "strict-safety"
+        because: "Security-sensitive runtime with credential handling, path traversal protection, and session authorization"
+        signals:
+          - "Keyring-based credential management"
+          - "Path security enforcement in diff/path_safety.rs"
+          - "Session-bound authorization guard"
+          - "Public API surface at /mcp endpoint"
+      - item: "adversarial-review"
+        because: "High-maturity codebase benefits from multi-model consensus review for security-critical and protocol-critical changes"
+        signals:
+          - "Existing review personas in .github/agents/review/"
+          - "Multiple security boundaries (path safety, auth, credential management)"
+    install_layers:
+      - item: "foundation"
+        because: "Core AGENTS.md, copilot-instructions.md, and constitution are essential for all installations"
+      - item: "instructions"
+        because: "Language-specific Rust instructions, commit message, markdown, and workflow conventions"
+      - item: "workflow"
+        because: "Pipeline agents (stage, ship), core skills (build-feature, fix-ci, impl-plan), and prompts"
+      - item: "review"
+        because: "Review personas and orchestrating review skills for plan and code review"
+      - item: "runtime"
+        because: "Public API and background job surfaces require runtime verification and operational closure"
+      - item: "backlog"
+        because: "Backlogit is actively used for all task tracking"
+      - item: "knowledge"
+        because: "Existing docs/ structure with compound learnings, decisions, memory, and closure records"
+      - item: "overlays"
+        because: "Six capability packs selected require cross-cutting overlay composition"
+
+agent_intercom:
+  detected: true
+  mcp_configured: true
+  config_paths:
+    - ".vscode/mcp.json"
+    - ".intercom/settings.json"
+  instruction_markers:
+    - "AGENTS.md references heartbeat, broadcast, approval routing, and Slack-mediated workflows"
+    - ".github/copilot-instructions.md has extensive agent-intercom operating model"
+    - "constitution.instructions.md includes Destructive Terminal Command Approval principle"
+  recommended: true
+
+agent_engram:
+  detected: true
+  mcp_configured: true
+  config_paths:
+    - ".vscode/mcp.json"
+    - ".engram/registry.yaml"
+  instruction_markers:
+    - ".engram/ directory with code-graph indexing, database, and templates"
+  recommended: true
+
+agent_native:
+  detected: true
+  mcp_sdk_present: true
+  mcp_transport: "streamable-http"
+  agent_tooling_markers:
+    - "src/mcp/tools/ with 10 MCP tool handlers"
+    - "src/mcp/handler.rs implements ServerHandler trait"
+    - "src/mcp/resources/ with resource providers"
+    - "rmcp 0.13 SDK with server, transport-streamable-http-server, transport-io features"
+  user_agent_parity_required: true
+  recommended_reviewer: true
+
+existing_harness:
+  has_harness: true
+  artifacts:
+    - path: "AGENTS.md"
+      type: "foundation"
+      description: "Root AGENTS.md with comprehensive development guidelines"
+    - path: ".github/copilot-instructions.md"
+      type: "foundation"
+      description: "Shared copilot instructions with project structure and conventions"
+    - path: ".github/instructions/constitution.instructions.md"
+      type: "foundation"
+      description: "Agent-intercom constitution v2.2.0 with 8 core principles"
+    - path: ".github/instructions/rust.instructions.md"
+      type: "instruction"
+      description: "Rust coding conventions and best practices"
+    - path: ".github/instructions/rust-mcp-server.instructions.md"
+      type: "instruction"
+      description: "Rust MCP server development best practices"
+    - path: ".github/instructions/commit-message.instructions.md"
+      type: "instruction"
+      description: "Commit message guidelines"
+    - path: ".github/instructions/markdown.instructions.md"
+      type: "instruction"
+      description: "Markdown style guide"
+    - path: ".github/instructions/writing-style.instructions.md"
+      type: "instruction"
+      description: "Writing style conventions"
+    - path: ".github/instructions/git-merge.instructions.md"
+      type: "instruction"
+      description: "Git merge and rebase protocol"
+    - path: ".github/instructions/pull-request.instructions.md"
+      type: "instruction"
+      description: "Pull request instructions"
+    - path: ".github/instructions/prompt-builder.instructions.md"
+      type: "instruction"
+      description: "Prompt engineering standards"
+    - path: ".github/instructions/workflows.instructions.md"
+      type: "instruction"
+      description: "CI/CD workflow conventions"
+    - path: ".github/agents/backlog-harvester.agent.md"
+      type: "agent"
+      description: "Backlog harvester agent"
+    - path: ".github/agents/build-orchestrator.agent.md"
+      type: "agent"
+      description: "Build orchestrator agent"
+    - path: ".github/agents/doc-ops.agent.md"
+      type: "agent"
+      description: "Documentation operations agent"
+    - path: ".github/agents/harness-architect.agent.md"
+      type: "agent"
+      description: "Harness architect agent"
+    - path: ".github/agents/memory.agent.md"
+      type: "agent"
+      description: "Session memory persistence agent"
+    - path: ".github/agents/pr-review.agent.md"
+      type: "agent"
+      description: "PR review lifecycle manager"
+    - path: ".github/agents/prompt-builder.agent.md"
+      type: "agent"
+      description: "Prompt engineering assistant"
+    - path: ".github/agents/rust-engineer.agent.md"
+      type: "agent"
+      description: "Expert Rust software engineer"
+    - path: ".github/agents/test-automation.agent.md"
+      type: "agent"
+      description: "Automated test runner agent"
+    - path: ".github/agents/test-hitl.agent.md"
+      type: "agent"
+      description: "Human-in-the-loop test agent"
+    - path: ".github/skills/automated-test-harness/SKILL.md"
+      type: "skill"
+      description: "Automated API + Playwright test harness"
+    - path: ".github/skills/brainstorm/SKILL.md"
+      type: "skill"
+      description: "Collaborative brainstorming skill"
+    - path: ".github/skills/build-feature/SKILL.md"
+      type: "skill"
+      description: "Feature build with compiler-driven feedback"
+    - path: ".github/skills/compound/SKILL.md"
+      type: "skill"
+      description: "Institutional knowledge capture"
+    - path: ".github/skills/fix-ci/SKILL.md"
+      type: "skill"
+      description: "CI failure detection and repair"
+    - path: ".github/skills/hitl-test/SKILL.md"
+      type: "skill"
+      description: "Human-in-the-loop test execution"
+    - path: ".github/skills/plan/SKILL.md"
+      type: "skill"
+      description: "Implementation planning"
+    - path: ".github/skills/plan-review/SKILL.md"
+      type: "skill"
+      description: "Multi-persona plan review"
+    - path: ".github/skills/review/SKILL.md"
+      type: "skill"
+      description: "Structured code review"
+    - path: ".github/prompts/ping-loop.prompt.md"
+      type: "prompt"
+      description: "Heartbeat ping loop prompt"
+
+backlog_tool:
+  detected: true
+  tool_name: "backlogit"
+  directory: ".backlogit"
+  tool_type: "both"
+  mcp_registered: true
+  cli_available: true
+  config_path: ".backlogit/config.yaml"
+  registry_path: null
+  status_values:
+    - "queued"
+    - "active"
+    - "blocked"
+    - "review"
+    - "done"
+    - "accepted"
+    - "rejected"
+    - "archived"
+  features:
+    sql_query: true
+    milestones: false
+    documents: false
+    telemetry: true
+    stash: true
+    shipments: true
+    hooks: true
+    deliberation: true
+    dependencies: true
+    links: true
+    comments: true
+    checkpoints: true
+    memory: true
+
+vscode:
+  detected: true
+  user_settings_path: "C:\\Users\\derek.williams\\AppData\\Roaming\\Code\\User\\settings.json"
+  has_agent_settings: false
+
+drift_report: null

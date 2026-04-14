@@ -636,8 +636,9 @@ impl ServerHandler for IntercomServer {
     ///    already created and activated by the Slack `/spawn` command before the
     ///    child process connected.  We verify it exists and log the connection.
     /// 2. **Direct connection** (Copilot Chat, Cursor, stdio, etc.): no prior
-    ///    session exists, so we auto-create and activate one using the configured
-    ///    `default_workspace_root`.
+    ///    session exists, so we auto-create and activate one using the workspace
+    ///    path resolved from `channel_id_override` (falling back to
+    ///    `default_workspace_root` when no channel is provided).
     #[allow(clippy::too_many_lines)]
     fn on_initialized(
         &self,
@@ -710,9 +711,12 @@ impl ServerHandler for IntercomServer {
                 }
             }
 
-            let workspace_root = state
-                .config
-                .default_workspace_root()
+            let workspace_root = channel_id_override
+                .as_deref()
+                .map_or_else(
+                    || state.config.default_workspace_root(),
+                    |ch| state.config.workspace_root_for_channel(ch),
+                )
                 .to_string_lossy()
                 .into_owned();
             let mode = if is_remote {

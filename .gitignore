@@ -22,7 +22,7 @@ Thumbs.db
 # VS Code MCP config — contains personal channel IDs and API keys, never committed
 .vscode/mcp.json
 
-# Logs and temp files
+# Logs, temp files, environment
 *.log
 *.tmp
 *.swp
@@ -30,6 +30,7 @@ Thumbs.db
 logs/
 temp/
 %SystemDrive%/*
+.copilot/*
 
 # Development debug scripts — contain env-specific config, never committed
 run-debug-*.ps1
@@ -44,13 +45,6 @@ data/*.db-journal
 # Contains mutation testing data
 **/mutants.out*/
 
-# RustRover
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
 # Playwright Tier 3 visual test artifacts (tests/visual/)
 tests/visual/node_modules/
 tests/visual/auth/*.json
@@ -62,3 +56,21 @@ tests/visual/.env
 # UE
 *.prj
 *.pui
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Engram runtime data (keep templates/, registry.yaml, .version)
+.engram/code-graph/
+.engram/db/
+.engram/run/
+.engram/logs/
+
+# Autoharness runtime artifacts (keep config.yaml and workspace-profile.yaml)
+.autoharness/*.lock
+.autoharness/harness-manifest.yaml
+.copilot-tracking/

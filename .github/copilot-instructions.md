@@ -1,493 +1,216 @@
----
-description: Shared agent-intercom development guidelines for custom agents.
----
 # agent-intercom Development Guidelines
 
-Last updated: 2026-02-28
+Last updated: 2026-04-14
 
-## Active Technologies
+agent-intercom is a MCP remote agent server enabling human operators to review and approve AI agent code changes via Slack, with workspace policy enforcement, stall detection, and session lifecycle management.
 
-| Dependency | Version | Purpose |
-|---|---|---|
-| Rust | stable, edition 2021 | Language toolchain |
-| `rmcp` | 0.13 | MCP SDK (`ServerHandler`, `ToolRouter`, `ToolRoute`) |
-| `axum` | 0.8 | HTTP/SSE transport (`StreamableHttpService` on `/mcp`) |
+## Technology Stack
+
+| Layer           | Technology                | Notes                                 |
+|-----------------|---------------------------|---------------------------------------|
+| Language        | Rust 2021 | (Rust 2021 edition, stable toolchain)          |
+| Build           | cargo            | `cargo build`                   |
+| Test            | cargo test           | `cargo test`                    |
+| Lint            | clippy                | `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`                    |
+| Format          | rustfmt             | `cargo fmt --all`                  |
+| CI              | GitHub Actions           | GitHub Actions CI with lint, test-unit, test-integration, audit pipeline. Concurrency cancel-in-progress enabled.                          |
+| `rmcp` | 0.13 | MCP SDK (ServerHandler, ToolRouter, ToolRoute) |
+| `axum` | 0.8 | HTTP/SSE transport (StreamableHttpService on /mcp) |
 | `slack-morphism` | 2.17 | Slack Socket Mode client |
-| `tokio` | 1.37 | Async runtime (full feature set) |
 | `sqlx` | 0.8 | SQLite async driver (file-based prod, in-memory tests) |
-| `diffy` | 0.4 | Unified diff parsing & patch application |
+| `diffy` | 0.4 | Unified diff parsing and patch application |
 | `interprocess` | 2.0 | IPC named pipes (Windows) / Unix domain sockets |
 | `clap` | 4.5 | CLI argument parsing |
 | `notify` | 6.1 | Filesystem watcher (policy hot-reload) |
-| `serde` / `serde_json` | 1.0 | Serialization |
-| `sha2` | 0.10 | Content integrity hashing |
-| `tracing` / `tracing-subscriber` | 0.1 / 0.3 | Structured logging |
-| `chrono` | 0.4 | Timestamps |
-| `uuid` | 1.7 | Entity IDs |
+| `tokio` | 1.37 | Async runtime (full feature set) |
+| `tokio-util` | 0.7 | CancellationToken for graceful shutdown |
 | `keyring` | 3 | OS keychain credential access |
-| `tokio-util` | 0.7 | `CancellationToken` for graceful shutdown |
 | `reqwest` | 0.13 | HTTP client (rustls) |
-| `glob` | 0.3 | Glob pattern matching |
-| `toml` | 0.8 | TOML config file parsing |
-| `tempfile` | 3.10 | Atomic file writes |
-| `regex` | 1.12 | Regular expression matching (policy evaluation) |
 
 ## Project Structure
 
 ```text
 src/
   config.rs               # GlobalConfig, credential loading, TOML parsing
-  errors.rs               # AppError enum (Config, Db, Slack, Mcp, Diff, Policy,
-                           #   Ipc, PathViolation, PatchConflict, NotFound,
-                           #   Unauthorized, AlreadyConsumed, Io)
-  lib.rs                  # Crate root — re-exports GlobalConfig, AppError, Result
+  errors.rs               # AppError enum
+  lib.rs                  # Crate root: re-exports GlobalConfig, AppError, Result
   main.rs                 # CLI bootstrap, tokio runtime, server startup
-  audit/                  # Audit logging subsystem
-    writer.rs             # AuditLogger trait and file-based implementation
+  audit/writer.rs         # AuditLogger trait and file-based implementation
   diff/                   # Unified diff parsing, patch application, atomic writes
-    applicator.rs, patcher.rs, path_safety.rs, writer.rs
-  ipc/                    # IPC server (named pipes / Unix sockets) for agent-intercom-ctl
-    server.rs, socket.rs
+  ipc/                    # IPC server for agent-intercom-ctl
   mcp/                    # MCP protocol layer
-    handler.rs            # AppState, AgentRcServer, ToolRouter wiring
-    context.rs            # Per-request context
+    handler.rs            # AppState, ToolRouter wiring
     sse.rs                # HTTP/SSE transport (axum)
-    transport.rs          # Stdio transport for direct agent connections
-    tools/                # 10 MCP tool handlers + shared utilities
-      accept_diff, ask_approval, check_auto_approve, forward_prompt,
-      heartbeat, recover_state, remote_log, set_operational_mode,
-      wait_for_instruction, util
-    resources/             # MCP resource providers
-      slack_channel
+    transport.rs          # Stdio transport
+    tools/                # 10 MCP tool handlers
+    resources/            # MCP resource providers
   models/                 # Domain models
-    approval, checkpoint, inbox, policy, progress, prompt, session,
-    stall, steering
   orchestrator/           # Session lifecycle management
-    session_manager, checkpoint_manager, child_monitor, spawner,
-    stall_consumer, stall_detector
-  persistence/            # sqlite (sqlx) repository layer
-    db.rs                 # connect(), schema bootstrap
-    schema.rs             # SQL DDL (idempotent CREATE TABLE IF NOT EXISTS)
-    approval_repo, checkpoint_repo, inbox_repo, prompt_repo,
-    session_repo, stall_repo, steering_repo, retention
+  persistence/            # SQLite repository layer
   policy/                 # Workspace auto-approve rules
-    evaluator, loader, watcher
   slack/                  # Slack Socket Mode integration
-    blocks.rs             # Block Kit message builders
-    client.rs             # SlackService (rate-limited message queue)
-    commands.rs           # Slash command handlers
-    events.rs             # Event dispatcher with authorization guard
-    handlers/             # Per-event-type handlers
-      approval, command_approve, modal, nudge, prompt, steer, task, wait
-ctl/
-  main.rs                 # agent-intercom-ctl companion CLI
-lib/
-  hve-core/               # External library (separate project)
+ctl/main.rs               # agent-intercom-ctl companion CLI
 tests/
-  unit/                   # Unit tests (25 modules)
-  contract/               # Contract tests (17 modules)
-  integration/            # Integration tests (33 modules)
+  unit/                   # Isolated logic tests
+  contract/               # MCP tool response contract verification
+  integration/            # End-to-end flows with real SSE/DB
 docs/
-  adrs/                   # Architecture Decision Records (0001–0013)
-specs/
-  001-mcp-remote-agent-server/   # Feature specification
-  002-sqlite-migration/          # Persistence migration spec
-  003-agent-intercom-release/    # Release pipeline spec
-  004-intercom-advanced-features/ # Advanced features spec
-  005-intercom-acp-server/       # ACP server spec
-config.toml              # Runtime configuration
-rustfmt.toml             # max_width = 100, edition = 2021
+  adrs/                   # Architecture Decision Records
+specs/                    # Feature specifications
+config.toml               # Runtime configuration
 ```
 
-### Binaries
+## Commands
 
-| Binary | Path | Description |
-|---|---|---|
-| `agent-intercom` | `src/main.rs` | MCP remote agent server |
-| `agent-intercom-ctl` | `ctl/main.rs` | Local CLI companion (IPC client) |
-
-## Quality Gates
-
-Every code change must pass these gates in order. Do not skip any gate.
-
-### Gate 1 — Compilation
-
-```powershell
-cargo check
+```bash
+cargo build              # Build
+cargo test               # Run all tests
+cargo clippy --all-targets -- -D warnings -D clippy::pedantic               # Lint
+cargo fmt --all             # Format check
+cargo check --all-targets     # Fast compilation check (no codegen)
+cargo audit                   # Security audit of dependencies
 ```
-
-All code must compile without errors. Run after every meaningful edit.
-
-### Gate 2 — Lint Compliance
-
-```powershell
-cargo clippy -- -D warnings
-```
-
-The workspace sets `clippy::pedantic = "deny"`, `clippy::unwrap_used = "deny"`, and `clippy::expect_used = "deny"` via `[workspace.lints.clippy]` in `Cargo.toml`. Zero warnings allowed.
-
-### Gate 3 — Formatting
-
-```powershell
-cargo fmt --all -- --check
-```
-
-If violations exist, run `cargo fmt --all` and re-check. Format config: `max_width = 100`, `edition = "2021"` (see `rustfmt.toml`).
-
-### Gate 4 — Tests
-
-```powershell
-cargo test
-```
-
-All unit, contract, and integration tests must pass. If output may be truncated, redirect:
-
-```powershell
-cargo test 2>&1 | Out-File logs\test-results.txt
-```
-
-### Gate 5 — TDD/BDD Discipline
-
-When adding new functionality:
-1. Write the test first
-2. Run it and **confirm it fails** (red)
-3. Implement the production code
-4. Run the test and confirm it passes (green)
-
-Never write production code before the corresponding test exists and has been observed to fail.
 
 ## Code Style and Conventions
-
-### Crate-Level Attributes
-
-* `#![forbid(unsafe_code)]` — no unsafe anywhere (both `src/main.rs` and `ctl/main.rs`)
-* `[workspace.lints.rust]`: `unsafe_code = "deny"`, `missing_docs = "warn"`
-* `[workspace.lints.clippy]`: `pedantic = "deny"`, `unwrap_used = "deny"`, `expect_used = "deny"`
 
 ### Error Handling
 
 * All fallible operations return `Result<T, AppError>` (type alias in `src/errors.rs`)
-* `AppError` variants: `Config`, `Db`, `Slack`, `Mcp`, `Diff`, `Policy`, `Ipc`, `PathViolation`, `PatchConflict`, `NotFound`, `Unauthorized`, `AlreadyConsumed`, `Io`
-* Map external errors via `From` impls or `.map_err()` — never `unwrap()` or `expect()` in library/production code
+* `AppError` variants: Config, Db, Slack, Mcp, Diff, Policy, Ipc, PathViolation, PatchConflict, NotFound, Unauthorized, AlreadyConsumed, Io
+* Map external errors via `From` impls or `.map_err()` — never `unwrap()` or `expect()`
 * Error messages are lowercase and do not end with a period
 
 ### Naming
 
 * Module files: `src/{module}/mod.rs` pattern for directories
-* Struct IDs: prefixed strings (`task:uuid`, `context:uuid`, `spec:uuid`)
+* Struct IDs: prefixed strings (`task:uuid`, `context:uuid`)
 * Status values: `snake_case` (`todo`, `in_progress`, `done`, `blocked`)
-* Default visibility: `pub(crate)` unless the item needs to be public API
+* Default visibility: `pub(crate)` unless public API
 
 ### Documentation
 
 * All public items require `///` doc comments
 * Module-level `//!` doc comments on every `mod.rs` or standalone module file
 
-### Database (SQLite)
-
-* All DB access goes through `persistence/` repository modules — no raw queries elsewhere
-* File-based SQLite for production, in-memory SQLite for tests (controlled by `connect(path, use_memory)`)
-* Schema uses idempotent DDL (`CREATE TABLE IF NOT EXISTS`) in `persistence/schema.rs`
-
-### MCP (rmcp 0.13)
-
-* Implements `ServerHandler` trait on `IntercomServer` in `mcp/handler.rs`
-* Tools registered via `ToolRouter` / `ToolRoute::new_dyn()` — no `#[tool]` proc macros
-* All 9 tools always registered and visible; inapplicable calls return descriptive errors
-* Blocking tools (`check_clearance`, `transmit`, `standby`) use `tokio::sync::oneshot` channels
-* HTTP transport: axum `StreamableHttpService` on `/mcp` endpoint
-* Stdio transport: `rmcp::transport::io::stdio()` for direct agent connections
-
-### Slack (slack-morphism)
-
-* Socket Mode — outbound-only WebSocket (no inbound firewall ports)
-* All message posting routes through the rate-limited in-memory queue with exponential backoff
-* Respect `Retry-After` headers from the Slack API
-* Use Block Kit builders from `slack/blocks.rs` for all messages
-* Centralized authorization guard in `slack/events.rs` — unauthorized users silently ignored
-* Double-submission prevention via `chat.update` replacing buttons before handler dispatch
-
-### Async (tokio)
-
-* `tokio` 1 with `full` feature set
-* `tokio::task::spawn_blocking` for CPU-bound or blocking I/O (e.g., `keyring` credential lookups)
-* Drop `MutexGuard`/`RwLockGuard` before `.await` points
-* `tokio_util::sync::CancellationToken` for graceful shutdown coordination
-* `tokio::process::Command` with `kill_on_drop(true)` for agent session processes
-
-### Path Security
-
-* All file paths canonicalized and validated via `starts_with(workspace_root)` in `diff/path_safety.rs`
-* Reject paths outside the workspace root — return `AppError::PathViolation`
-
-### Workspace Policy
-
-* Auto-approve rules in `.agentrc/settings.json` per workspace
-* Hot-reloaded via `notify` file watcher in `policy/watcher.rs`
-* Evaluated by `policy/evaluator.rs`
-
-### IPC
-
-* `interprocess` crate — named pipes (Windows) / Unix domain sockets
-* JSON-line protocol (one JSON object per line, newline-delimited)
-
 ### Testing
 
 * TDD required: write tests first, verify they fail, then implement
-* Three test tiers in `tests/` directory (not inline):
-  * `unit/` — isolated logic tests (25 modules)
-  * `contract/` — MCP tool response contract verification (17 modules)
-  * `integration/` — end-to-end flows with real SSE/DB (33 modules)
-* Test DB: always use in-memory SQLite (`":memory:"`)
-* Use `serial_test` crate for tests requiring sequential execution
+* Test tiers in `tests/` directory:
+Three tiers: `unit/` for isolated logic tests, `contract/` for MCP tool response contract verification, `integration/` for end-to-end flows with real SSE/DB. In-memory SQLite for all tests.
 
-## Architecture Reference
+## Search Strategy
 
-| Concern | Approach |
-|---|---|
-| MCP SDK | `rmcp` 0.13 — `ServerHandler` trait, `ToolRouter` / `ToolRoute::new_dyn()` |
-| Transport (stdio) | `rmcp::transport::io::stdio()` for direct agent connections |
-| Transport (HTTP) | axum 0.8 with `StreamableHttpService` on `/mcp` |
-| Slack | `slack-morphism` 2.17 Socket Mode |
-| Database | SQLite via `sqlx` 0.8 — file-based prod, in-memory tests, idempotent DDL |
-| Configuration | TOML (`config.toml`) → `GlobalConfig`, credentials via keyring with env fallback |
-| Workspace policy | JSON auto-approve rules (`.agentrc/settings.json`), hot-reloaded via `notify` |
-| Diff safety | `diffy` 0.4 for unified diff parsing, `sha2` for integrity hashing, atomic writes via `tempfile` |
-| Path security | All paths canonicalized and validated via `starts_with(workspace_root)` |
-| IPC | `interprocess` 2.0 — named pipes (Windows) / Unix domain sockets for `agent-intercom-ctl` |
-| Shutdown | `CancellationToken` — persist state, notify Slack, terminate children gracefully |
-| ADRs | Numbered markdown files in `docs/adrs/` (currently 0001–0013) |
-| Audit logging | `AuditLogger` trait in `audit/writer.rs`, file-based impl, wired into `AppState` |
+Use available workspace search tools before falling back to file-based search
+(grep, glob, view). Indexed search returns precise results with minimal token
+cost. File-based tools read raw content into the context window, consuming
+tokens proportional to file size.
 
-## Remote Approval Workflow for Destructive File Operations
+**Search tool preference order:**
 
-When the agent-intercom MCP server is running, agents may write files directly for creation and modification. The remote approval workflow is reserved for **destructive operations only** — file deletion, directory removal, or any operation that permanently removes content from the filesystem. This allows the operator to review and approve destructive changes via Slack before they execute.
+1. When the `agent-engram` capability pack is enabled and reachable: `unified_search`, `query_memory`, `map_code`, `list_symbols`, `impact_analysis`, `query_graph`
+2. Otherwise use workspace-indexed tools (if available): semantic search, symbol lookup, call graphs
+3. File-based fallback: grep, glob, view — only when indexed results are insufficient
 
-Additionally, **do not write multiple files in a single proposal.** Each destructive operation must be proposed, reviewed, and approved separately to ensure clear audit trails and granular control.
+## Session Memory Requirements
 
-For terminal commands, **never chain multiple commands together**. Each command must be submitted separately to the `evaluate_command` tool for proper policy evaluation and approval. If the terminal command is **not** already auto-approved for the current workspace or current working directory, it may be executed directly without approval, but still must not be chained with other commands unless those commands are effectively piping output.
+* Working agent sessions MUST persist output to `docs/memory/` before the session ends — do NOT rely on built-in AI assistant memory features, which write to their own managed locations.
+* Content to capture: task IDs completed, files modified, decisions and rationale, failed approaches, open questions, and next steps.
+* File convention: `docs/memory/{YYYY-MM-DD}/{descriptive-slug}-memory.md`
+* After writing memory, invoke the **compact-context** skill to consolidate stale checkpoints and finalize decided-plans. This is a mandatory workflow step, not advisory.
+* If context has grown from loading multiple skill definitions mid-session, consider invoking **compact-context** proactively before hitting hard thresholds.
 
-### Required Call Sequence (Destructive Operations Only)
+## Foundational Protocols
 
-```text
-1. auto_check       →  Can this destructive operation bypass approval?
-2. check_clearance   →  Submit the proposal (blocks until operator responds)
-3. check_diff        →  Execute the approved destructive operation
-```
+| Protocol | Location | When |
+|---|---|---|
+| **Circuit Breaker** | `.github/instructions/circuit-breaker.instructions.md` | All retry loops and failure handling |
+| **Concurrency Control** | `.github/instructions/concurrency.instructions.md` | Multi-agent or human+agent concurrent edits |
+| **Skill Discovery** | `scripts/search.ps1` / `scripts/search.sh` | Finding capabilities by keyword (Primitive 6) |
 
-### Step 1 — `auto_check`
+## Optional Capability Packs
 
-Call **before** every destructive file operation (deletion, directory removal) to check if the workspace policy allows the operation without human review.
+### agent-intercom
 
-| Parameter   | Type     | Required | Description |
-|-------------|----------|----------|-------------|
-| `tool_name` | `string` | yes      | Name of the destructive operation being executed |
-| `context`   | `object` | no       | `{ "file_path": "...", "risk_level": "..." }` |
+When the workspace enabled the `agent-intercom` capability pack:
 
-- If `auto_approved: true` → the agent may write the file directly (skip steps 2–3).
-- If `auto_approved: false` → proceed to step 2.
+* verify the intercom server / tool surface is reachable before depending on remote approval or operator steering
+* call heartbeat / ping at session start and keep it alive during long-running work
+* broadcast major workflow transitions so the operator can observe planning, build, review, verification, and closure progress
+* route destructive terminal commands and destructive file operations through the intercom approval workflow
+* use transmit / standby flows when blocked on operator clarification or when intentionally pausing for instructions
+* if the intercom service is unreachable, warn that remote visibility is degraded and avoid pretending approval or operator awareness exists
 
-### Step 2 — `check_clearance`
+### agent-engram
 
-Submit the proposed destructive operation for operator review. This call **blocks** until the operator taps Accept/Reject in Slack or the timeout elapses.
+When the workspace enabled the `agent-engram` capability pack:
 
-| Parameter     | Type     | Required | Description |
-|---------------|----------|----------|---------------------------------------------------------------------------------------|
-| `title`       | `string` | yes      | Concise summary of the proposed change |
-| `diff`        | `string` | yes      | Standard unified diff or full file content |
-| `file_path`   | `string` | yes      | Target file path relative to workspace root |
-| `description` | `string` | no       | Additional context about the change |
-| `risk_level`  | `string` | no       | `low` (default), `high`, or `critical` |
-| `snippets`    | `array`  | no       | Curated code excerpts for inline Slack review (see below) |
+* verify the engram daemon / MCP surface is reachable before depending on indexed lookup
+* prefer engram tools for conceptual search, symbol discovery, call-graph lookup, impact analysis, and workspace-memory retrieval
+* verify the workspace binding state before relying on results; if the daemon auto-binds the workspace, prefer status checks over repeated rebinding
+* use `sync_workspace` or the equivalent freshness operation when code changed outside the expected indexing flow
+* if semantic search is unavailable or degraded, fall back to `list_symbols` + `map_code` + `impact_analysis` before resorting to broad file scans
+* treat `.engram/` generated artifacts as tool-managed state rather than files to hand-edit casually
 
-**`snippets` array** — each element has:
-- `label` (string, required) — short human-readable title, e.g. `"handle() — main entry point"`
-- `language` (string, optional) — markdown code-fence language, e.g. `"rust"`, `"toml"`
-- `content` (string, required) — the code to display (server truncates at 2,600 chars)
+### backlogit
 
-When `snippets` is provided, the server posts them as a **threaded Slack message** using inline code blocks, which Slack always renders as readable text. This is the preferred approach for all `check_clearance` calls: curate the 1–4 most meaningful sections of the affected file (changed functions, modified public APIs, key callers) rather than relying on the server to upload the whole file. See the build-feature skill for full curation guidance.
+When the workspace enabled the `backlogit` capability pack:
 
-Two key conventions apply to every snippet:
-- **Function-boundary scoping**: each snippet must span one complete function or method — from its signature to its closing delimiter. Never include a partial function even if only one line changed.
-- **Changed-line annotation**: Slack code blocks render all content as literal text (`**bold**` becomes asterisks). Annotate changed lines with inline comments instead: `// ← new`, `// ← modified`, `// ← deleted` (or `#`, `--`, `<!-- -->` for Python/SQL/HTML respectively).
+* verify the backlogit MCP / CLI surface is reachable before depending on queue, dependency, memory, or traceability operations
+* prefer backlogit query operations for targeted state lookup instead of reading many backlog markdown files into context
+* use backlogit queue and dependency operations when available rather than inferring execution order from prose alone
+* write concise memory summaries and checkpoints through backlogit operations at task and session boundaries when supported
+* append significant task comments and associate commits with task IDs for execution traceability when those operations are available
+* if backlog content was edited outside the normal mutation flow, refresh the backlogit index before relying on query results
 
-**Response:** `{ "status": "approved" | "rejected" | "timeout", "request_id": "...", "reason": "..." }`
+### browser-verification
 
-- `approved` → proceed to step 3 with the returned `request_id`.
-- `rejected` → do **not** apply the change. Adapt or abandon based on the `reason`.
-- `timeout` → treat as rejection. Do not retry automatically without operator guidance.
+When the workspace enabled the `browser-verification` capability pack:
 
-### Step 3 — `check_diff`
+* verify the target server or preview environment is reachable before launching browser work
+* choose headed vs headless mode intentionally and record the reason
+* derive browser routes from changed pages, components, or affected user journeys
+* treat OAuth, email, SMS, payments, CAPTCHAs, or other external flows as explicit human checkpoints
+* carry browser findings into runtime verification and operational closure rather than leaving them as informal notes
 
-Execute the approved destructive operation. Only call this after receiving `status: "approved"`.
+### continuous-learning
 
-| Parameter    | Type      | Required | Description |
-|--------------|-----------|----------|-------------|
-| `request_id` | `string`  | yes      | The `request_id` from the `check_clearance` response |
-| `force`      | `boolean` | no       | `true` to overwrite even if the file changed since proposal |
+When the workspace enabled the `continuous-learning` capability pack:
 
-**Response:** `{ "status": "applied", "files_written": [{ "path": "...", "bytes": N }] }`
+* store observation state under `.autoharness/continuous-learning/`
+* keep hook capture optional and environment-specific; manual capture is still valid
+* use `observe` to capture recurring workflow signals, `learn` to infer instincts, and `evolve` to promote mature patterns into `learned-*` artifacts
+* do not harden a rule into a learned instruction or skill until it has enough corroborating observations to justify the promotion
+* treat learned artifacts as explicit repository knowledge rather than invisible prompt-only behavior
 
-If the server returns `patch_conflict` (file changed since proposal), the agent should re-read the file, regenerate the diff, and restart from step 2.
+### strict-safety
 
-### Rules
+When the workspace enabled the `strict-safety` capability pack:
 
-1. **File creation and modification proceed directly** when the MCP server is reachable. No approval workflow is needed for non-destructive writes.
-2. **Broadcast every file change.** After each non-destructive file write, call `broadcast` at `info` level with `[FILE] {action}: {file_path}` (where `action` is `created` or `modified`) and include the unified diff (for modifications) or full file content (for new files) in the message body. These broadcasts are non-blocking and keep the operator informed in real time.
-3. **Destructive operations require approval.** File deletion, directory removal, or any operation that permanently removes content must go through the `auto_check` → `check_clearance` → `check_diff` workflow.
-4. **One destructive operation per approval.** Submit each deletion or removal as a separate `check_clearance` call.
-5. **Set `risk_level`** to `high` or `critical` for destructive operations targeting configuration files, security-sensitive modules (`diff/path_safety.rs`, `policy/`, `slack/events.rs`), or database schema (`persistence/schema.rs`).
-6. **Do not retry rejected proposals** with the same content. Incorporate the operator's feedback first.
-7. **Handle all response statuses.** Never assume approval — always branch on `approved`, `rejected`, and `timeout`.
+* follow `.github/instructions/strict-safety.instructions.md`
+* express risky work as `ProposedAction` entries with `ActionRisk` and `ActionResult`
+* require explicit approval before destructive actions and prefer approval for high-blast-radius actions
+* keep risky action records visible in plan hardening, review, runtime verification, and operational closure
 
-## Destructive Terminal Command Approval (NON-NEGOTIABLE)
+### release-observability
 
-**All destructive terminal commands MUST go through agent-intercom operator approval regardless of whether the agent is running in `--allow-all`, `--yolo`, or any other permissive mode.** This rule has no exceptions and cannot be overridden by agent configuration, workspace policy, or auto-approve rules.
+When the workspace enabled the `release-observability` capability pack:
 
-### Definition of Destructive Terminal Commands
+* follow `.github/instructions/release-observability.instructions.md`
+* produce monitoring plans with SLIs, dashboards, baselines, and alert thresholds before merge
+* complete pre-deploy audit checklists for runtime, migration, or rollout-risk changes
+* define explicit post-deploy observation windows with owner and duration
+* declare rollback triggers with named metrics and thresholds
+* carry all release-observability artifacts into operational closure
 
-A terminal command is considered **destructive** if it:
-- Deletes files or directories (`rm`, `Remove-Item`, `del`, `rmdir`)
-- Overwrites files without creating backups (`mv` to existing target, `Move-Item -Force`)
-- Modifies system configuration (`reg`, `Set-ExecutionPolicy`, `chmod`, `chown`)
-- Alters version control history (`git reset --hard`, `git push --force`, `git clean -fd`)
-- Drops or truncates database content (`DROP TABLE`, `TRUNCATE`, `DELETE FROM` without `WHERE`)
-- Installs or removes system-level packages (`npm install -g`, `cargo install`, `apt remove`)
-- Executes arbitrary code from untrusted sources (`curl | sh`, `iex (irm ...)`)
+### adversarial-review
 
-### Required Workflow
+When the workspace enabled the `adversarial-review` capability pack:
 
-1. **Detect**: Before executing any terminal command, evaluate whether it is destructive per the definition above.
-2. **Route through agent-intercom**: If destructive, call `auto_check` with the full command string. If not auto-approved, call `check_clearance` with:
-   - `title`: The command being proposed
-   - `description`: Why the command is needed and what it will affect
-   - `risk_level`: `high` for most destructive commands, `critical` for force-pushes, database drops, or system config changes
-3. **Execute only after approval**: Only run the command after receiving `status: "approved"` from the operator.
-4. **Never bypass**: Even if `--allow-all` or `--yolo` flags are active, destructive terminal commands MUST still go through this approval workflow. These flags only affect non-destructive operations.
+* follow `.github/instructions/adversarial-review.instructions.md`
+* escalate from standard review when 3+ P0/P1 findings appear or the work is security-sensitive
+* dispatch parallel reviewer instances across different model tiers for cross-model diversity
+* assemble consensus-weighted findings (HIGH / MEDIUM / LOW confidence)
+* treat HIGH-confidence P0/P1 findings as gate-blocking
+* feed remediation queue entries into backlog
 
-### Rationale
-
-Permissive agent modes (`--allow-all`, `--yolo`) exist to reduce friction for routine operations like file creation, modification, and safe build/test commands. They must NEVER extend to destructive terminal operations because:
-- A single misrouted destructive command can irrecoverably corrupt repositories, delete production data, or break system configuration.
-- Agents operating autonomously for extended periods may accumulate context drift that leads to incorrect destructive actions.
-- The operator retains final authority over any operation that permanently removes or alters critical resources.
-
-<!-- MANUAL ADDITIONS START -->
-
-## Terminal Command Execution Policy
-
-**Do NOT chain terminal commands.** Run each command as a separate, standalone invocation.
-
-### Rules
-
-1. **One command per terminal call.** NEVER, NEVER chain or combine commands with `;`, `&&`, `||`, or `|` unless it falls under an allowed exception below.
-2. **No `cmd /c` wrappers.** Run commands directly in the shell rather than wrapping them in `cmd /c "..."`. If `cmd /c` is genuinely required (e.g., for environment isolation), it must contain a single command only.
-3. **No exit-code echo suffixes.** Do not append `; echo "EXIT: $LASTEXITCODE"` or `&& echo "done"` to commands. The terminal tool already captures exit codes.
-4. **Check results between commands.** After each command, inspect the output and exit code before deciding whether to run the next command. This is safer and produces better diagnostics.
-5. **Always use `pwsh`, never `powershell`.** When invoking PowerShell explicitly (e.g., to run a `.ps1` script), use `pwsh` — the cross-platform PowerShell 7+ executable. Never use `powershell` or `powershell.exe`, which refers to the legacy Windows PowerShell 5.1 runtime.
-6. **Always use relative paths for output redirection.** When redirecting command output to a file, use workspace-relative paths (e.g., `logs\results.txt`), never absolute paths (e.g., `d:\Source\...\logs\results.txt`). Absolute paths break auto-approve regex matching.
-7. **Temporary output files go in `logs/`.** All temporary output files — compilation logs, test results, clippy output, diff captures, or any other ephemeral terminal output redirected to disk — must be written to the `logs/` folder, never to `target/` or the workspace root. The `logs/` folder is gitignored and designated for transient artifacts. Example: `cargo test 2>&1 | Out-File logs\test-results.txt`.
-
-### Allowed Exceptions
-
-Output redirection is **not** command chaining — it is I/O plumbing that cannot execute destructive operations. The following patterns are permitted:
-
-- **Shell redirection operators**: `>`, `>>`, `2>&1` (e.g., `cargo test > logs/results.txt 2>&1`)
-- **Pipe to `Out-File` or `Set-Content`**: `cargo test 2>&1 | Out-File logs/results.txt` or `| Set-Content`
-- **Pipe to `Out-String`**: `some-command | Out-String`
-
-Use these when the terminal tool's ~60 KB output limit would truncate results (e.g., full `cargo test` compilation + test output).
-
-### Why
-
-Terminal auto-approve rules use regex pattern matching against the full command line. Chained commands create unpredictable command strings that cannot be reliably matched, forcing manual approval prompts that slow down the workflow. Single commands match cleanly and approve instantly.
-
-### Correct Examples
-
-```powershell
-# Good: separate calls
-cargo check
-# (inspect output)
-cargo clippy -- -D warnings
-# (inspect output)
-cargo test
-
-# Good: output redirection to capture full results
-cargo test 2>&1 | Out-File logs\test-results.txt
-
-# Good: shell redirect when output may be truncated
-cargo test > logs\test-results.txt 2>&1
-```
-
-### Incorrect Examples
-
-```powershell
-# Bad: chained with semicolons
-cargo check; cargo clippy -- -D warnings; cargo test
-
-# Bad: cmd /c wrapper with echo suffix
-cmd /c "cargo test > logs\test-results.txt 2>&1"; echo "EXIT: $LASTEXITCODE"
-
-# Bad: output redirect to target/ instead of logs/
-cargo test 2>&1 | Out-File target\test-results.txt
-
-# Bad: AND-chained
-cargo fmt && cargo clippy && cargo test
-
-# Bad: pipe to something other than Out-File/Set-Content/Out-String
-cargo test | Select-String "FAILED" | Remove-Item foo.txt
-```
-
-### Full List of Auto-Approve Commands with RegEx
-
-```json
-"chat.tools.terminal.autoApprove": {
-    ".specify/scripts/bash/": true,
-    ".specify/scripts/powershell/": true,
-    "/^cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^& cargo (build|test|run|clippy|fmt|check|doc|update|install|search|publish|login|logout|new|init|add|upgrade|version|help|bench)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^cargo --(help|version|verbose|quiet|release|features)(\\s[^;|&`]*)?$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^& git (status|add|commit|diff|log|fetch|pull|push|checkout|branch|--version)(\\s[^;|&`]*)?(\\s*(>|>>|2>&1|\\|\\s*(Out-File|Set-Content|Out-String))\\s*[^;|&`]*)*$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^(Out-File|Set-Content|Add-Content|Get-Content|Get-ChildItem|Copy-Item|Move-Item|New-Item|Test-Path)(\\s[^;|&`]*)?$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^(echo|dir|mkdir|where\\.exe|vsWhere\\.exe|rustup|rustc|refreshenv)(\\s[^;|&`]*)?$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^cmd /c \"cargo (test|check|clippy|fmt|build|doc|bench)(\\s[^;|&`]*)?\"(\\s*[;&|]+\\s*echo\\s.*)?$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "New-Item": true,
-    "Out-Null": true,
-    "cargo build": true,
-    "cargo check": true,
-    "cargo doc": true,
-    "cargo test": true,
-    "git commit": true,
-    "ForEach-Object": true,
-    "cargo clippy": true,
-    "cargo fmt": true,
-    "git add": true,
-    "git push": true
-}
-```
-<!-- MANUAL ADDITIONS END -->
+Generated by autoharness | Template: copilot-instructions.md.tmpl
