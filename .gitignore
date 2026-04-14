@@ -60,6 +60,9 @@ tests/visual/.env
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Engram runtime data (keep templates/, registry.yaml, .version)
 .engram/code-graph/
