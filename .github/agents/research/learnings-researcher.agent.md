@@ -51,7 +51,7 @@ Return a structured JSON response:
       "prevention_notes": "..."
     }
   ],
-  "search_coverage": "Number of files searched",
+  "files_searched": 12,
   "confidence": "high|medium|low"
 }
 ```

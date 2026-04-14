@@ -61,11 +61,10 @@ strict_safety:
   require_approval_for:
     - destructive
 
-# Model routing preferences (map tiers to model identifiers)
-model_routing:
-  tier1: gpt-5.4-mini      # Fast/cheap: memory, docs, compaction
-  tier2: claude-sonnet-4.6      # Standard: orchestration, code, review
-  tier3: claude-opus-4.6      # Frontier: planning, architecture, analysis
+# Model routing preferences (optional).
+# Leave unset here so each developer machine or CI environment can supply its
+# own available models and defaults.
+model_routing: {}
 
 # AI CLI tool startup configuration
 # Resolves copilot in the generated start.ps1 and start.sh scripts.

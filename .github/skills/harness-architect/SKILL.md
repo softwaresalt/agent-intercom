@@ -92,9 +92,10 @@ For each task, select the appropriate harness strategy:
 1. Create test files that express the task intent as compilable tests.
 2. Prefer table-driven or parameterized tests when the task describes
    multiple scenarios.
-3. Create matching production stubs with unimplemented!("Worker: ...") bodies
-   so the module compiles while the tests still fail for the intended
-   reason.
+3. Create matching production stubs that compile without panicking in
+   production code paths. Prefer explicit typed-error placeholders for
+   fallible APIs, or inert placeholder state that keeps the tests red
+   through assertions rather than runtime panics.
 4. Keep signatures, types, and module names aligned with the current
    codebase.
 
@@ -123,8 +124,9 @@ with a non-compiling harness.
 
 #### Step 5.2: Red phase check
 
-Run `cargo test` for the harness tests. ALL tests MUST fail with
-the expected failure marker (unimplemented!("Worker: ...")).
+Run `cargo test` for the harness tests. ALL tests MUST fail for the
+intended red-phase reason, such as an explicit placeholder error or a
+failing assertion in test code.
 
 If any test passes (false positive) or fails with an unexpected error
 (compilation vs runtime), fix the harness.
