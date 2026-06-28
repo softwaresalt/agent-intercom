@@ -75,4 +75,6 @@ tests/visual/.env
 .autoharness/harness-manifest.yaml
 .autoharness/staging/
 .autoharness/backups/
+docs/experiments/
+docs/closure/browser-automation/
 .copilot-tracking/

@@ -71,6 +71,7 @@ In addition to the pipeline agents (Stage and Ship), the Orchestrator can route 
 ### Elective Agent Behavioral Notes
 
 * **Operator-initiated only**: The Orchestrator never invokes elective agents autonomously. The operator must explicitly request an install or tune operation.
+* **Elective agents are global, not repo-packaged**: Auto-MergeInstall and Auto-Tune (and their workspace-discovery / install-harness / tune-harness skills) ship with the globally installed autoharness tool, not this repository. Route to them only when they are registered in the environment; if they are unavailable, report that the elective capability is not installed rather than failing.
 * **Not pipeline participants**: Elective agents do not participate in the Stage → Ship pipeline. They operate outside the stash/shipment lifecycle.
 * **Target workspace scoped**: Both agents operate against a target workspace (which may or may not be the autoharness repository itself). The operator specifies the target.
 * **Branch safety**: Both agents enforce branch safety — they recommend feature branches for their output and never commit directly to the default branch.

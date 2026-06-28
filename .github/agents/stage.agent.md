@@ -164,7 +164,7 @@ Before any pipeline work begins, verify tool availability and declare degraded m
 3. Do NOT silently fall back to ad hoc filesystem `grep`/`cat` operations when a configured backlog tool is unavailable. That hides configuration problems and produces incorrect results (P-012 violation).
 4. Log overall status: `ALL_TOOLS_OK`, `DEGRADED_MODE: {tool_list}`, or `TOOL_UNAVAILABLE`.
 
-When `harness-doctor` is installed and tool availability is in doubt, invoke it with `mode: check` targeting Phase 5 (MCP prerequisite check) for a deeper diagnostic. Skip if quick probes succeed.
+When `harness-doctor` is installed and tool availability is in doubt, invoke it with `mode: report` targeting Phase 5 (MCP prerequisite check) for a deeper diagnostic. Skip if quick probes succeed.
 
 ### Step 0.1: Backlog Index Sync (backlogit only)
 
@@ -191,11 +191,6 @@ When the `agent-engram` capability pack is installed, also follow
 symbols, and prior context before falling back to broader file scans while shaping the backlog.
 Agent-engram provides code-level context (symbols, modules, dependencies); use the skill-search
 tool separately when looking for harness skills by keyword — these are complementary, not competing.
-
-When the `graphtor-docs` capability pack is installed, also follow
-`.github/instructions/graphtor-docs.instructions.md`: resolve domain concepts, API references,
-and architectural context from indexed local documentation using `search_local_docs`,
-`search_semantic`, or `research_topic` before falling back to web search or raw filesystem scan.
 
 When the `backlogit` capability pack is installed, also follow
 `.github/instructions/backlogit.instructions.md`: use query-driven lookup when inspecting existing

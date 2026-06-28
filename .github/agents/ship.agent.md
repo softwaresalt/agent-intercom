@@ -114,7 +114,7 @@ Before any pipeline work begins, verify tool availability and declare degraded m
 3. Do NOT silently fall back to ad hoc filesystem `grep`/`cat` operations when a configured backlog tool is unavailable. That hides configuration problems and produces incorrect results (P-012 violation).
 4. Log overall status: `ALL_TOOLS_OK`, `DEGRADED_MODE: {tool_list}`, or `TOOL_UNAVAILABLE`.
 
-When `harness-doctor` is installed and tool availability is in doubt, invoke it with `mode: check` targeting Phase 5 (MCP prerequisite check) for a deeper diagnostic. Skip if quick probes succeed.
+When `harness-doctor` is installed and tool availability is in doubt, invoke it with `mode: report` targeting Phase 5 (MCP prerequisite check) for a deeper diagnostic. Skip if quick probes succeed.
 
 ### Step 0.1: Backlog Index Sync (backlogit only)
 
@@ -140,12 +140,6 @@ warning and continue without intercom — do not block the pipeline.
 When the `agent-engram` capability pack is installed, also follow
 `.github/instructions/agent-engram.instructions.md` and verify the engram daemon / binding surface
 is available before depending on indexed analysis.
-
-When the `graphtor-docs` capability pack is installed, also follow
-`.github/instructions/graphtor-docs.instructions.md` and verify the graphtor-docs server is
-reachable before depending on indexed documentation retrieval. Use `search_local_docs`,
-`search_semantic`, or `research_topic` to resolve domain concepts and API references from indexed
-sources before falling back to web search or raw filesystem scan.
 
 When the `backlogit` capability pack is installed, also follow
 `.github/instructions/backlogit.instructions.md` and verify the backlog queue / dependency /
@@ -410,7 +404,7 @@ Do not begin any post-merge closure work until the PR merge is confirmed. Even w
 A merged PR does not complete the top-level release unit by itself. For P-001 purposes, treat the shipment as still active until all required Step 6 closure work is complete.
 
 1. Complete the post-merge closure branch/PR workflow in Step 6.0 before declaring the release unit closed.
-2. When `true` is `true`, also complete any required tag, publish, release-record, or other release checklist steps tied to this shipment.
+2. When shipment-based releases are enabled, also complete any required tag, publish, release-record, or other release checklist steps tied to this shipment.
 3. If any required post-merge release closure remains open, halt with `RELEASE_CLOSURE_INCOMPLETE: shipment {shipment_id} still awaiting required post-merge closure`. Treat the shipment as still active for P-001 purposes, and do not allow another top-level release unit to begin yet.
 
 #### Post-Merge Closure PR Local Review Gate (P-014, NON-NEGOTIABLE)

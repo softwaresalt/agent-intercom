@@ -71,7 +71,7 @@ For each iteration `i` from 1 to `budget`:
 5. **Evaluate**:
    - If the result moves in the desired direction relative to the previous best: keep the commit. Update the running best.
    - If the result does not improve: revert the commit (`git revert HEAD --no-edit`) and record the revert.
-6. **Append to log**: write the iteration row to the TSV experiment log (see Output format) before evaluating the goal check. The log file lives in `docs/experiments` which is gitignored for ephemeral experiments; untracked files do not dirty the working tree, so writing the log does not violate the Git clean invariant. If the operator has opted into committed reproducibility mode (see Output Format), the log must be committed in a separate step after each iteration and before the next change is applied.
+6. **Append to log**: write the iteration row to the TSV experiment log (see Output format) before evaluating the goal check. The log file lives in `docs/experiments`, which is gitignored for ephemeral experiments, so writing the log does not dirty the working tree. If the operator has opted into committed reproducibility mode (see Output Format), the log must be committed in a separate step after each iteration and before the next change is applied.
 7. **Check goal**: if a numeric goal threshold was specified and the result meets it, exit the loop early with success.
 8. **Budget check**: if `i == budget`, exit the loop with "budget exhausted" status.
 
@@ -86,7 +86,7 @@ For each iteration `i` from 1 to `budget`:
 **Skip condition**: Never skip.
 
 1. Collect the final experiment state: best result, baseline, improvement delta and percentage, number of iterations run, goal met (yes/no), and the commit hash of the best result.
-2. If the goal was met: the experiment branch is already at the winning commit because losing iterations were reverted in Phase 3. Confirm the current HEAD is the best commit (they should match). If a regression occurred in the final iteration and was reverted, use `git reset --hard <best-commit-hash>` to restore the branch tip to the best state — this keeps the branch attached, not detached. Report success with the commit hash.
+2. If the goal was met: the experiment branch is already at the winning commit because losing iterations were reverted in Phase 3. Confirm the current HEAD is the best commit (they should match). If a regression occurred in the final iteration and was reverted, restore the branch tip to the best state with a non-destructive `git revert` of the regression; only use `git reset --hard <best-commit-hash>` after explicit operator approval (it is a destructive command per the workspace approval policy). Report success with the commit hash.
 3. If the goal was not met: report the best result achieved, the remaining gap, and a set of promising next hypotheses based on what moved the metric most.
 4. Write the summary section to the experiment log file.
 5. Report the experiment branch name and the path to the persisted log.

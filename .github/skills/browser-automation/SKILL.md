@@ -137,7 +137,7 @@ Produce a verification record with:
 4. **Human checkpoints** — each checkpoint encountered, operator action recorded, outcome
 5. **Failures** — each failure with the selector or element, action attempted, error received, and snapshot at time of failure
 
-Do not persist snapshots to source control. Write them to `docs/closure/browser-automation/` or a workspace-configured temp directory.
+Do not persist snapshots to source control. Write them under the gitignored `docs/closure/browser-automation/` path (or a workspace-configured temp directory), and keep only the verification record itself in `docs/closure/`.
 
 ## Model Routing
 
