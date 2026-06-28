@@ -211,7 +211,7 @@ async fn stall_timer_with_near_threshold_elapsed_fires_quickly() {
     let detector = StallDetector::new(
         "s-near-elapsed".to_owned(),
         Duration::from_secs(5),
-        Duration::from_secs(60),
+        Duration::from_mins(1),
         3,
         tx,
         ct.clone(),
@@ -246,7 +246,7 @@ async fn stall_timer_with_past_threshold_elapsed_fires_immediately() {
     let detector = StallDetector::new(
         "s-past-elapsed".to_owned(),
         Duration::from_secs(5),
-        Duration::from_secs(60),
+        Duration::from_mins(1),
         3,
         tx,
         ct.clone(),

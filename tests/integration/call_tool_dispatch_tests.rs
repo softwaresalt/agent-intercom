@@ -237,8 +237,8 @@ async fn dispatch_tool_resets_stall_detector() {
     let (tx, _rx) = mpsc::channel(32);
     let detector = StallDetector::new(
         session.id.clone(),
-        Duration::from_secs(60),
-        Duration::from_secs(60),
+        Duration::from_mins(1),
+        Duration::from_mins(1),
         3,
         tx,
         ct.clone(),
