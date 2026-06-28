@@ -60,8 +60,8 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     done < "$skill_file"
 
     # Check if keyword matches name or description (case-insensitive)
-    name_match=$(echo "$skill_name" | grep -i "$KEYWORD" 2>/dev/null || true)
-    desc_match=$(echo "$description" | grep -i "$KEYWORD" 2>/dev/null || true)
+    name_match=$(echo "$skill_name" | grep -F -i -- "$KEYWORD" 2>/dev/null || true)
+    desc_match=$(echo "$description" | grep -F -i -- "$KEYWORD" 2>/dev/null || true)
 
     if [ -n "$name_match" ] || [ -n "$desc_match" ]; then
         # Truncate description if too long

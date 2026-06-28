@@ -22,7 +22,7 @@ LOCKPATH="${DIR}/.${FILENAME}.lock"
 
 if [ -f "$LOCKPATH" ]; then
     echo "WARNING: Lock already held on: $FILEPATH" >&2
-    cat "$LOCKPATH" >&2 2>/dev/null || true
+    cat "$LOCKPATH" >&2 || true
     exit 1
 fi
 

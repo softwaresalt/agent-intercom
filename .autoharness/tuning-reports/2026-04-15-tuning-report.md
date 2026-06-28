@@ -176,3 +176,17 @@ The primary gap is 6 missing script artifacts referenced by `concurrency.instruc
 The deprecated agents in `.github/agents/deprecated/` are a low-priority cleanup item. They are properly isolated and do not interfere with active agents, but removing them reduces confusion.
 
 The 3 user-modified artifacts are intentional review fixes and should be preserved with updated manifest checksums.
+
+## Applied Status
+
+All seven drift proposals were applied by this PR:
+
+| Proposal | Description | Status |
+|---|---|---|
+| TUNE-001 | Restore `acquire_lock.ps1` | applied |
+| TUNE-002 | Restore `acquire_lock.sh` | applied |
+| TUNE-003 | Restore `release_lock.ps1` | applied |
+| TUNE-004 | Restore `release_lock.sh` | applied |
+| TUNE-005 | Restore `search.ps1` | applied |
+| TUNE-006 | Restore `search.sh` | applied |
+| TUNE-007 | Remove deprecated agents | applied |

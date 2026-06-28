@@ -43,7 +43,7 @@ foreach ($dir in $skillDirs) {
     $description = ""
     if ($content -match '(?ms)^---\s*\n(.*?)\n---') {
         $frontmatter = $Matches[1]
-        if ($frontmatter -match 'description:\s*[''"]?(.*?)[''"]?\s*$') {
+        if ($frontmatter -match '(?m)^\s*description:\s*[''"]?(.*?)[''"]?\s*$') {
             $description = $Matches[1].Trim()
         }
     }
