@@ -1,5 +1,5 @@
 schema_version: "1.0.0"
-generated_at: "2026-04-14T06:08:11Z"
+generated_at: "2026-06-28T19:35:44Z"
 workspace_path: "D:/Source/GitHub/agent-intercom"
 
 languages:
@@ -57,14 +57,10 @@ ci:
     - "test-integration"
     - "cargo-audit"
   quality_gates:
-    - name: "fmt"
-      command: "cargo fmt --all -- --check"
-    - name: "clippy"
-      command: "cargo clippy --all-targets -- -D warnings -D clippy::pedantic"
-    - name: "test"
-      command: "cargo test"
-    - name: "audit"
-      command: "cargo audit"
+    - "cargo fmt --all -- --check"
+    - "cargo clippy --all-targets -- -D warnings -D clippy::pedantic"
+    - "cargo test"
+    - "cargo audit"
   notes: "GitHub Actions CI with lint → test-unit → test-integration → audit pipeline. Concurrency cancel-in-progress enabled."
 
 structure:

@@ -73,4 +73,6 @@ tests/visual/.env
 # Autoharness runtime artifacts (keep config.yaml and workspace-profile.yaml)
 .autoharness/*.lock
 .autoharness/harness-manifest.yaml
+.autoharness/staging/
+.autoharness/backups/
 .copilot-tracking/
