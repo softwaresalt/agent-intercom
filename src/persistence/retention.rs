@@ -14,7 +14,7 @@ use tracing::info;
 use super::db::Database;
 use crate::Result;
 
-const PURGE_INTERVAL: Duration = Duration::from_secs(3600);
+const PURGE_INTERVAL: Duration = Duration::from_hours(1);
 
 /// Spawn the retention purge background task.
 ///

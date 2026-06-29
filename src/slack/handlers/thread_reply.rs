@@ -44,7 +44,7 @@ use crate::slack::client::{SlackMessage, SlackService};
 ///
 /// If the operator does not reply within this window the spawned task exits
 /// and the pending map entry is removed.
-pub(crate) const FALLBACK_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+pub(crate) const FALLBACK_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(5);
 
 /// Thread-safe map type for pending thread-reply oneshot senders.
 ///
