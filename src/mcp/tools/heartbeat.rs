@@ -32,7 +32,7 @@ struct HeartbeatInput {
 /// rather than erroring.  Returns `None` when the list is empty.
 #[must_use]
 pub fn pick_primary_session(mut sessions: Vec<Session>) -> Option<Session> {
-    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
     sessions.into_iter().next()
 }
 

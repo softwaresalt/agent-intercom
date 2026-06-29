@@ -85,9 +85,9 @@ async fn stall_detector_reset_works() {
         tokio::sync::mpsc::channel::<agent_intercom::orchestrator::stall_detector::StallEvent>(10);
     let detector = StallDetector::new(
         session.id.clone(),
-        std::time::Duration::from_secs(300), // inactivity_threshold
-        std::time::Duration::from_secs(120), // escalation_interval
-        3,                                   // max_retries
+        std::time::Duration::from_mins(5), // inactivity_threshold
+        std::time::Duration::from_mins(2), // escalation_interval
+        3,                                 // max_retries
         event_tx,
         cancel.clone(),
     );
