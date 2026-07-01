@@ -5,9 +5,6 @@ sources:
   - type: tests
     language: rust
     path: tests
-  - type: spec
-    language: markdown
-    path: specs
   - type: docs
     language: markdown
     path: docs

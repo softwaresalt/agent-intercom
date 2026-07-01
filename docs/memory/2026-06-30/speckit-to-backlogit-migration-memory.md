@@ -58,8 +58,11 @@ branch `chore/migrate-speckit-to-backlogit` (140 files). `main` untouched.
 
 `cargo fmt --all -- --check` passed, `cargo clippy --all-targets -- -D warnings -D clippy::pedantic`
 passed, `cargo test` passed (contract 250, plus unit/integration all green).
-`backlogit_doctor` reports no findings. No active tracked file references the
-removed `specs/` folder.
+`backlogit_doctor` reports no findings. No operational or config surface references
+the removed `specs/` folder (source code, tests, active docs, `.engram/registry.yaml`,
+`.context/backlog.md`). Dated frozen session logs under `.copilot-tracking/**` and
+`.context/memory|sessions/**` intentionally retain their point-in-time references as
+accurate historical records and were left untouched.
 
 ## Next steps / open questions
 
