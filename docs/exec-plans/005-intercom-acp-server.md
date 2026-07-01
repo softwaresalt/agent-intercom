@@ -9,7 +9,7 @@ tags:
 # Implementation Plan: Intercom ACP Server
 
 **Branch**: `005-intercom-acp-server` | **Date**: 2026-02-28 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/005-intercom-acp-server/spec.md`
+**Input**: Feature specification from `/docs/product-specs/005-intercom-acp-server/spec.md`
 
 ## Summary
 
@@ -48,7 +48,7 @@ No violations. All features align with constitution principles.
 ### Documentation (this feature)
 
 ```text
-specs/005-intercom-acp-server/
+docs/product-specs/005-intercom-acp-server/
 ├── plan.md              # This file
 ├── research.md          # Phase 0: research findings
 ├── data-model.md        # Phase 1: entity models
@@ -57,7 +57,7 @@ specs/005-intercom-acp-server/
 │   ├── agent-driver.md
 │   ├── acp-stream.md
 │   └── workspace-mapping.md
-└── tasks.md             # Phase 2: task breakdown (via /speckit.tasks)
+└── tasks.md             # Phase 2: task breakdown
 ```
 
 ### Source Code (repository root)

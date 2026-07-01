@@ -107,5 +107,5 @@ a workspace dependency.
 - Three modal interactions exist: Refine (prompt), Rejection reason (approval), Resume with
   instructions (wait)
 
-**Output**: `specs/007-acp-correctness-mobile/research-f15-mobile-modals.md`
+**Output**: `docs/product-specs/007-acp-correctness-mobile/research-f15-mobile-modals.md`
 

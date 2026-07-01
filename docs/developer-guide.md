@@ -54,7 +54,7 @@ tests/
   integration/            # 210+ end-to-end flow tests
 docs/
   adrs/                   # Architecture Decision Records
-specs/                    # Feature specifications
+  product-specs/          # Feature specifications
 ```
 
 ### Binaries

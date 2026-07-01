@@ -9,7 +9,7 @@ tags:
 # Implementation Plan: SQLite Migration
 
 **Branch**: `002-sqlite-migration` | **Date**: 2026-02-16 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/002-sqlite-migration/spec.md`
+**Input**: Feature specification from `/docs/product-specs/002-sqlite-migration/spec.md`
 
 ## Summary
 
@@ -55,7 +55,7 @@ Constitution Principle VI violation remains justified. Post-merge amendment requ
 ### Documentation (this feature)
 
 ```text
-specs/002-sqlite-migration/
+docs/product-specs/002-sqlite-migration/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output (sqlx patterns, SQLite config, migration strategy)
 ├── data-model.md        # Phase 1 output (entity definitions, SQLite schema, type changes)
@@ -63,7 +63,7 @@ specs/002-sqlite-migration/
 ├── contracts/           # Phase 1 output
 │   ├── schema.sql.md    # Complete DDL for all 5 tables
 │   └── repository-api.md # Method signatures and behavioral contracts
-└── tasks.md             # Phase 2 output (/speckit.tasks command)
+└── tasks.md             # Phase 2 output (task breakdown)
 ```
 
 ### Source Code (repository root)

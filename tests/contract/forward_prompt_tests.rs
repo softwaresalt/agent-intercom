@@ -187,10 +187,9 @@ fn tool_name_matches_contract() {
 /// registers.
 #[test]
 fn contract_schema_structure_is_valid() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"][TOOL_NAME];
 
@@ -268,10 +267,9 @@ fn contract_schema_structure_is_valid() {
 /// in the `transmit` outputSchema (implementation gate for T067).
 #[test]
 fn contract_transmit_schema_includes_error_code_property() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"]["transmit"];
     let output = &tool["outputSchema"];

@@ -1,6 +1,6 @@
 # ADR-0004: SurrealDB Record ID Serde Pattern
 
-**Status**: Superseded — SurrealDB replaced by SQLite via sqlx (see specs/002-sqlite-migration)
+**Status**: Superseded — SurrealDB replaced by SQLite via sqlx (see docs/product-specs/002-sqlite-migration)
 **Date**: 2026-02-09
 **Phase**: 3 (User Story 1), Tasks T038-T042
 
