@@ -9,7 +9,7 @@ tags:
 # Implementation Plan: Intercom Advanced Features
 
 **Branch**: `004-intercom-advanced-features` | **Date**: 2026-02-26 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/004-intercom-advanced-features/spec.md`
+**Input**: Feature specification from `/docs/product-specs/004-intercom-advanced-features/spec.md`
 
 ## Summary
 
@@ -47,7 +47,7 @@ No violations. All features align with constitution principles.
 ### Documentation (this feature)
 
 ```text
-specs/004-intercom-advanced-features/
+docs/product-specs/004-intercom-advanced-features/
 ├── plan.md              # This file
 ├── research.md          # Phase 0: research findings
 ├── data-model.md        # Phase 1: entity models

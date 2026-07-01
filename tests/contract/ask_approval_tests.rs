@@ -197,10 +197,9 @@ fn tool_name_matches_contract() {
 /// registers. This test loads the contract and validates the schema structure.
 #[test]
 fn contract_schema_structure_is_valid() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"][TOOL_NAME];
 
@@ -238,10 +237,9 @@ fn contract_schema_structure_is_valid() {
 /// in the `check_clearance` outputSchema (implementation gate for T058/T061).
 #[test]
 fn contract_check_clearance_schema_includes_error_code_property() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"]["check_clearance"];
     let output = &tool["outputSchema"];

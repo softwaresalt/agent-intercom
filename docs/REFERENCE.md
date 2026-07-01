@@ -1571,7 +1571,7 @@ Located in `docs/adrs/`:
 | 0010 | Centralized Interaction Dispatch Guards |
 | 0011 | Reconnect & Repost Pending Messages |
 
-**Note:** ADRs 0002, 0004, 0006, 0007, 0008 reference SurrealDB which has since been replaced by SQLite (see `specs/002-sqlite-migration/`).
+**Note:** ADRs 0002, 0004, 0006, 0007, 0008 reference SurrealDB which has since been replaced by SQLite (see `docs/product-specs/002-sqlite-migration/`).
 
 ---
 

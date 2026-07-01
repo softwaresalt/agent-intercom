@@ -1,12 +1,14 @@
 # cargo-audit configuration
 #
-# All advisories listed here originate from transitive dependencies of
-# surrealdb 1.5.6 or rmcp 0.5.0.  These crates cannot be independently
-# upgraded without a major-version bump of the root dependency.
+# Historical entries below originated from transitive dependencies of the
+# former surrealdb stack (since replaced by sqlx) and rmcp 0.5.0 (since
+# upgraded to 0.13.0). They are retained as harmless no-ops in case any
+# advisory is still reachable transitively.
 #
-# SurrealDB will be replaced by sqlx (SQLite) in the next feature release,
-# which will eliminate 8 of the 9 advisories below.  The remaining advisory
-# (paste via rmcp) is a compile-time-only unmaintained warning.
+# The active, intentional entry is RUSTSEC-2026-0189 (rmcp 0.13.0), a HIGH
+# vulnerability whose fix is a breaking rmcp >=1.4.0 upgrade tracked as its
+# own release unit. Its risk is accepted temporarily because this project is
+# pre-release and not publicly deployed. Remove that entry when rmcp is upgraded.
 
 [advisories]
 ignore = [
@@ -45,4 +47,12 @@ ignore = [
 
     # RUSTSEC-2025-0141 — bincode 1.3.3 (via surrealdb, compile-time)
     "RUSTSEC-2025-0141",
+
+    # ── Temporarily accepted (pre-release; not publicly deployed) ────────────
+
+    # RUSTSEC-2026-0189 — rmcp 0.13.0 (HIGH 8.8) DNS rebinding in the Streamable
+    # HTTP server transport. Fix requires upgrading rmcp to >=1.4.0, a breaking
+    # major bump tracked as a dedicated release unit. Risk accepted temporarily:
+    # pre-release, no public deployment. Remove this entry when rmcp is upgraded.
+    "RUSTSEC-2026-0189",
 ]

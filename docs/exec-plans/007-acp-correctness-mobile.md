@@ -9,7 +9,7 @@ tags:
 # Implementation Plan: ACP Correctness Fixes and Mobile Operator Accessibility
 
 **Branch**: `007-acp-correctness-mobile` | **Date**: 2026-03-08 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/007-acp-correctness-mobile/spec.md`
+**Input**: Feature specification from `/docs/product-specs/007-acp-correctness-mobile/spec.md`
 
 ## Summary
 
@@ -52,13 +52,13 @@ is research-first with conditional implementation gated on findings.
 ### Documentation (this feature)
 
 ```text
-specs/007-acp-correctness-mobile/
+docs/product-specs/007-acp-correctness-mobile/
 ├── spec.md              # Feature specification (complete)
 ├── plan.md              # This file
 ├── research.md          # Phase 0: mobile modal research + codebase analysis
 ├── data-model.md        # Phase 1: affected entity models and state transitions
-├── SCENARIOS.md         # Behavioral matrix (speckit.behavior output)
-├── tasks.md             # Phased task breakdown (speckit.tasks output)
+├── SCENARIOS.md         # Behavioral matrix
+├── tasks.md             # Phased task breakdown
 └── checklists/
     └── requirements.md  # Specification quality checklist (complete)
 ```

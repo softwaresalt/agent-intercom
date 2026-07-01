@@ -8,7 +8,7 @@ tags:
 ---
 # ADR-0006: SurrealDB SCHEMAFULL Nested Field Definitions
 
-**Status**: Superseded — SurrealDB replaced by SQLite via sqlx (see specs/002-sqlite-migration)
+**Status**: Superseded — SurrealDB replaced by SQLite via sqlx (see docs/product-specs/002-sqlite-migration)
 **Date**: 2026-02-11
 **Phase**: 5 (User Story 4), Task T049
 

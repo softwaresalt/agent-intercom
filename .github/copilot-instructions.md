@@ -56,7 +56,7 @@ tests/
   integration/            # End-to-end flows with real SSE/DB
 docs/
   adrs/                   # Architecture Decision Records
-specs/                    # Feature specifications
+  product-specs/          # Feature specifications (migrated from spec-kit)
 config.toml               # Runtime configuration
 ```
 

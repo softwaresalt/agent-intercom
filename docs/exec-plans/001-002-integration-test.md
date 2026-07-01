@@ -10,7 +10,7 @@ tags:
 # Implementation Plan: Integration Test Full Coverage
 
 **Branch**: `001-002-integration-test` | **Date**: 2026-02-22 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/001-002-integration-test/spec.md`
+**Input**: Feature specification from `/docs/product-specs/001-002-integration-test/spec.md`
 
 ## Summary
 
@@ -50,14 +50,14 @@ No production code changes and no new dependencies. All constitution principles 
 ### Documentation (this feature)
 
 ```text
-specs/001-002-integration-test/
+docs/product-specs/001-002-integration-test/
 ├── spec.md              # Feature specification
 ├── plan.md              # This file
 ├── research.md          # Gap analysis and test strategy research
 ├── quickstart.md        # Build/test instructions
 ├── checklists/
 │   └── requirements.md  # Specification quality checklist
-└── tasks.md             # Phase 2 output (/speckit.tasks command)
+└── tasks.md             # Phase 2 output (task breakdown)
 ```
 
 ### Source Code (repository root)

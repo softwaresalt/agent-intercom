@@ -300,10 +300,9 @@ fn tool_name_matches_contract() {
 
 #[test]
 fn contract_schema_structure_is_valid() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"][TOOL_NAME];
 

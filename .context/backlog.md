@@ -43,7 +43,7 @@ Batch of targeted correctness fixes found during adversarial review, plus a mobi
 
 **Post-Review Technical Debt (Phase 8 — in progress)**
 
-- **TQ-008**: Extract duplicated fallback logic (`spawn_thread_reply_fallback` helper) — `T057` in `specs/007-acp-correctness-mobile/tasks.md`
+- **TQ-008**: Extract duplicated fallback logic (`spawn_thread_reply_fallback` helper) — `T057` in `docs/product-specs/007-acp-correctness-mobile/tasks.md`
 - **TQ-009**: Push_event integration tests for negative paths — `T058`
 - **LC-05**: `StreamActivity` emitted for failed deliveries in `deliver_queued_messages` — `T059`
 - **LC-04**: Silent overwrite on duplicate `register_thread_reply_fallback` call — `T060`

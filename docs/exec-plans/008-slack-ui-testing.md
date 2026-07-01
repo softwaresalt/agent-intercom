@@ -9,7 +9,7 @@ tags:
 # Implementation Plan: Slack UI Automated Testing
 
 **Branch**: `008-slack-ui-testing` | **Date**: 2026-03-09 | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `/specs/008-slack-ui-testing/spec.md`
+**Input**: Feature specification from `/docs/product-specs/008-slack-ui-testing/spec.md`
 
 ## Summary
 
@@ -47,12 +47,12 @@ Add a three-tier automated testing framework for Slack UI interactions: Tier 1 (
 ### Documentation (this feature)
 
 ```text
-specs/008-slack-ui-testing/
+docs/product-specs/008-slack-ui-testing/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output
 ├── contracts/           # Phase 1 output (test harness API)
-└── tasks.md             # Phase 2 output (via /speckit.tasks)
+└── tasks.md             # Phase 2 output
 ```
 
 ### Source Code (repository root)

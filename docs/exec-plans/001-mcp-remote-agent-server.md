@@ -72,8 +72,8 @@ src/mcp/resources/slack_channel.rs  # resource URI prefix
 ctl/main.rs                   # CLI about text, IPC pipe name
 tests/**/*.rs                 # extern crate / use references (~75)
 README.md                     # project name, install instructions
-specs/**/*.md                 # documentation references
-.specify/memory/constitution.md  # project name references
+docs/product-specs/**/*.md                 # documentation references
+.github/instructions/constitution.instructions.md  # project name references
 .github/copilot-instructions.md # project name references
 ```
 
@@ -181,7 +181,7 @@ The SSE transport in `src/mcp/sse.rs` already implements:
 - [ ] T210 [US13] Rename CLI references in `ctl/main.rs`: update `monocoque-agent-rem` / `monocoque_agent_rem` to `monocoque-agent-rc` / `monocoque_agent_rc`
 - [ ] T211 [US13] Rename config.toml references: update comments and default values referencing `monocoque-agent-rem` to `monocoque-agent-rc`
 - [ ] T212 [US13] Rename test references in `tests/`: update all `monocoque_agent_rem` crate references to `monocoque_agent_rc` (~75 occurrences)
-- [ ] T213 [US13] Rename documentation references: update `README.md`, `quickstart.md`, all `specs/**/*.md` files, `.specify/memory/constitution.md`, `.github/copilot-instructions.md`
+- [ ] T213 [US13] Rename documentation references: update `README.md`, `quickstart.md`, all `docs/product-specs/**/*.md` files, `.github/instructions/constitution.instructions.md`, `.github/copilot-instructions.md`
 - [ ] T214 [US13] Verify compilation: run `cargo build` and confirm binary is named `monocoque-agent-rc`
 - [ ] T215 [US13] Verify tests: run `cargo test` and confirm all tests pass with renamed crate
 - [ ] T216 [US13] Verify naming consistency: grep the entire workspace for `agent.rem` (regex) and confirm zero matches in non-changelog files (SC-015)

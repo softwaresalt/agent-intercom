@@ -9,7 +9,7 @@ tags:
 # Implementation Plan: Agent Intercom Release
 
 **Branch**: `003-agent-intercom-release` | **Date**: 2026-02-23 | **Spec**: [spec.md](spec.md)  
-**Input**: Feature specification from `specs/003-agent-intercom-release/spec.md`
+**Input**: Feature specification from `docs/product-specs/003-agent-intercom-release/spec.md`
 
 ## Summary
 
@@ -47,7 +47,7 @@ Rebrand the project from "monocoque-agent-rc" to "agent-intercom" across all sou
 ### Documentation (this feature)
 
 ```text
-specs/003-agent-intercom-release/
+docs/product-specs/003-agent-intercom-release/
 ├── spec.md              # Feature specification
 ├── plan.md              # This file
 ├── research.md          # Phase 0 research output

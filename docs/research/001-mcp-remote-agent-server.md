@@ -314,7 +314,7 @@ DELETE FROM session WHERE id = $id;
 | Cargo.toml | 1 | ~2 (package name, binary name) |
 | config.toml | 1 | ~4 |
 | README.md | 1 | TBD |
-| Spec/plan docs (`specs/`) | Multiple | Many (documentation references) |
+| Spec/plan docs (`docs/product-specs/`) | Multiple | Many (documentation references) |
 | Constitution | 1 | ~5 |
 | Agent context files | 1 | TBD |
 

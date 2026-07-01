@@ -253,10 +253,9 @@ fn session_mode_serializes_all_variants() {
 /// in the `standby` outputSchema (implementation gate for T067).
 #[test]
 fn contract_standby_schema_includes_error_code_property() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"]["standby"];
     let output = &tool["outputSchema"];
@@ -284,10 +283,9 @@ fn standby_no_channel_error_code_structure() {
 /// `standby` contract must include `slack_unavailable` in the `error_code` enum.
 #[test]
 fn contract_standby_error_code_includes_slack_unavailable() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let enum_vals =
         &contract["tools"]["standby"]["outputSchema"]["properties"]["error_code"]["enum"];
@@ -306,10 +304,9 @@ fn contract_standby_error_code_includes_slack_unavailable() {
 /// `standby` contract status enum must include `error` variant.
 #[test]
 fn contract_standby_status_includes_error() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let enum_vals = &contract["tools"]["standby"]["outputSchema"]["properties"]["status"]["enum"];
     let statuses: Vec<&str> = enum_vals
@@ -329,10 +326,9 @@ fn contract_standby_status_includes_error() {
 /// The `transmit` contract must include `error_code` in its `outputSchema`.
 #[test]
 fn contract_transmit_schema_includes_error_code_property() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"]["transmit"];
     let output = &tool["outputSchema"];
@@ -348,10 +344,9 @@ fn contract_transmit_schema_includes_error_code_property() {
 /// The `transmit` contract must include a `status` field for the error path.
 #[test]
 fn contract_transmit_schema_includes_status_property() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"]["transmit"];
     let output = &tool["outputSchema"];
@@ -367,10 +362,9 @@ fn contract_transmit_schema_includes_status_property() {
 /// The `transmit` contract must NOT require `decision` (error path lacks it).
 #[test]
 fn contract_transmit_schema_does_not_require_decision() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let tool = &contract["tools"]["transmit"];
     let required = &tool["outputSchema"]["required"];
@@ -388,10 +382,9 @@ fn contract_transmit_schema_does_not_require_decision() {
 /// `transmit` `error_code` enum must include both `no_channel` and `slack_unavailable`.
 #[test]
 fn contract_transmit_error_code_includes_both_variants() {
-    let contract: serde_json::Value = serde_json::from_str(include_str!(
-        "../../specs/001-mcp-remote-agent-server/contracts/mcp-tools.json"
-    ))
-    .expect("mcp-tools.json should be valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/contracts/mcp-tools.json"))
+            .expect("mcp-tools.json should be valid JSON");
 
     let enum_vals =
         &contract["tools"]["transmit"]["outputSchema"]["properties"]["error_code"]["enum"];

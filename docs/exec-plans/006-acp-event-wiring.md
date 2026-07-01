@@ -9,7 +9,7 @@ tags:
 # Implementation Plan: ACP Event Handler Wiring
 
 **Branch**: `006-acp-event-wiring` | **Date**: 2026-03-07 | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `specs/006-acp-event-wiring/spec.md`
+**Input**: Feature specification from `docs/product-specs/006-acp-event-wiring/spec.md`
 
 ## Summary
 
@@ -47,12 +47,12 @@ Wire the two no-op ACP event handlers (`ClearanceRequested`, `PromptForwarded`) 
 ### Documentation (this feature)
 
 ```text
-specs/006-acp-event-wiring/
+docs/product-specs/006-acp-event-wiring/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output
 ├── quickstart.md        # Phase 1 output
-└── tasks.md             # Phase 2 output (from /speckit.tasks)
+└── tasks.md             # Phase 2 output
 ```
 
 ### Source Code (files changed)
