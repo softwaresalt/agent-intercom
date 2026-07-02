@@ -317,3 +317,28 @@ All P1 findings resolved via revision; no P0/P1 remain. Residual items are P2/P3
 advisory and recorded as implementation notes carried into the backlog. The
 012-F "subsumed by removal, not upgraded" determination was independently
 confirmed correct by both personas. Plan is cleared for harvest.
+
+## Operator Decisions (2026-07-02)
+
+Recorded by the orchestrator after presenting the Stage handoff. These resolve
+the three checkpoints raised at the end of staging.
+
+1. **012-F disposition — CLOSE (won't-fix, superseded).** The rmcp 0.13→1.4
+   security upgrade (RUSTSEC-2026-0189) is **not** to be performed. It is
+   superseded by removal: F.5 task `013.005.005-T` deletes `rmcp` and the MCP
+   Streamable HTTP transport (`src/mcp/*`) entirely, eliminating the vulnerable
+   surface. `012-F` is archived; links `013.005.005-T --supersedes--> 012-F` and
+   `013-F --related_to--> 012-F` are recorded. The `RUSTSEC-2026-0189` ignore in
+   `.cargo/audit.toml` stays (risk-accepted; pre-release, not publicly deployed)
+   until `013.005.005-T` lands, then is removed.
+
+2. **MCP removal — APPROVED.** Rationale: "GHCP mobile now effectively does what
+   MCP mode did — redundant functionality." Phase F.5 (`013.005-F`) is authorized
+   to make ACP the default and remove the MCP surface. **Guardrail (CP-1):** F.5
+   is the irreversible phase — it must not execute until the F.1 conformance ADR
+   (`013.004-F`) is merged and F.2 (`013.001-F`) / F.3 (`013.003-F`) are accepted.
+
+3. **Execution cadence — SHIP IN WAVES.** Order: F.1 gate → F.4 in parallel →
+   F.2/F.3 → F.5 last. Note: F.1 is a **spike/ADR gate** (read-only investigation
+   + one ADR), not a build wave; its middle task `013.004.002-T` (test-drive a
+   real ACP agent) requires a live external ACP agent and operator involvement.
