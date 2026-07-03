@@ -4,6 +4,7 @@ pub mod approval_repo;
 pub mod checkpoint_repo;
 pub mod db;
 pub mod inbox_repo;
+pub mod intercom_queue_repo;
 pub mod prompt_repo;
 pub mod retention;
 pub mod schema;

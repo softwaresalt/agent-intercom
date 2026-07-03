@@ -3,6 +3,7 @@
 pub mod approval;
 pub mod checkpoint;
 pub mod inbox;
+pub mod intercom_queue;
 pub mod policy;
 pub mod progress;
 pub mod prompt;
