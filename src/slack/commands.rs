@@ -32,6 +32,7 @@ use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
 use crate::orchestrator::{checkpoint_manager, session_manager, spawner};
 use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::db::Database;
+use crate::persistence::intercom_queue_repo::IntercomQueueRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
@@ -224,6 +225,12 @@ pub async fn dispatch_command(
             task_handler::store_from_slack(&text, Some(channel_id), state).await
         }
 
+        "queue" if state.server_mode == ServerMode::Acp => handle_queue_command(args, state).await,
+
+        "queue" => Ok(format!(
+            "`queue` is only available in ACP mode. Use `/{prefix} help` for commands."
+        )),
+
         other => Ok(format!(
             "Unknown command: `{other}`. Use `/{prefix} help` for available commands."
         )),
@@ -292,6 +299,16 @@ fn format_full_help(prefix: &str, mode: ServerMode) -> String {
          highlighting\n\n",
     );
 
+    if mode == ServerMode::Acp {
+        text.push_str(
+            "*Queue*\n\
+             • `queue add <text>` — Add a numbered queue item\n\
+             • `queue list` — List queued items\n\
+             • `queue replace <n> <text>` — Replace queue item text\n\
+             • `queue transfer <n>` — Transfer a queue item to backlogit stash\n\n",
+        );
+    }
+
     text.push_str(
         "*General*\n\
          • `help [category]` — Show this help (categories: session, checkpoint, files, steering)",
@@ -355,6 +372,182 @@ fn format_steering_help(prefix: &str) -> String {
      agent's next session recovery (`reboot` call), making them ideal for asynchronous to-do \
      items that the agent should pick up at the start of its next session."
         .to_owned()
+}
+
+fn format_queue_help(prefix: &str) -> String {
+    format!(
+        "*Queue commands (`/{prefix}` ACP only):*
+         • `queue add <text>` — Add a numbered queue item
+         • `queue list` — List queued items
+         • `queue replace <n> <text>` — Replace queue item text
+         • `queue transfer <n>` — Transfer a queue item to backlogit stash"
+    )
+}
+
+/// Handle `/arc queue` subcommands.
+///
+/// # Errors
+///
+/// Returns an error when the queue cannot be read or updated, when arguments
+/// are invalid, or when `backlogit stash add` fails.
+async fn handle_queue_command(args: &[&str], state: &Arc<AppState>) -> crate::Result<String> {
+    let intercom_dir = state.config.default_workspace_root.join(".intercom");
+    let prefix = slash_prefix(state.server_mode).to_owned();
+    let owned_args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+
+    tokio::task::spawn_blocking(move || {
+        let repo = IntercomQueueRepo::new(&intercom_dir);
+        let arg_refs: Vec<&str> = owned_args.iter().map(String::as_str).collect();
+        execute_queue_command(&arg_refs, &repo, &prefix)
+    })
+    .await
+    .map_err(|err| crate::AppError::Io(format!("queue task failed: {err}")))?
+}
+
+fn execute_queue_command(
+    args: &[&str],
+    repo: &IntercomQueueRepo,
+    prefix: &str,
+) -> crate::Result<String> {
+    match args.first().copied() {
+        None => Ok(format_queue_help(prefix)),
+        Some("add") => {
+            if args.len() < 2 {
+                return Err(crate::AppError::Config(
+                    "usage: queue add <text>".to_owned(),
+                ));
+            }
+
+            let text = args[1..].join(" ");
+            if text.trim().is_empty() {
+                return Err(crate::AppError::Config(
+                    "usage: queue add <text>".to_owned(),
+                ));
+            }
+
+            let item = repo.add(&text)?;
+            Ok(format!("Added queue item {}. {}", item.number, item.text))
+        }
+        Some("list") => {
+            if args.len() > 1 {
+                return Err(crate::AppError::Config("usage: queue list".to_owned()));
+            }
+
+            let items = repo.list()?;
+            if items.is_empty() {
+                return Ok("Queue is empty.".to_owned());
+            }
+
+            Ok(items
+                .into_iter()
+                .map(|item| format!("{}. {}", item.number, item.text))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        Some("replace") => {
+            if args.len() < 3 {
+                return Err(crate::AppError::Config(
+                    "usage: queue replace <n> <text>".to_owned(),
+                ));
+            }
+
+            let number =
+                parse_queue_number(args.get(1).copied(), "usage: queue replace <n> <text>")?;
+            let text = args[2..].join(" ");
+            if text.trim().is_empty() {
+                return Err(crate::AppError::Config(
+                    "usage: queue replace <n> <text>".to_owned(),
+                ));
+            }
+
+            let item = repo.replace(number, &text)?;
+            Ok(format!(
+                "Replaced queue item {}. {}",
+                item.number, item.text
+            ))
+        }
+        Some("transfer") => {
+            if args.len() != 2 {
+                return Err(crate::AppError::Config(
+                    "usage: queue transfer <n>".to_owned(),
+                ));
+            }
+
+            let number = parse_queue_number(args.get(1).copied(), "usage: queue transfer <n>")?;
+            let item = repo
+                .list()?
+                .into_iter()
+                .find(|queued| queued.number == number)
+                .ok_or_else(|| {
+                    crate::AppError::NotFound(format!("queue item {number} not found"))
+                })?;
+            let backlogit_output = transfer_to_backlogit(&item.text, repo.workspace_root())?;
+
+            // The backlogit stash add already succeeded above. If removing the item
+            // from the local queue then fails, report success-with-warning rather
+            // than an error so an operator retry does not create a duplicate stash.
+            match repo.remove(number) {
+                Ok(removed) if backlogit_output.is_empty() => Ok(format!(
+                    "Transferred queue item {} to backlogit.",
+                    removed.number
+                )),
+                Ok(removed) => Ok(format!(
+                    "Transferred queue item {} to backlogit.\n{}",
+                    removed.number, backlogit_output
+                )),
+                Err(err) => Ok(format!(
+                    "Transferred queue item {number} to backlogit, but failed to remove it \
+                     from the queue: {err}. Remove it manually to avoid a duplicate on retry."
+                )),
+            }
+        }
+        Some(other) => Ok(format!(
+            "Unknown queue subcommand: `{other}`.
+{}",
+            format_queue_help(prefix)
+        )),
+    }
+}
+
+fn parse_queue_number(arg: Option<&str>, usage: &str) -> crate::Result<u32> {
+    let raw = arg.ok_or_else(|| crate::AppError::Config(usage.to_owned()))?;
+    raw.parse::<u32>()
+        .map_err(|err| crate::AppError::Config(format!("parse number: {err}")))
+}
+
+fn transfer_to_backlogit(text: &str, workspace_root: Option<&Path>) -> crate::Result<String> {
+    let mut command = std::process::Command::new("backlogit");
+    command.args(["stash", "add"]).arg(text);
+    // Run in the workspace root (parent of `.intercom`) so backlogit resolves the
+    // `.backlogit` workspace regardless of the server process's launch directory.
+    if let Some(root) = workspace_root {
+        command.current_dir(root);
+    }
+    let output = command.output().map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            crate::AppError::Io("backlogit command not found on PATH".to_owned())
+        } else {
+            crate::AppError::Io(format!("failed to run backlogit stash add: {err}"))
+        }
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit status {}", output.status)
+        };
+
+        return Err(crate::AppError::Io(format!(
+            "backlogit stash add failed: {detail}"
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 // ── Session commands (T067, T072) ────────────────────────────────────
