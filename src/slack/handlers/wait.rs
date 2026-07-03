@@ -98,9 +98,10 @@ pub async fn handle_wait_action(
                 .and_then(|m| m.origin.thread_ts.as_ref())
                 .map(|ts| ts.0.as_str());
             if crate::slack::handlers::thread_reply::message_is_in_thread(thread_ts_str) {
-                // Derive thread_ts using the same defensive pattern as prompt.rs:
-                // when origin.thread_ts is absent but we are in thread context, fall
-                // back to origin.ts (the message IS the thread root in that case).
+                // This branch only runs in thread context (origin.thread_ts is
+                // Some), so thread_ts is guaranteed present here. We still mirror
+                // prompt.rs's defensive origin.ts fallback so the two paths stay
+                // structurally identical; it is a no-op in this proactive path.
                 let thread_ts_opt = message.map(|m| {
                     m.origin
                         .thread_ts
@@ -139,9 +140,7 @@ pub async fn handle_wait_action(
                     .await?;
                     return Ok(());
                 }
-                return Err(
-                    "thread context: missing channel or thread_ts for wait fallback".to_owned(),
-                );
+                return Err("thread context: missing channel for wait fallback".to_owned());
             }
 
             // Cache the original message coordinates so the ViewSubmission

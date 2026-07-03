@@ -647,16 +647,21 @@ fn silent_swallow_no_thread_ts_not_in_thread() {
     assert!(!message_is_in_thread(None));
 }
 
-/// `message_is_in_thread(Some("..."))` → in a thread.
+/// `message_is_in_thread(Some(_))` → in a thread.
 ///
-/// Verifies the proactive detection helper returns `true` when a non-empty
+/// Verifies the proactive detection helper returns `true` whenever a
 /// `thread_ts` is present.  The slash command originated from a Slack thread,
 /// so `views.open` would be silently suppressed; the handler must skip it and
 /// activate the thread-reply fallback directly (F-16/F-17 proactive path).
+///
+/// Per the helper's documented contract, an empty-string `thread_ts`
+/// (`Some("")`) is also treated as being in a thread.
 #[test]
 fn silent_swallow_with_thread_ts_is_in_thread() {
     use agent_intercom::slack::handlers::thread_reply::message_is_in_thread;
 
     assert!(message_is_in_thread(Some("1234567890.000100")));
     assert!(message_is_in_thread(Some("0000000000.000001")));
+    // Contract: Some("") is treated as in-thread (thread_ts.is_some()).
+    assert!(message_is_in_thread(Some("")));
 }
