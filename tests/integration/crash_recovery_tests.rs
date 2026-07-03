@@ -16,11 +16,13 @@ use agent_intercom::models::checkpoint::Checkpoint;
 use agent_intercom::models::progress::{ProgressItem, ProgressStatus};
 use agent_intercom::models::prompt::{ContinuationPrompt, PromptType};
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
+use agent_intercom::models::steering::{SteeringMessage, SteeringSource};
 use agent_intercom::persistence::approval_repo::ApprovalRepo;
 use agent_intercom::persistence::checkpoint_repo::CheckpointRepo;
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::prompt_repo::PromptRepo;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::persistence::steering_repo::SteeringRepo;
 
 use agent_intercom::orchestrator::spawner;
 
@@ -356,7 +358,7 @@ async fn respawn_creates_resumed_session_linked_to_crashed() {
 
     // Induce crash recovery.
     let (resumed, _child) =
-        spawner::respawn_session(&active, &config, &session_repo, config.http_port)
+        spawner::respawn_session(&active, &config, &session_repo, &database, config.http_port)
             .await
             .expect("respawn");
 
@@ -390,4 +392,117 @@ async fn respawn_creates_resumed_session_linked_to_crashed() {
         .expect("resumed session exists");
     assert_eq!(persisted.status, SessionStatus::Active);
     assert_eq!(persisted.restart_of.as_deref(), Some(active.id.as_str()));
+}
+
+/// F.3-T4 (characterization): the resume path consumes F.3-T2 + F.3-T3
+/// persistence. After a respawn, the crashed session's pending steering
+/// messages, clearances, and prompts are rebound to the resumed session with
+/// correlation ids preserved, and none remain on the crashed session.
+#[tokio::test]
+async fn respawn_rebinds_pending_steering_clearance_and_prompt() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().to_str().expect("utf8").to_string();
+    let config = respawn_config(&workspace);
+
+    let database = Arc::new(db::connect_memory().await.expect("db"));
+    let session_repo = SessionRepo::new(Arc::clone(&database));
+    let steering_repo = SteeringRepo::new(Arc::clone(&database));
+    let approval_repo = ApprovalRepo::new(Arc::clone(&database));
+    let prompt_repo = PromptRepo::new(Arc::clone(&database));
+
+    // An active session mid-task with pending steering, clearance, and prompt.
+    let mut session = Session::new(
+        "U_OWNER".into(),
+        workspace.clone(),
+        Some("mid-task work".into()),
+        SessionMode::Remote,
+    );
+    session.channel_id = Some("C_TEST".into());
+    let created = session_repo.create(&session).await.expect("create");
+    let active = session_repo
+        .update_status(&created.id, SessionStatus::Active)
+        .await
+        .expect("activate");
+
+    let steer = SteeringMessage::new(
+        active.id.clone(),
+        Some("C_TEST".into()),
+        "refocus on the failing test".into(),
+        SteeringSource::Slack,
+    );
+    steering_repo.insert(&steer).await.expect("insert steering");
+
+    let approval = ApprovalRequest::new(
+        active.id.clone(),
+        "Apply refactor".into(),
+        None,
+        "--- a/src/x.rs\n+++ b/src/x.rs".into(),
+        "src/x.rs".into(),
+        RiskLevel::Low,
+        "hash-x".into(),
+    );
+    let approval_id = approval.id.clone();
+    approval_repo
+        .create(&approval)
+        .await
+        .expect("create approval");
+
+    let prompt = ContinuationPrompt::new(
+        active.id.clone(),
+        "Continue with the plan?".into(),
+        PromptType::Continuation,
+        Some(60),
+        Some(2),
+    );
+    let prompt_id = prompt.id.clone();
+    prompt_repo.create(&prompt).await.expect("create prompt");
+
+    // Induce crash recovery.
+    let (resumed, _child) =
+        spawner::respawn_session(&active, &config, &session_repo, &database, config.http_port)
+            .await
+            .expect("respawn");
+
+    // Steering message is now owned by the resumed session (origin preserved).
+    assert!(steering_repo
+        .fetch_unconsumed(&active.id)
+        .await
+        .expect("fetch crashed steering")
+        .is_empty());
+    let resumed_steering = steering_repo
+        .fetch_unconsumed(&resumed.id)
+        .await
+        .expect("fetch resumed steering");
+    assert_eq!(resumed_steering.len(), 1);
+    assert_eq!(resumed_steering[0].message, "refocus on the failing test");
+    assert_eq!(
+        resumed_steering[0].origin_session_id.as_deref(),
+        Some(active.id.as_str())
+    );
+
+    // Pending clearance is rebound with its correlation id preserved.
+    assert!(approval_repo
+        .get_pending_for_session(&active.id)
+        .await
+        .expect("fetch crashed approval")
+        .is_none());
+    let resumed_approval = approval_repo
+        .get_pending_for_session(&resumed.id)
+        .await
+        .expect("fetch resumed approval")
+        .expect("pending approval present");
+    assert_eq!(resumed_approval.id, approval_id);
+
+    // Pending prompt is rebound with its correlation id preserved.
+    assert!(prompt_repo
+        .get_pending_for_session(&active.id)
+        .await
+        .expect("fetch crashed prompt")
+        .is_none());
+    let resumed_prompt = prompt_repo
+        .get_pending_for_session(&resumed.id)
+        .await
+        .expect("fetch resumed prompt")
+        .expect("pending prompt present");
+    assert_eq!(resumed_prompt.id, prompt_id);
 }

@@ -7,13 +7,18 @@
 //! endpoint to connect to.
 
 use std::process::Stdio;
+use std::sync::Arc;
 
 use tokio::process::{Child, Command};
-use tracing::{info, info_span};
+use tracing::{info, info_span, warn};
 
 use crate::config::GlobalConfig;
 use crate::models::session::{Session, SessionMode, SessionStatus};
+use crate::persistence::approval_repo::ApprovalRepo;
+use crate::persistence::db::Database;
+use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
+use crate::persistence::steering_repo::SteeringRepo;
 use crate::{AppError, Result};
 
 /// Spawn a new agent session process and persist the session record.
@@ -141,9 +146,12 @@ fn build_agent_command(
 /// logical session. A fresh host CLI process is spawned and the resumed session
 /// is activated before it is returned.
 ///
-/// Recovering pending approval / prompt / progress state across the restart is
-/// the responsibility of the resume-state contract (plan F.3-T3 / F.3-T4); this
-/// function establishes the `restart_of` linkage those steps consume.
+/// Per the stdio-child resume-state contract (ADR-0017, plan F.3-T4), the
+/// crashed session's durable pending state is rebound to the resumed session:
+/// unconsumed steering messages (F.3-T2), pending clearances, and undecided
+/// prompts (F.3-T3) are carried forward, preserving correlation ids. Rebinding
+/// is best-effort — a failure to move one class is logged but does not abort
+/// the recovery, since a live resumed session is preferable to none.
 ///
 /// # Errors
 ///
@@ -153,6 +161,7 @@ pub async fn respawn_session(
     crashed: &Session,
     config: &GlobalConfig,
     session_repo: &SessionRepo,
+    db: &Arc<Database>,
     http_port: u16,
 ) -> Result<(Session, Child)> {
     let span = info_span!("respawn_session", crashed_session = %crashed.id);
@@ -182,6 +191,10 @@ pub async fn respawn_session(
 
     let created = session_repo.create(&resumed).await?;
 
+    // Rebind the crashed session's durable pending state to the resumed session
+    // so mid-task work continues (ADR-0017; consumes F.3-T2 + F.3-T3).
+    rebind_pending_state(db, &crashed.id, &created.id).await;
+
     // Spawn the replacement process bound to the resumed session id. The
     // workspace root was canonicalized at original spawn, so it is reused as-is.
     let workspace_path = std::path::PathBuf::from(&created.workspace_root);
@@ -206,6 +219,36 @@ pub async fn respawn_session(
         .await?;
 
     Ok((active, child))
+}
+
+/// Carry a crashed session's durable pending state forward to its resumed
+/// session (ADR-0017): unconsumed steering messages, pending clearances, and
+/// undecided prompts are reassigned from `from_session_id` to `to_session_id`,
+/// preserving correlation ids. Best-effort — failures are logged, not fatal.
+async fn rebind_pending_state(db: &Arc<Database>, from_session_id: &str, to_session_id: &str) {
+    match SteeringRepo::new(Arc::clone(db))
+        .reassign_unconsumed_to_session(from_session_id, to_session_id)
+        .await
+    {
+        Ok(count) => info!(count, "rebound steering messages to resumed session"),
+        Err(err) => warn!(%err, "failed to rebind steering messages to resumed session"),
+    }
+
+    match ApprovalRepo::new(Arc::clone(db))
+        .reassign_pending_to_session(from_session_id, to_session_id)
+        .await
+    {
+        Ok(count) => info!(count, "rebound pending clearances to resumed session"),
+        Err(err) => warn!(%err, "failed to rebind pending clearances to resumed session"),
+    }
+
+    match PromptRepo::new(Arc::clone(db))
+        .reassign_pending_to_session(from_session_id, to_session_id)
+        .await
+    {
+        Ok(count) => info!(count, "rebound pending prompts to resumed session"),
+        Err(err) => warn!(%err, "failed to rebind pending prompts to resumed session"),
+    }
 }
 
 /// Verify that a user is the owner of the given session.

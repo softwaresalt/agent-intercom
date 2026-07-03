@@ -227,7 +227,7 @@ async fn attempt_respawn(
         }
     };
 
-    match spawner::respawn_session(&crashed, config, &session_repo, config.http_port).await {
+    match spawner::respawn_session(&crashed, config, &session_repo, db, config.http_port).await {
         Ok((resumed, child)) => {
             let resumed_id = resumed.id.clone();
             children.lock().await.insert(resumed_id.clone(), child);
