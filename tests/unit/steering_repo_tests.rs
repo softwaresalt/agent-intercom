@@ -169,3 +169,198 @@ async fn purge_removes_old_messages() {
     let remaining = repo.fetch_unconsumed("sess-purge").await.expect("fetch");
     assert!(remaining.is_empty());
 }
+
+// ─── F.3-T2: durable steering-queue persistence across restarts ──────
+
+/// New messages have no origin session until reassigned to a resumed session.
+#[tokio::test]
+async fn insert_defaults_origin_session_id_to_none() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = SteeringRepo::new(Arc::new(db));
+
+    let saved = repo
+        .insert(&sample_msg("sess-origin", None, "no origin yet"))
+        .await
+        .expect("insert");
+    assert_eq!(saved.origin_session_id, None);
+
+    let fetched = repo.fetch_unconsumed("sess-origin").await.expect("fetch");
+    assert_eq!(fetched[0].origin_session_id, None);
+}
+
+/// Reassigning carries only the *unconsumed* messages of a crashed session to
+/// the resumed session, preserving FIFO order and recording the crashed
+/// session id as the durable origin.
+#[tokio::test]
+async fn reassign_unconsumed_carries_messages_to_resumed_session() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = SteeringRepo::new(Arc::new(db));
+
+    let m1 = sample_msg("sess-crashed", Some("C1"), "pending 1");
+    let m2 = sample_msg("sess-crashed", Some("C1"), "pending 2");
+    let m3 = sample_msg("sess-crashed", Some("C1"), "already delivered");
+    repo.insert(&m1).await.expect("insert m1");
+    repo.insert(&m2).await.expect("insert m2");
+    let saved3 = repo.insert(&m3).await.expect("insert m3");
+    repo.mark_consumed(&saved3.id).await.expect("consume m3");
+
+    let moved = repo
+        .reassign_unconsumed_to_session("sess-crashed", "sess-resumed")
+        .await
+        .expect("reassign");
+    assert_eq!(moved, 2, "only the 2 unconsumed messages move");
+
+    // The crashed session has no unconsumed messages left.
+    let crashed = repo
+        .fetch_unconsumed("sess-crashed")
+        .await
+        .expect("fetch crashed");
+    assert!(crashed.is_empty());
+
+    // The resumed session inherits them in FIFO order with origin recorded.
+    let resumed = repo
+        .fetch_unconsumed("sess-resumed")
+        .await
+        .expect("fetch resumed");
+    assert_eq!(resumed.len(), 2);
+    assert_eq!(resumed[0].message, "pending 1");
+    assert_eq!(resumed[1].message, "pending 2");
+    assert_eq!(
+        resumed[0].origin_session_id.as_deref(),
+        Some("sess-crashed")
+    );
+    assert_eq!(
+        resumed[1].origin_session_id.as_deref(),
+        Some("sess-crashed")
+    );
+}
+
+/// A message reassigned across multiple restarts keeps its *original* origin,
+/// not the intermediate session id.
+#[tokio::test]
+async fn reassign_preserves_original_origin_across_chained_restarts() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = SteeringRepo::new(Arc::new(db));
+
+    repo.insert(&sample_msg("sess-a", None, "chained"))
+        .await
+        .expect("insert");
+
+    repo.reassign_unconsumed_to_session("sess-a", "sess-b")
+        .await
+        .expect("a->b");
+    repo.reassign_unconsumed_to_session("sess-b", "sess-c")
+        .await
+        .expect("b->c");
+
+    let c = repo.fetch_unconsumed("sess-c").await.expect("fetch c");
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].origin_session_id.as_deref(), Some("sess-a"));
+}
+
+/// Steering queue contents survive a full DB restart (close pool, reopen the
+/// same file-backed database).
+#[tokio::test]
+async fn steering_messages_survive_db_restart() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("steer-restart.db");
+    let path_str = path.to_str().expect("utf8");
+
+    let saved_id = {
+        let db = db::connect(path_str).await.expect("connect");
+        let repo = SteeringRepo::new(Arc::new(db));
+        let saved = repo
+            .insert(&sample_msg("sess-restart", Some("C1"), "survive restart"))
+            .await
+            .expect("insert");
+        saved.id
+    }; // pool dropped == server shutdown
+
+    // Reopen the same file (simulated restart).
+    let db2 = db::connect(path_str).await.expect("reconnect");
+    let repo2 = SteeringRepo::new(Arc::new(db2));
+    let msgs = repo2
+        .fetch_unconsumed("sess-restart")
+        .await
+        .expect("fetch after restart");
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0].id, saved_id);
+    assert_eq!(msgs[0].message, "survive restart");
+    assert!(!msgs[0].consumed);
+}
+
+/// A legacy database whose `steering_message` table predates the
+/// `origin_session_id` column migrates additively on reconnect: existing rows
+/// survive and the new column becomes available.
+#[tokio::test]
+async fn legacy_db_without_origin_column_migrates_additively() {
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("legacy-steer.db");
+    let path_str = path.to_str().expect("utf8");
+
+    // Build a legacy DB whose steering_message table lacks origin_session_id.
+    {
+        let opts = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("legacy pool");
+        sqlx::raw_sql(
+            "CREATE TABLE steering_message (
+                id TEXT PRIMARY KEY NOT NULL,
+                session_id TEXT NOT NULL,
+                channel_id TEXT,
+                message TEXT NOT NULL,
+                source TEXT NOT NULL CHECK(source IN ('slack','ipc')),
+                created_at TEXT NOT NULL,
+                consumed INTEGER NOT NULL DEFAULT 0
+            );",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy ddl");
+        sqlx::query(
+            "INSERT INTO steering_message
+             (id, session_id, channel_id, message, source, created_at, consumed)
+             VALUES ('steer:legacy', 'sess-legacy', NULL, 'legacy message', 'slack', ?1, 0)",
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&pool)
+        .await
+        .expect("legacy insert");
+        pool.close().await;
+    }
+
+    // Reopen with the production connect path, which runs the additive migration.
+    let db = db::connect(path_str)
+        .await
+        .expect("connect migrates legacy db");
+    let repo = SteeringRepo::new(Arc::new(db));
+
+    // Legacy row survived and reads back with the new column defaulting to None.
+    let msgs = repo
+        .fetch_unconsumed("sess-legacy")
+        .await
+        .expect("fetch legacy");
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0].message, "legacy message");
+    assert_eq!(msgs[0].origin_session_id, None);
+
+    // Reassignment works against the migrated legacy row.
+    let moved = repo
+        .reassign_unconsumed_to_session("sess-legacy", "sess-resumed")
+        .await
+        .expect("reassign legacy");
+    assert_eq!(moved, 1);
+    let resumed = repo
+        .fetch_unconsumed("sess-resumed")
+        .await
+        .expect("fetch resumed");
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].origin_session_id.as_deref(), Some("sess-legacy"));
+}

@@ -201,7 +201,8 @@ CREATE TABLE IF NOT EXISTS steering_message (
     message         TEXT NOT NULL,
     source          TEXT NOT NULL CHECK(source IN ('slack','ipc')),
     created_at      TEXT NOT NULL,
-    consumed        INTEGER NOT NULL DEFAULT 0
+    consumed        INTEGER NOT NULL DEFAULT 0,
+    origin_session_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_inbox (
@@ -223,5 +224,28 @@ CREATE INDEX IF NOT EXISTS idx_inbox_channel_consumed ON task_inbox(channel_id, 
 
     sqlx::raw_sql(ddl).execute(pool).await?;
     migrate_session_columns(pool).await?;
+    migrate_steering_columns(pool).await?;
+    Ok(())
+}
+
+/// Apply column migrations for the `steering_message` table.
+///
+/// Adds the `origin_session_id` column (feature F.3) idempotently so that a
+/// crashed session's pending steering queue can be rebound to its resumed
+/// session while preserving the original owning session id. Safe to call on
+/// every server startup; a legacy database missing the column is migrated
+/// additively without data loss.
+///
+/// # Errors
+///
+/// Returns `AppError::Db` if the check or `ALTER TABLE` fails.
+async fn migrate_steering_columns(pool: &SqlitePool) -> Result<()> {
+    add_column_if_missing(
+        pool,
+        "steering_message",
+        "origin_session_id",
+        "ALTER TABLE steering_message ADD COLUMN origin_session_id TEXT",
+    )
+    .await?;
     Ok(())
 }
