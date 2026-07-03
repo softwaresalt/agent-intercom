@@ -79,3 +79,11 @@ tests/visual/.env
 docs/experiments/
 docs/closure/browser-automation/
 .copilot-tracking/
+
+# Backlogit runtime data (keep config/*.yaml, header-def, registry, and the
+# durable queue/archive *.md work items). hooks_queue.jsonl is an ephemeral
+# hook-event queue (poll/ack consumed) that produces spurious merge conflicts
+# across branches. The SQLite cache (*.db*) and per-item logs (.backlogit/logs/)
+# are already ignored above. stash.jsonl is intentionally kept tracked while it
+# holds durable deferred-work entries.
+.backlogit/hooks_queue.jsonl
