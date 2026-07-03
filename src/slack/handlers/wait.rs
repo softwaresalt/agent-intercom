@@ -90,6 +90,59 @@ pub async fn handle_wait_action(
         if let Some(ref slack) = state.slack {
             let callback_id = format!("wait_instruct:{session_id}");
 
+            // F-16/F-17 proactive: Slack silently suppresses views.open when the
+            // triggering message lives inside a thread (origin.thread_ts is Some).
+            // Skip the doomed views.open call and activate the thread-reply fallback
+            // immediately, asking the operator to reply in the thread.
+            let thread_ts_str: Option<&str> = message
+                .and_then(|m| m.origin.thread_ts.as_ref())
+                .map(|ts| ts.0.as_str());
+            if crate::slack::handlers::thread_reply::message_is_in_thread(thread_ts_str) {
+                // This branch only runs in thread context (origin.thread_ts is
+                // Some), so thread_ts is guaranteed present here. We still mirror
+                // prompt.rs's defensive origin.ts fallback so the two paths stay
+                // structurally identical; it is a no-op in this proactive path.
+                let thread_ts_opt = message.map(|m| {
+                    m.origin
+                        .thread_ts
+                        .as_ref()
+                        .map_or_else(|| m.origin.ts.0.clone(), |ts| ts.0.clone())
+                });
+                let chan_id_opt = channel.map(|c| c.id.to_string());
+                if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
+                    let button_msg_ts = message.map(|m| m.origin.ts.clone());
+                    let state_clone = Arc::clone(state);
+                    let session_id_owned = session_id.to_owned();
+                    crate::slack::handlers::thread_reply::activate_thread_reply_fallback(
+                        chan_id.as_str(),
+                        thread_ts.as_str(),
+                        session_id.to_owned(),
+                        user_id.to_owned(),
+                        "Please reply in this thread with your instructions.",
+                        button_msg_ts,
+                        slack,
+                        Arc::clone(&state.pending_thread_replies),
+                        callback_id.as_str(),
+                        move |reply_text| async move {
+                            if let Err(err) = state_clone
+                                .driver
+                                .resolve_wait(&session_id_owned, Some(reply_text))
+                                .await
+                            {
+                                warn!(
+                                    session_id = session_id_owned,
+                                    %err,
+                                    "thread-reply fallback (proactive): failed to resolve wait"
+                                );
+                            }
+                        },
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                return Err("thread context: missing channel for wait fallback".to_owned());
+            }
+
             // Cache the original message coordinates so the ViewSubmission
             // handler can update the message from "⏳ Processing…" to a
             // final status line (FR-022).

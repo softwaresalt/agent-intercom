@@ -68,6 +68,26 @@ pub fn fallback_map_key(channel_id: &str, thread_ts: &str) -> String {
     format!("{channel_id}\x1f{thread_ts}")
 }
 
+/// Returns `true` when `thread_ts` indicates the interaction originated inside
+/// a Slack thread.
+///
+/// When this returns `true`, calling `views.open` would be silently suppressed
+/// by the Slack client on mobile (the modal is never rendered). Callers should
+/// skip the `views.open` call and activate the thread-reply fallback directly.
+///
+/// Pass `message.origin.thread_ts.as_ref().map(|ts| ts.0.as_str())` from a
+/// [`SlackHistoryMessage`].
+///
+/// **Contract**: an empty-string `thread_ts` (`Some("")`) is treated as being in
+/// a thread. Slack's API does not emit empty `thread_ts` values; if future
+/// integrations must guard against this, add a non-empty check at the call site.
+///
+/// [`SlackHistoryMessage`]: slack_morphism::prelude::SlackHistoryMessage
+#[must_use]
+pub fn message_is_in_thread(thread_ts: Option<&str>) -> bool {
+    thread_ts.is_some()
+}
+
 /// Register a thread-reply fallback by storing the session, authorized user,
 /// and oneshot sender, keyed by the composite `"{channel_id}\x1f{thread_ts}"`.
 ///
