@@ -31,6 +31,8 @@ mod unit {
     mod error_tests;
     mod heartbeat_tests;
     mod inbox_repo_tests;
+    mod intercom_queue_command_tests;
+    mod intercom_queue_tests;
     mod mode_routing_tests;
     mod model_tests;
     mod offline_queue_tests;
