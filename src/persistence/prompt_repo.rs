@@ -201,4 +201,36 @@ impl PromptRepo {
 
         rows.into_iter().map(PromptRow::into_prompt).collect()
     }
+
+    /// Rebind a crashed session's *undecided* prompts to a resumed session so
+    /// mid-task prompt state survives a respawn (F.3-T3).
+    ///
+    /// Moves every prompt with no decision from `from_session_id` to
+    /// `to_session_id`, preserving each prompt's id (the ACP correlation id)
+    /// so the resumed agent can match an operator decision to its original
+    /// prompt. Already decided prompts are left untouched. Returns the number
+    /// of prompts carried forward.
+    ///
+    /// This is the durable persistence primitive that the resume-state
+    /// contract (F.3-T4) wires into the respawn path.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn reassign_pending_to_session(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE continuation_prompt SET session_id = ?1
+             WHERE session_id = ?2 AND decision IS NULL",
+        )
+        .bind(to_session_id)
+        .bind(from_session_id)
+        .execute(self.db.as_ref())
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }
