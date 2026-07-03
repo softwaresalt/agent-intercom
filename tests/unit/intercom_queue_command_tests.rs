@@ -145,3 +145,73 @@ async fn queue_list_empty_returns_empty_message() {
     let message = result.expect("list response");
     assert_eq!(message, "Queue is empty.");
 }
+
+#[tokio::test]
+async fn queue_list_multiple_items_uses_newline_delimiter() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST";
+    let state = app_state_with_mode(root, user, ServerMode::Acp).await;
+
+    dispatch_command("queue", &["add", "alpha"], user, "C_TEST", &state)
+        .await
+        .expect("add alpha");
+    dispatch_command("queue", &["add", "beta"], user, "C_TEST", &state)
+        .await
+        .expect("add beta");
+
+    let listed = dispatch_command("queue", &["list"], user, "C_TEST", &state)
+        .await
+        .expect("list response");
+    // Items are joined by a bare newline (no leading space on continuation lines).
+    assert_eq!(listed, "1. alpha\n2. beta");
+}
+
+#[tokio::test]
+async fn queue_transfer_requires_number() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST";
+    let state = app_state_with_mode(root, user, ServerMode::Acp).await;
+
+    let result = dispatch_command("queue", &["transfer"], user, "C_TEST", &state).await;
+
+    let err = result.expect_err("transfer without a number should error");
+    assert!(
+        format!("{err:?}").contains("usage: queue transfer"),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn queue_transfer_rejects_non_numeric() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST";
+    let state = app_state_with_mode(root, user, ServerMode::Acp).await;
+
+    let result = dispatch_command("queue", &["transfer", "abc"], user, "C_TEST", &state).await;
+
+    assert!(
+        result.is_err(),
+        "a non-numeric transfer argument should error before invoking backlogit"
+    );
+}
+
+#[tokio::test]
+async fn queue_transfer_missing_item_errors() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST";
+    let state = app_state_with_mode(root, user, ServerMode::Acp).await;
+
+    // Empty queue: transfer resolves the item before shelling out to backlogit,
+    // so a missing item errors without any side effect.
+    let result = dispatch_command("queue", &["transfer", "99"], user, "C_TEST", &state).await;
+
+    let err = result.expect_err("transfer of a missing item should error");
+    assert!(
+        format!("{err:?}").contains("not found"),
+        "unexpected error: {err:?}"
+    );
+}

@@ -80,7 +80,7 @@ fn replace_nonexistent_returns_error() {
 }
 
 #[test]
-fn transfer_removes_item_from_queue() {
+fn remove_deletes_item_from_queue() {
     let (_temp_dir, repo) = build_repo();
 
     repo.add("a").expect("add a");

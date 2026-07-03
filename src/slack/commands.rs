@@ -442,10 +442,7 @@ fn execute_queue_command(
                 .into_iter()
                 .map(|item| format!("{}. {}", item.number, item.text))
                 .collect::<Vec<_>>()
-                .join(
-                    "
-",
-                ))
+                .join("\n"))
         }
         Some("replace") => {
             if args.len() < 3 {
@@ -484,20 +481,24 @@ fn execute_queue_command(
                 .ok_or_else(|| {
                     crate::AppError::NotFound(format!("queue item {number} not found"))
                 })?;
-            let backlogit_output = transfer_to_backlogit(&item.text)?;
-            let removed = repo.remove(number)?;
+            let backlogit_output = transfer_to_backlogit(&item.text, repo.workspace_root())?;
 
-            if backlogit_output.is_empty() {
-                Ok(format!(
+            // The backlogit stash add already succeeded above. If removing the item
+            // from the local queue then fails, report success-with-warning rather
+            // than an error so an operator retry does not create a duplicate stash.
+            match repo.remove(number) {
+                Ok(removed) if backlogit_output.is_empty() => Ok(format!(
                     "Transferred queue item {} to backlogit.",
                     removed.number
-                ))
-            } else {
-                Ok(format!(
-                    "Transferred queue item {} to backlogit.
-{}",
+                )),
+                Ok(removed) => Ok(format!(
+                    "Transferred queue item {} to backlogit.\n{}",
                     removed.number, backlogit_output
-                ))
+                )),
+                Err(err) => Ok(format!(
+                    "Transferred queue item {number} to backlogit, but failed to remove it \
+                     from the queue: {err}. Remove it manually to avoid a duplicate on retry."
+                )),
             }
         }
         Some(other) => Ok(format!(
@@ -514,18 +515,21 @@ fn parse_queue_number(arg: Option<&str>, usage: &str) -> crate::Result<u32> {
         .map_err(|err| crate::AppError::Config(format!("parse number: {err}")))
 }
 
-fn transfer_to_backlogit(text: &str) -> crate::Result<String> {
-    let output = std::process::Command::new("backlogit")
-        .args(["stash", "add"])
-        .arg(text)
-        .output()
-        .map_err(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                crate::AppError::Io("backlogit command not found on PATH".to_owned())
-            } else {
-                crate::AppError::Io(format!("failed to run backlogit stash add: {err}"))
-            }
-        })?;
+fn transfer_to_backlogit(text: &str, workspace_root: Option<&Path>) -> crate::Result<String> {
+    let mut command = std::process::Command::new("backlogit");
+    command.args(["stash", "add"]).arg(text);
+    // Run in the workspace root (parent of `.intercom`) so backlogit resolves the
+    // `.backlogit` workspace regardless of the server process's launch directory.
+    if let Some(root) = workspace_root {
+        command.current_dir(root);
+    }
+    let output = command.output().map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            crate::AppError::Io("backlogit command not found on PATH".to_owned())
+        } else {
+            crate::AppError::Io(format!("failed to run backlogit stash add: {err}"))
+        }
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();

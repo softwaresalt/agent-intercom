@@ -39,6 +39,16 @@ impl IntercomQueueRepo {
         }
     }
 
+    /// The workspace root that contains this `.intercom` directory.
+    ///
+    /// Returns the grandparent of the queue file (`<root>/.intercom/queue.json`) —
+    /// the directory where the backlogit workspace (`.backlogit`) is expected to
+    /// live. Returns `None` when the path has no such ancestor.
+    #[must_use]
+    pub fn workspace_root(&self) -> Option<&Path> {
+        self.queue_file.parent().and_then(Path::parent)
+    }
+
     /// Add a new queue item.
     ///
     /// # Errors
