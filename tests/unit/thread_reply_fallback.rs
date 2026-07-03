@@ -633,3 +633,30 @@ fn test_parse_thread_decision_trims_whitespace() {
     assert_eq!(d2.keyword, "refine");
     assert_eq!(d2.instruction, "fix this");
 }
+
+// ── T4 / F.2-T4 — Proactive thread-context detection (silent-swallow path) ────
+
+/// `message_is_in_thread(None)` → not in a thread.
+///
+/// Verifies the proactive detection helper returns `false` when there is no
+/// message (e.g. interaction came from a direct message, not a thread button).
+#[test]
+fn silent_swallow_no_thread_ts_not_in_thread() {
+    use agent_intercom::slack::handlers::thread_reply::message_is_in_thread;
+
+    assert!(!message_is_in_thread(None));
+}
+
+/// `message_is_in_thread(Some("..."))` → in a thread.
+///
+/// Verifies the proactive detection helper returns `true` when a non-empty
+/// `thread_ts` is present.  The slash command originated from a Slack thread,
+/// so `views.open` would be silently suppressed; the handler must skip it and
+/// activate the thread-reply fallback directly (F-16/F-17 proactive path).
+#[test]
+fn silent_swallow_with_thread_ts_is_in_thread() {
+    use agent_intercom::slack::handlers::thread_reply::message_is_in_thread;
+
+    assert!(message_is_in_thread(Some("1234567890.000100")));
+    assert!(message_is_in_thread(Some("0000000000.000001")));
+}
