@@ -344,6 +344,7 @@ async fn run(args: Cli) -> Result<()> {
             Arc::clone(slack),
             default_channel,
             Arc::clone(&state.db),
+            Arc::clone(&state.config),
             ct.clone(),
         ))
     } else {

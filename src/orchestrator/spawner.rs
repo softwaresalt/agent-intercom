@@ -84,17 +84,7 @@ pub async fn spawn_session(
     let mcp_url = format!("http://localhost:{http_port}/mcp?session_id={}", created.id);
 
     // Spawn the host CLI process.
-    let mut cmd = Command::new(&config.host_cli);
-    cmd.args(&config.host_cli_args)
-        .arg(prompt)
-        .env("INTERCOM_WORKSPACE_ROOT", &workspace_path)
-        .env("INTERCOM_MCP_URL", &mcp_url)
-        .env("INTERCOM_SESSION_ID", &created.id)
-        .current_dir(&workspace_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let mut cmd = build_agent_command(config, &workspace_path, &mcp_url, &created.id, prompt);
 
     let child = cmd
         .spawn()
@@ -113,6 +103,109 @@ pub async fn spawn_session(
         .await?;
 
     Ok((active_session, child))
+}
+
+/// Build the host CLI command for an agent session process.
+///
+/// Shared by [`spawn_session`] and [`respawn_session`] so both spawn paths
+/// apply the same environment contract (`INTERCOM_WORKSPACE_ROOT`,
+/// `INTERCOM_MCP_URL`, `INTERCOM_SESSION_ID`), working directory, stdio wiring,
+/// and `kill_on_drop` behavior.
+fn build_agent_command(
+    config: &GlobalConfig,
+    workspace_path: &std::path::Path,
+    mcp_url: &str,
+    session_id: &str,
+    prompt: &str,
+) -> Command {
+    let mut cmd = Command::new(&config.host_cli);
+    cmd.args(&config.host_cli_args)
+        .arg(prompt)
+        .env("INTERCOM_WORKSPACE_ROOT", workspace_path)
+        .env("INTERCOM_MCP_URL", mcp_url)
+        .env("INTERCOM_SESSION_ID", session_id)
+        .current_dir(workspace_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    cmd
+}
+
+/// Respawn a crashed agent session and rebind it as a resumed session.
+///
+/// Marks the `crashed` session as `Interrupted`, then creates a new session
+/// that is a restart of it (`restart_of = Some(crashed.id)`), carrying the
+/// owner, workspace, prompt, routing mode, protocol, Slack channel/thread, and
+/// ACP `agent_session_id` forward so the resumed agent rebinds to the same
+/// logical session. A fresh host CLI process is spawned and the resumed session
+/// is activated before it is returned.
+///
+/// Recovering pending approval / prompt / progress state across the restart is
+/// the responsibility of the resume-state contract (plan F.3-T3 / F.3-T4); this
+/// function establishes the `restart_of` linkage those steps consume.
+///
+/// # Errors
+///
+/// Returns `AppError::Mcp` if the replacement process fails to spawn, or
+/// `AppError::Db` if a session record update fails.
+pub async fn respawn_session(
+    crashed: &Session,
+    config: &GlobalConfig,
+    session_repo: &SessionRepo,
+    http_port: u16,
+) -> Result<(Session, Child)> {
+    let span = info_span!("respawn_session", crashed_session = %crashed.id);
+    let _guard = span.enter();
+
+    // Mark the crashed session interrupted: frees its concurrency slot and
+    // makes it discoverable by recovery queries. Idempotent if already set.
+    if crashed.status != SessionStatus::Interrupted {
+        session_repo
+            .set_terminated(&crashed.id, SessionStatus::Interrupted)
+            .await?;
+    }
+
+    // Build the resumed session, rebinding identity to the crashed one.
+    let mut resumed = Session::new(
+        crashed.owner_user_id.clone(),
+        crashed.workspace_root.clone(),
+        crashed.prompt.clone(),
+        crashed.mode,
+    );
+    resumed.protocol_mode = crashed.protocol_mode;
+    resumed.channel_id = crashed.channel_id.clone();
+    resumed.thread_ts = crashed.thread_ts.clone();
+    resumed.agent_session_id = crashed.agent_session_id.clone();
+    resumed.title = crashed.title.clone();
+    resumed.restart_of = Some(crashed.id.clone());
+
+    let created = session_repo.create(&resumed).await?;
+
+    // Spawn the replacement process bound to the resumed session id. The
+    // workspace root was canonicalized at original spawn, so it is reused as-is.
+    let workspace_path = std::path::PathBuf::from(&created.workspace_root);
+    let mcp_url = format!("http://localhost:{http_port}/mcp?session_id={}", created.id);
+    let prompt = created.prompt.clone().unwrap_or_default();
+    let mut cmd = build_agent_command(config, &workspace_path, &mcp_url, &created.id, &prompt);
+
+    let child = cmd
+        .spawn()
+        .map_err(|err| AppError::Mcp(format!("failed to respawn host cli: {err}")))?;
+
+    info!(
+        crashed_session = crashed.id,
+        resumed_session = created.id,
+        pid = child.id(),
+        "agent process respawned after crash"
+    );
+
+    // Activate the resumed session now that the replacement process is running.
+    let active = session_repo
+        .update_status(&created.id, SessionStatus::Active)
+        .await?;
+
+    Ok((active, child))
 }
 
 /// Verify that a user is the owner of the given session.

@@ -22,6 +22,44 @@ use agent_intercom::persistence::db;
 use agent_intercom::persistence::prompt_repo::PromptRepo;
 use agent_intercom::persistence::session_repo::SessionRepo;
 
+use agent_intercom::orchestrator::spawner;
+
+/// Build a config with a cross-platform `host_cli` that spawns and exits
+/// immediately (`cmd /c echo` on Windows, `echo` on Unix). `root` must be an
+/// existing directory because `from_toml_str` canonicalizes it.
+fn respawn_config(root: &str) -> GlobalConfig {
+    let host_cli_line = if cfg!(windows) {
+        "host_cli = \"cmd\"\nhost_cli_args = [\"/c\", \"echo\"]"
+    } else {
+        "host_cli = \"echo\"\nhost_cli_args = []"
+    };
+    let toml = format!(
+        r#"
+default_workspace_root = '{root}'
+http_port = 0
+ipc_name = "test-respawn"
+max_concurrent_sessions = 3
+{host_cli_line}
+
+[slack]
+channel_id = "C_TEST"
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = false
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "continue"
+"#,
+    );
+    GlobalConfig::from_toml_str(&toml).expect("valid config")
+}
+
 /// Build a minimal test configuration.
 fn test_config() -> GlobalConfig {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -285,4 +323,71 @@ async fn recover_finds_most_recent_interrupted_session() {
         .expect("get")
         .expect("session should exist");
     assert_eq!(specific.status, SessionStatus::Interrupted);
+}
+
+/// F.3-T1: an induced agent crash triggers respawn + session rebind. The
+/// crashed session becomes `Interrupted`, and a new `Active` session is created
+/// that is linked to the predecessor via `restart_of`, carrying the workspace,
+/// owner, prompt, Slack thread, and ACP `agent_session_id` forward (rebind).
+#[tokio::test]
+async fn respawn_creates_resumed_session_linked_to_crashed() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().to_str().expect("utf8").to_string();
+    let config = respawn_config(&workspace);
+
+    let database = Arc::new(db::connect_memory().await.expect("db"));
+    let session_repo = SessionRepo::new(Arc::clone(&database));
+
+    // Create an active session that will "crash".
+    let mut session = Session::new(
+        "U_OWNER".into(),
+        workspace.clone(),
+        Some("build feature X".into()),
+        SessionMode::Remote,
+    );
+    session.channel_id = Some("C_TEST".into());
+    session.thread_ts = Some("1700000000.000100".into());
+    session.agent_session_id = Some("acp-sess-123".into());
+    let created = session_repo.create(&session).await.expect("create");
+    let active = session_repo
+        .update_status(&created.id, SessionStatus::Active)
+        .await
+        .expect("activate");
+
+    // Induce crash recovery.
+    let (resumed, _child) =
+        spawner::respawn_session(&active, &config, &session_repo, config.http_port)
+            .await
+            .expect("respawn");
+
+    // The crashed session is now Interrupted.
+    let crashed = session_repo
+        .get_by_id(&active.id)
+        .await
+        .expect("get")
+        .expect("crashed session exists");
+    assert_eq!(crashed.status, SessionStatus::Interrupted);
+    assert!(crashed.terminated_at.is_some());
+
+    // The resumed session is a distinct, Active restart linked to the crashed one.
+    assert_ne!(resumed.id, active.id, "resume must be a new session record");
+    assert_eq!(resumed.status, SessionStatus::Active);
+    assert_eq!(resumed.restart_of.as_deref(), Some(active.id.as_str()));
+
+    // Session rebind: identity + workspace + prompt + ACP session id carried forward.
+    assert_eq!(resumed.owner_user_id, active.owner_user_id);
+    assert_eq!(resumed.workspace_root, active.workspace_root);
+    assert_eq!(resumed.prompt, active.prompt);
+    assert_eq!(resumed.agent_session_id.as_deref(), Some("acp-sess-123"));
+    assert_eq!(resumed.channel_id.as_deref(), Some("C_TEST"));
+    assert_eq!(resumed.thread_ts.as_deref(), Some("1700000000.000100"));
+
+    // The resumed session is persisted and retrievable.
+    let persisted = session_repo
+        .get_by_id(&resumed.id)
+        .await
+        .expect("get")
+        .expect("resumed session exists");
+    assert_eq!(persisted.status, SessionStatus::Active);
+    assert_eq!(persisted.restart_of.as_deref(), Some(active.id.as_str()));
 }
