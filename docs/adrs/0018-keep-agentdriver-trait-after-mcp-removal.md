@@ -35,9 +35,12 @@ decided before the removal work.
   in isolation because it holds live per-session stream channels.
 * **`AgentEvent`** (the event enum in `src/driver/mod.rs`) is protocol-neutral
   and unaffected by this decision; it stays regardless.
-* **Cost of keeping is negligible.** The trait is invoked only on operator
-  actions (resolve clearance/prompt/wait, send prompt, interrupt) — not a hot
-  path — so the single `dyn` dispatch per call is immaterial.
+* **Cost of keeping is negligible.** The trait is invoked on operator actions
+  (resolve clearance/prompt/wait, send prompt, interrupt), on reconnect-flush
+  delivery (`acp::reader::deliver_queued_messages` — one `dyn` dispatch per
+  queued steering message), and on ACP stall-consumer auto-nudges. None of
+  these are high-frequency hot paths, so the dynamic-dispatch cost is
+  immaterial.
 * **Cost of collapsing is real.** Replacing `Arc<dyn AgentDriver>` with
   `Arc<AcpDriver>` would touch `state::AppState`, `acp::reader`,
   `orchestrator::stall_consumer`, `main.rs`, and the tests — churn during an
@@ -70,11 +73,14 @@ Rationale:
 
 ### Negative / Follow-ups
 
-* `McpDriver::new_empty()` currently constructs the default/placeholder
-  `Arc<dyn AgentDriver>` used before an ACP driver is wired. When 013.005.003-T
-  removes `McpDriver`, that default-driver construction must be repointed to an
-  `AcpDriver` (or a small null driver) so `AppState.driver` is always populated.
-  This is called out here as a required part of the removal task, not this one.
+* `McpDriver::new_empty()` is a **test-only** convenience constructor used by
+  ~24 test call sites to populate `AppState.driver`; it has **no production
+  callers** (`main.rs` builds `McpDriver::new(...)` in the MCP-mode branch and
+  `AcpDriver::new()` coerced to `Arc<dyn AgentDriver>` in ACP mode). When
+  013.005.003-T removes `McpDriver`, those test call sites must be repointed to
+  a non-MCP default driver (e.g. `AcpDriver::new()` or a shared test helper),
+  and the MCP-mode driver branch in `main.rs` is deleted along with the rest of
+  the MCP surface. These are required parts of the removal task, not this one.
 
 ### Neutral
 
