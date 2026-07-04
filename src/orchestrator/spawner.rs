@@ -191,10 +191,6 @@ pub async fn respawn_session(
 
     let created = session_repo.create(&resumed).await?;
 
-    // Rebind the crashed session's durable pending state to the resumed session
-    // so mid-task work continues (ADR-0017; consumes F.3-T2 + F.3-T3).
-    rebind_pending_state(db, &crashed.id, &created.id).await;
-
     // Spawn the replacement process bound to the resumed session id. The
     // workspace root was canonicalized at original spawn, so it is reused as-is.
     let workspace_path = std::path::PathBuf::from(&created.workspace_root);
@@ -217,6 +213,12 @@ pub async fn respawn_session(
     let active = session_repo
         .update_status(&created.id, SessionStatus::Active)
         .await?;
+
+    // Rebind the crashed session's durable pending state to the resumed session
+    // only after the replacement process is live and activated (ADR-0017;
+    // consumes F.3-T2 + F.3-T3). Doing this after a successful spawn avoids
+    // moving pending rows onto a session whose process never started.
+    rebind_pending_state(db, &crashed.id, &active.id).await;
 
     Ok((active, child))
 }

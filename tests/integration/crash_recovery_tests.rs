@@ -62,6 +62,37 @@ default_nudge_message = "continue"
     GlobalConfig::from_toml_str(&toml).expect("valid config")
 }
 
+/// Build a config whose `host_cli` points at a binary that does not exist, so
+/// `respawn_session`'s child spawn deterministically fails.
+fn respawn_config_bad_cli(root: &str) -> GlobalConfig {
+    let toml = format!(
+        r#"
+default_workspace_root = '{root}'
+http_port = 0
+ipc_name = "test-respawn-bad"
+max_concurrent_sessions = 3
+host_cli = "agent-intercom-nonexistent-binary-xyz"
+host_cli_args = []
+
+[slack]
+channel_id = "C_TEST"
+
+[timeouts]
+approval_seconds = 3600
+prompt_seconds = 1800
+wait_seconds = 0
+
+[stall]
+enabled = false
+inactivity_threshold_seconds = 300
+escalation_threshold_seconds = 120
+max_retries = 3
+default_nudge_message = "continue"
+"#,
+    );
+    GlobalConfig::from_toml_str(&toml).expect("valid config")
+}
+
 /// Build a minimal test configuration.
 fn test_config() -> GlobalConfig {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -505,4 +536,96 @@ async fn respawn_rebinds_pending_steering_clearance_and_prompt() {
         .expect("fetch resumed prompt")
         .expect("pending prompt present");
     assert_eq!(resumed_prompt.id, prompt_id);
+}
+
+/// F.3-T4 (regression): if the replacement process fails to spawn, the crashed
+/// session's pending state is NOT moved — it stays on the crashed session so it
+/// can be retried or recovered, rather than being orphaned onto a session whose
+/// process never started.
+#[tokio::test]
+async fn respawn_spawn_failure_leaves_pending_state_on_crashed_session() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().to_str().expect("utf8").to_string();
+    let config = respawn_config_bad_cli(&workspace);
+
+    let database = Arc::new(db::connect_memory().await.expect("db"));
+    let session_repo = SessionRepo::new(Arc::clone(&database));
+    let steering_repo = SteeringRepo::new(Arc::clone(&database));
+    let approval_repo = ApprovalRepo::new(Arc::clone(&database));
+    let prompt_repo = PromptRepo::new(Arc::clone(&database));
+
+    let mut session = Session::new(
+        "U_OWNER".into(),
+        workspace.clone(),
+        Some("mid-task work".into()),
+        SessionMode::Remote,
+    );
+    session.channel_id = Some("C_TEST".into());
+    let created = session_repo.create(&session).await.expect("create");
+    let active = session_repo
+        .update_status(&created.id, SessionStatus::Active)
+        .await
+        .expect("activate");
+
+    steering_repo
+        .insert(&SteeringMessage::new(
+            active.id.clone(),
+            Some("C_TEST".into()),
+            "pending steer".into(),
+            SteeringSource::Slack,
+        ))
+        .await
+        .expect("insert steering");
+    approval_repo
+        .create(&ApprovalRequest::new(
+            active.id.clone(),
+            "Apply refactor".into(),
+            None,
+            "--- a/x\n+++ b/x".into(),
+            "x".into(),
+            RiskLevel::Low,
+            "hash".into(),
+        ))
+        .await
+        .expect("create approval");
+    prompt_repo
+        .create(&ContinuationPrompt::new(
+            active.id.clone(),
+            "Continue?".into(),
+            PromptType::Continuation,
+            Some(60),
+            Some(2),
+        ))
+        .await
+        .expect("create prompt");
+
+    // Respawn fails because the host CLI binary does not exist.
+    let result =
+        spawner::respawn_session(&active, &config, &session_repo, &database, config.http_port)
+            .await;
+    assert!(
+        result.is_err(),
+        "respawn must fail when the host CLI is missing"
+    );
+
+    // The crashed session's pending state was NOT moved — it remains recoverable.
+    let steering = steering_repo
+        .fetch_unconsumed(&active.id)
+        .await
+        .expect("fetch steering");
+    assert_eq!(
+        steering.len(),
+        1,
+        "steering must stay on the crashed session"
+    );
+    assert!(approval_repo
+        .get_pending_for_session(&active.id)
+        .await
+        .expect("fetch approval")
+        .is_some());
+    assert!(prompt_repo
+        .get_pending_for_session(&active.id)
+        .await
+        .expect("fetch prompt")
+        .is_some());
 }

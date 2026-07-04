@@ -50,9 +50,12 @@ process is activated. The contract is:
    via `PromptRepo::reassign_pending_to_session`. The prompt `id` — the ACP
    prompt correlation id — is preserved for the same reason.
 
-5. **Best-effort semantics.** Re-binding is best-effort: a failure to move one
-   state class is logged (`warn`) but does not abort the respawn. A live
-   resumed session with partial state is preferable to no session at all.
+5. **Best-effort, post-spawn semantics.** Re-binding runs **only after** the
+   replacement process has spawned and the resumed session is activated, so
+   pending rows are never moved onto a session whose process failed to start
+   (a spawn failure leaves the pending state on the crashed session for a
+   later retry or `recover_state`). Re-binding itself is best-effort: a failure
+   to move one state class is logged (`warn`) but does not abort the respawn.
 
 6. **Already-terminal state is untouched.** Consumed steering messages, decided
    clearances, and decided prompts remain attached to the crashed session as an
