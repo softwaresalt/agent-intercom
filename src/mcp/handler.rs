@@ -1,4 +1,4 @@
-//! MCP server handler, shared application state, and tool router.
+//! MCP server handler and tool router.
 
 use std::future::Future;
 use std::sync::{Arc, OnceLock};

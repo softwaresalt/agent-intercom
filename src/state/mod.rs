@@ -78,7 +78,8 @@ pub type StallDetectors = Arc<Mutex<HashMap<String, StallDetectorHandle>>>;
 /// line (FR-022).
 pub type PendingModalContexts = Arc<Mutex<HashMap<String, (String, String)>>>;
 
-/// Thread-safe map of pending thread-reply oneshot senders keyed by `thread_ts`.
+/// Thread-safe map of pending thread-reply oneshot senders keyed by a composite
+/// `channel_id` + `thread_ts` key (built by `thread_reply::fallback_map_key`).
 ///
 /// Used by the thread-reply fallback (F-16/F-17) when Slack modals cannot be
 /// opened (e.g. `trigger_id` expiry in Socket Mode). The button handler
@@ -119,7 +120,8 @@ pub struct AppState {
     pub pending_command_approvals: PendingCommandApprovals,
     /// Cached modal message contexts for FR-022 button replacement.
     pub pending_modal_contexts: PendingModalContexts,
-    /// Pending thread-reply oneshot senders keyed by `thread_ts` (F-16/F-17 fallback).
+    /// Pending thread-reply oneshot senders keyed by a composite
+    /// `channel_id` + `thread_ts` key (F-16/F-17 fallback).
     ///
     /// When `views.open` fails, a oneshot sender is registered here by the
     /// button handler. The push-event handler ([`crate::slack::push_events`])
