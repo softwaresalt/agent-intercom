@@ -18,12 +18,12 @@ use std::time::Duration;
 
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::ipc::server::spawn_ipc_server;
-use agent_intercom::mcp::handler::{AppState, ApprovalResponse, WaitResponse};
 use agent_intercom::models::approval::{ApprovalRequest, RiskLevel};
 use agent_intercom::models::session::{SessionMode, SessionStatus};
 use agent_intercom::persistence::approval_repo::ApprovalRepo;
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::state::{AppState, ApprovalResponse, WaitResponse};
 use interprocess::local_socket::{
     traits::Stream as SyncStreamTrait, GenericNamespaced, Stream, ToNsName,
 };

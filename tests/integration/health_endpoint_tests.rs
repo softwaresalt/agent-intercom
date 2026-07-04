@@ -40,7 +40,7 @@ async fn spawn_server() -> (String, CancellationToken) {
     let state = {
         let mut cfg = (*state.config).clone();
         cfg.http_port = port;
-        let new_state = agent_intercom::mcp::handler::AppState {
+        let new_state = agent_intercom::state::AppState {
             config: Arc::new(cfg),
             db: Arc::clone(&state.db),
             slack: None,

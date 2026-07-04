@@ -11,11 +11,11 @@ use tracing::{info, warn};
 
 use crate::audit::{AuditEntry, AuditEventType};
 use crate::driver::AgentDriver;
-use crate::mcp::handler::AppState;
 use crate::models::session::{ConnectivityStatus, ProtocolMode};
 use crate::models::steering::{SteeringMessage, SteeringSource};
 use crate::persistence::session_repo::SessionRepo;
 use crate::persistence::steering_repo::SteeringRepo;
+use crate::state::AppState;
 
 /// Store a steering message from a Slack channel.
 ///

@@ -29,7 +29,7 @@ fn transport_module_exports_serve_stdio() {
 
     // Also verify the crate name appears in the type path as a basic sanity
     // check that we are importing from the right crate.
-    let module_path = std::any::type_name::<agent_intercom::mcp::handler::AppState>();
+    let module_path = std::any::type_name::<agent_intercom::state::AppState>();
     assert!(
         module_path.contains("agent_intercom"),
         "module name should contain crate name: {module_path}"

@@ -181,11 +181,7 @@ async fn fetch_and_consume_steering(
 }
 
 /// Forward a heartbeat status message to the Slack channel, if configured.
-async fn send_heartbeat_to_slack(
-    state: &crate::mcp::handler::AppState,
-    channel_id: &str,
-    msg: &str,
-) {
+async fn send_heartbeat_to_slack(state: &crate::state::AppState, channel_id: &str, msg: &str) {
     if let Some(ref slack) = state.slack {
         let channel = slack_morphism::prelude::SlackChannelId(channel_id.to_owned());
         let slack_msg = SlackMessage {

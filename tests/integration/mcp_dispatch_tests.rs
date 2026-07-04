@@ -15,8 +15,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_intercom::mcp::handler::AppState;
 use agent_intercom::mcp::sse::serve_http;
+use agent_intercom::state::AppState;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 

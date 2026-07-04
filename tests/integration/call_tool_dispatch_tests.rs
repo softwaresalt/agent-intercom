@@ -15,12 +15,12 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-use agent_intercom::mcp::handler::StallDetectors;
 use agent_intercom::models::progress::{validate_snapshot, ProgressItem, ProgressStatus};
 use agent_intercom::models::session::SessionMode;
 use agent_intercom::orchestrator::stall_detector::StallDetector;
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::state::StallDetectors;
 
 use super::test_helpers::{
     create_active_session, create_active_session_with_mode, create_interrupted_session,

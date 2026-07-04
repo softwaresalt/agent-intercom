@@ -21,11 +21,12 @@ use tracing::{info, info_span, warn, Instrument};
 use uuid::Uuid;
 
 use crate::audit::{AuditEntry, AuditEventType};
-use crate::mcp::handler::{ApprovalResponse, IntercomServer};
+use crate::mcp::handler::IntercomServer;
 use crate::persistence::session_repo::SessionRepo;
 use crate::policy::evaluator::{AutoApproveContext, PolicyEvaluator};
 use crate::policy::loader::PolicyLoader;
 use crate::slack::{blocks, client::SlackMessage};
+use crate::state::ApprovalResponse;
 
 /// Input parameters per mcp-tools.json contract.
 #[derive(Debug, serde::Deserialize)]

@@ -10,7 +10,8 @@ use rmcp::transport::io::stdio;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use super::handler::{AppState, IntercomServer};
+use super::handler::IntercomServer;
+use crate::state::AppState;
 use crate::{AppError, Result};
 
 /// Serve the MCP server over stdio until the cancellation token fires.

@@ -19,11 +19,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::config::GlobalConfig;
-use crate::mcp::handler::ActiveChildren;
 use crate::models::session::SessionStatus;
 use crate::orchestrator::spawner;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::client::{SlackMessage, SlackService};
+use crate::state::ActiveChildren;
 
 /// Interval between polls for child process exits.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);

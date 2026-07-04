@@ -23,10 +23,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use agent_intercom::mcp::handler::{AppState, IntercomServer};
+use agent_intercom::mcp::handler::IntercomServer;
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::state::AppState;
 use tokio::sync::Mutex;
 
 use super::test_helpers::test_config;

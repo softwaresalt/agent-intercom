@@ -22,7 +22,7 @@ use std::sync::Arc;
 // `serve_http` symbol does not cause a compile error in default builds.
 // The red gate is verified by running with `--features rmcp-upgrade`.
 #[cfg(feature = "rmcp-upgrade")]
-use agent_intercom::mcp::handler::AppState;
+use agent_intercom::state::AppState;
 #[cfg(feature = "rmcp-upgrade")]
 use tokio_util::sync::CancellationToken;
 
@@ -55,7 +55,7 @@ async fn spawn_http_server() -> (String, CancellationToken) {
     let state: Arc<AppState> = {
         let mut cfg = (*state.config).clone();
         cfg.http_port = port;
-        let new_state = agent_intercom::mcp::handler::AppState {
+        let new_state = agent_intercom::state::AppState {
             config: Arc::new(cfg),
             db: Arc::clone(&state.db),
             slack: None,

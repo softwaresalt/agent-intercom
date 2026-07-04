@@ -13,12 +13,13 @@ use slack_morphism::prelude::SlackChannelId;
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
 
-use crate::mcp::handler::{ApprovalResponse, IntercomServer};
+use crate::mcp::handler::IntercomServer;
 use crate::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
+use crate::state::ApprovalResponse;
 
 /// A curated code excerpt supplied by the agent for operator review.
 ///

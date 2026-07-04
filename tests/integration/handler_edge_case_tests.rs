@@ -6,9 +6,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use agent_intercom::mcp::handler::{
-    AppState, ApprovalResponse, PromptResponse, StallDetectors, WaitResponse,
-};
 use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
 use agent_intercom::models::progress::{ProgressItem, ProgressStatus};
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
@@ -16,6 +13,9 @@ use agent_intercom::orchestrator::stall_detector::StallDetector;
 use agent_intercom::persistence::approval_repo::ApprovalRepo;
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::state::{
+    AppState, ApprovalResponse, PromptResponse, StallDetectors, WaitResponse,
+};
 use tokio::sync::Mutex;
 
 use super::test_helpers::{

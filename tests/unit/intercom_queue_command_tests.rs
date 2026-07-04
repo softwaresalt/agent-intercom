@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::driver::mcp_driver::McpDriver;
-use agent_intercom::mcp::handler::AppState;
 use agent_intercom::mode::ServerMode;
 use agent_intercom::persistence::db;
 use agent_intercom::slack::commands::dispatch_command;
+use agent_intercom::state::AppState;
 use tokio::sync::Mutex;
 
 fn make_config(workspace_root: &str, user: &str) -> GlobalConfig {

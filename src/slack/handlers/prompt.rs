@@ -13,12 +13,12 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::models::prompt::PromptDecision;
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::handlers::check_session_ownership;
+use crate::state::AppState;
 
 /// Process a single prompt button action from Slack.
 ///

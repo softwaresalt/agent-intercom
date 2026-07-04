@@ -13,12 +13,13 @@ use slack_morphism::prelude::SlackChannelId;
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
 
-use crate::mcp::handler::{IntercomServer, PromptResponse};
+use crate::mcp::handler::IntercomServer;
 use crate::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
+use crate::state::PromptResponse;
 
 /// Input parameters for the `forward_prompt` tool per mcp-tools.json contract.
 #[derive(Debug, serde::Deserialize)]

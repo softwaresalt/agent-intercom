@@ -23,12 +23,12 @@ use uuid::Uuid;
 
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::driver::mcp_driver::McpDriver;
-use agent_intercom::mcp::handler::{AppState, PendingApprovals, PendingPrompts, PendingWaits};
 use agent_intercom::mode::ServerMode;
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
 use agent_intercom::slack::commands::dispatch_command;
+use agent_intercom::state::{AppState, PendingApprovals, PendingPrompts, PendingWaits};
 use tokio::sync::Mutex;
 
 use super::live_helpers::{LiveSlackClient, LiveTestConfig};

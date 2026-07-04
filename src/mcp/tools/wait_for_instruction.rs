@@ -14,10 +14,11 @@ use slack_morphism::prelude::SlackChannelId;
 use tokio::sync::oneshot;
 use tracing::{info, info_span, warn, Instrument};
 
-use crate::mcp::handler::{IntercomServer, WaitResponse};
+use crate::mcp::handler::IntercomServer;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
+use crate::state::WaitResponse;
 
 use super::util::truncate_text;
 

@@ -20,15 +20,15 @@ use agent_intercom::config_watcher::ConfigWatcher;
 use agent_intercom::driver::acp_driver::AcpDriver;
 use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::driver::AgentEvent;
-use agent_intercom::mcp::handler::{
-    AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
-};
 use agent_intercom::mcp::{sse, transport};
 use agent_intercom::mode::ServerMode;
 use agent_intercom::orchestrator::{child_monitor, stall_consumer};
 use agent_intercom::persistence::{db, retention};
 use agent_intercom::policy::watcher::PolicyWatcher;
 use agent_intercom::slack::client::{SlackRuntime, SlackService};
+use agent_intercom::state::{
+    AppState, PendingApprovals, PendingPrompts, PendingWaits, StallDetectors,
+};
 use agent_intercom::{AppError, Result};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]

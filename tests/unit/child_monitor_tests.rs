@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use agent_intercom::mcp::handler::ActiveChildren;
 use agent_intercom::orchestrator::child_monitor::{classify_exit, spawn_child_monitor, ExitClass};
 use agent_intercom::slack::client::SlackService;
+use agent_intercom::state::ActiveChildren;
 
 /// Run a throwaway process that exits with the given code and return its
 /// real `ExitStatus`. Cross-platform: `cmd /c exit N` on Windows, `sh -c` elsewhere.
