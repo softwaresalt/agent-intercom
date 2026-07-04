@@ -11,8 +11,26 @@ pub mod mcp_driver;
 use std::future::Future;
 use std::pin::Pin;
 
+use serde::Deserialize;
+
 use crate::models::progress::ProgressItem;
 use crate::Result;
+
+/// A single operator-selectable option offered by a standard ACP
+/// `session/request_permission` request (ADR-0016).
+///
+/// Carried on [`AgentEvent::PermissionRequested`] so the driver can echo the
+/// chosen `option_id` back in the JSON-RPC `result` outcome.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PermissionOption {
+    /// Stable identifier echoed back in the permission `outcome`.
+    #[serde(rename = "optionId")]
+    pub option_id: String,
+    /// Human-readable label for the option.
+    pub name: String,
+    /// Option semantics (`allow_once`, `allow_always`, `reject_once`, `reject_always`).
+    pub kind: String,
+}
 
 /// Events emitted by driver implementations into the shared event channel.
 #[derive(Debug, Clone)]
@@ -33,6 +51,27 @@ pub enum AgentEvent {
         file_path: String,
         /// Risk classification (`low`, `high`, `critical`).
         risk_level: String,
+    },
+    /// Agent issued a standard ACP `session/request_permission` (ADR-0016).
+    ///
+    /// The conformant permission flow: the operator's approve/reject decision
+    /// is echoed back as a JSON-RPC `result` carrying the selected option's
+    /// `outcome`, rather than a bespoke `clearance/response`.
+    PermissionRequested {
+        /// JSON-RPC request `id` to correlate the `result` reply.
+        request_id: String,
+        /// Session this request belongs to.
+        session_id: String,
+        /// Human-readable title derived from the tool call.
+        title: String,
+        /// Detailed description of the requested permission.
+        description: String,
+        /// Target file path (first tool-call location, if any).
+        file_path: String,
+        /// Risk classification (`low`, `high`, `critical`).
+        risk_level: String,
+        /// Operator-selectable options offered by the agent.
+        options: Vec<PermissionOption>,
     },
     /// Agent emitted a status or log message.
     StatusUpdated {

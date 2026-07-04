@@ -25,7 +25,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::driver::AgentDriver;
+use crate::driver::{AgentDriver, PermissionOption};
 use crate::{AppError, Result};
 
 // ── Internal state types ──────────────────────────────────────────────────────
@@ -40,6 +40,14 @@ struct PendingClearance {
 #[derive(Debug, Clone)]
 struct PendingPromptAcp {
     session_id: String,
+}
+
+/// Tracks a pending standard `session/request_permission` (ADR-0016) and the
+/// options offered so the operator decision can be echoed as an `optionId`.
+#[derive(Debug, Clone)]
+struct PendingPermission {
+    session_id: String,
+    options: Vec<PermissionOption>,
 }
 
 /// Shared map type alias for session writer channels.
@@ -82,6 +90,8 @@ pub struct AcpDriver {
     pending_clearances: Arc<Mutex<HashMap<String, PendingClearance>>>,
     /// Pending prompt-forward requests: `prompt_id` → owning session metadata.
     pending_prompts_acp: Arc<Mutex<HashMap<String, PendingPromptAcp>>>,
+    /// Pending standard permission requests: `request_id` → session + options.
+    pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
 }
 
 impl AcpDriver {
@@ -94,6 +104,7 @@ impl AcpDriver {
             seq_counters: Arc::new(Mutex::new(HashMap::new())),
             pending_clearances: Arc::new(Mutex::new(HashMap::new())),
             pending_prompts_acp: Arc::new(Mutex::new(HashMap::new())),
+            pending_permissions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -201,6 +212,31 @@ impl AcpDriver {
             prompt_id, "acp driver: prompt request registered"
         );
     }
+
+    /// Register a pending standard permission request for response routing.
+    ///
+    /// Called by the event consumer when [`AgentEvent::PermissionRequested`] is
+    /// received (ADR-0016), before posting the Slack approval message. Stores
+    /// the offered `options` so [`AgentDriver::resolve_clearance`] can echo the
+    /// selected `optionId` in the JSON-RPC `result` outcome.
+    pub async fn register_permission(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        options: Vec<PermissionOption>,
+    ) {
+        self.pending_permissions.lock().await.insert(
+            request_id.to_owned(),
+            PendingPermission {
+                session_id: session_id.to_owned(),
+                options,
+            },
+        );
+        debug!(
+            session_id,
+            request_id, "acp driver: permission request registered"
+        );
+    }
 }
 
 impl Default for AcpDriver {
@@ -231,27 +267,49 @@ impl AgentDriver for AcpDriver {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         let request_id = request_id.to_owned();
         Box::pin(async move {
-            let session_id = {
+            // Bespoke clearance path: reply with a `clearance/response` message.
+            let clearance_session = {
                 let mut pending = self.pending_clearances.lock().await;
                 pending.remove(&request_id).map(|e| e.session_id)
             };
+            if let Some(session_id) = clearance_session {
+                let msg = json!({
+                    "method": "clearance/response",
+                    "id": request_id,
+                    "params": {
+                        "status": if approved { "approved" } else { "rejected" },
+                        "reason": reason,
+                    }
+                });
+                return send_to_session(&self.stream_writers, &session_id, msg).await;
+            }
 
-            let Some(session_id) = session_id else {
-                return Err(AppError::NotFound(format!(
-                    "no pending ACP clearance for request_id '{request_id}'"
-                )));
+            // Standard ACP permission path (ADR-0016): reply with a JSON-RPC
+            // `result` carrying the selected option's `outcome`.
+            let permission = {
+                let mut pending = self.pending_permissions.lock().await;
+                pending.remove(&request_id)
             };
+            if let Some(PendingPermission {
+                session_id,
+                options,
+            }) = permission
+            {
+                let outcome = match select_option_id(&options, approved) {
+                    Some(option_id) => json!({ "outcome": "selected", "optionId": option_id }),
+                    None => json!({ "outcome": "cancelled" }),
+                };
+                let msg = json!({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": { "outcome": outcome },
+                });
+                return send_to_session(&self.stream_writers, &session_id, msg).await;
+            }
 
-            let msg = json!({
-                "method": "clearance/response",
-                "id": request_id,
-                "params": {
-                    "status": if approved { "approved" } else { "rejected" },
-                    "reason": reason,
-                }
-            });
-
-            send_to_session(&self.stream_writers, &session_id, msg).await
+            Err(AppError::NotFound(format!(
+                "no pending ACP clearance or permission for request_id '{request_id}'"
+            )))
         })
     }
 
@@ -441,6 +499,33 @@ impl AgentDriver for AcpDriver {
 }
 
 // ── Private helper ────────────────────────────────────────────────────────────
+
+/// Choose the `optionId` to echo in a permission `outcome`.
+///
+/// On approval, prefer an `allow_once` option, then `allow_always`, then the
+/// first offered option. On rejection, prefer `reject_once`, then
+/// `reject_always`, then the last offered option. Returns `None` when no
+/// options are offered, signalling a `cancelled` outcome.
+fn select_option_id(options: &[PermissionOption], approved: bool) -> Option<String> {
+    if options.is_empty() {
+        return None;
+    }
+    let preferred: [&str; 2] = if approved {
+        ["allow_once", "allow_always"]
+    } else {
+        ["reject_once", "reject_always"]
+    };
+    for kind in preferred {
+        if let Some(opt) = options.iter().find(|o| o.kind == kind) {
+            return Some(opt.option_id.clone());
+        }
+    }
+    if approved {
+        options.first().map(|o| o.option_id.clone())
+    } else {
+        options.last().map(|o| o.option_id.clone())
+    }
+}
 
 /// Look up the writer for `session_id` and send `msg` through it.
 ///
