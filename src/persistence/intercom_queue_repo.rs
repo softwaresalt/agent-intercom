@@ -1,13 +1,31 @@
 //! File-backed persistence for the `.intercom` numbered queue.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::models::intercom_queue::QueueItem;
 use crate::{AppError, Result};
+
+/// Per-queue-file locks that serialize read-modify-write operations on the same
+/// `.intercom` queue file within the process (PR #18 review P1). This guards
+/// against concurrent `/arc queue` handlers racing on the load-modify-save
+/// sequence and losing updates. Scope is in-process; a single server owns a
+/// workspace's `.intercom` queue, so cross-process locking is not required.
+static QUEUE_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+
+/// Return the shared lock guarding writes to `path`, creating it on first use.
+fn queue_lock(path: &Path) -> Arc<Mutex<()>> {
+    let registry = QUEUE_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = registry.lock().unwrap_or_else(PoisonError::into_inner);
+    map.entry(path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct QueueStore {
@@ -55,6 +73,9 @@ impl IntercomQueueRepo {
     ///
     /// Returns an error when queue state cannot be loaded or saved.
     pub fn add(&self, text: &str) -> Result<QueueItem> {
+        let lock = queue_lock(&self.queue_file);
+        let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+
         let mut store = self.load()?;
         let item = QueueItem {
             number: store.next_number,
@@ -76,6 +97,9 @@ impl IntercomQueueRepo {
     ///
     /// Returns an error when queue state cannot be loaded.
     pub fn list(&self) -> Result<Vec<QueueItem>> {
+        let lock = queue_lock(&self.queue_file);
+        let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+
         Ok(self.load()?.items)
     }
 
@@ -86,6 +110,9 @@ impl IntercomQueueRepo {
     /// Returns `AppError::NotFound` when the item does not exist, or an error
     /// when queue state cannot be loaded or saved.
     pub fn replace(&self, n: u32, text: &str) -> Result<QueueItem> {
+        let lock = queue_lock(&self.queue_file);
+        let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+
         let mut store = self.load()?;
         let item = store
             .items
@@ -105,6 +132,9 @@ impl IntercomQueueRepo {
     /// Returns `AppError::NotFound` when the item does not exist, or an error
     /// when queue state cannot be loaded or saved.
     pub fn remove(&self, n: u32) -> Result<QueueItem> {
+        let lock = queue_lock(&self.queue_file);
+        let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+
         let mut store = self.load()?;
         let index = store
             .items

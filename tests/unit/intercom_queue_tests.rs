@@ -104,3 +104,40 @@ fn remove_nonexistent_returns_error() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn concurrent_adds_preserve_all_items() {
+    // Concurrent-write safety (PR #18 review P1): many threads adding at once
+    // must not lose updates to the read-modify-write race, and every item must
+    // receive a unique number.
+    let (_temp_dir, repo) = build_repo();
+    let count = 64u32;
+
+    let handles: Vec<_> = (0..count)
+        .map(|i| {
+            let repo = repo.clone();
+            std::thread::spawn(move || {
+                repo.add(&format!("item {i}")).expect("concurrent add");
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().expect("thread join");
+    }
+
+    let items = repo.list().expect("list items");
+    assert_eq!(
+        items.len(),
+        count as usize,
+        "all concurrent adds must be preserved"
+    );
+
+    let mut numbers: Vec<u32> = items.iter().map(|item| item.number).collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    assert_eq!(
+        numbers.len(),
+        count as usize,
+        "every queue item must have a unique number"
+    );
+}
