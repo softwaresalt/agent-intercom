@@ -63,6 +63,8 @@ via the `AcpDriver`/`writer.rs` stream.
   `parse_thread_decision`, `message_is_in_thread`) becomes the **primary** operator
   path (no longer a fallback), delivering results via
   `AcpDriver::resolve_clearance/resolve_prompt/resolve_wait` over the stream.
+- **(D3) Drop `set_operational_mode`** — ACP mode is remote-by-design in this
+  scenario, so an agent-initiated routing-mode switch is unnecessary. Not re-homed.
 
 The three operator-decision tools (approval, forward-prompt, standby) therefore
 converge onto **one text-reply mechanism**: relay request → operator text reply in
