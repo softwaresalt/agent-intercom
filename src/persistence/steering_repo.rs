@@ -25,6 +25,7 @@ struct SteeringRow {
     source: String,
     created_at: String,
     consumed: i64,
+    origin_session_id: Option<String>,
 }
 
 impl SteeringRow {
@@ -42,6 +43,7 @@ impl SteeringRow {
             source,
             created_at,
             consumed: self.consumed != 0,
+            origin_session_id: self.origin_session_id,
         })
     }
 }
@@ -78,8 +80,8 @@ impl SteeringRepo {
         let created_at = msg.created_at.to_rfc3339();
 
         sqlx::query(
-            "INSERT INTO steering_message (id, session_id, channel_id, message, source, created_at, consumed)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO steering_message (id, session_id, channel_id, message, source, created_at, consumed, origin_session_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )
         .bind(&msg.id)
         .bind(&msg.session_id)
@@ -88,6 +90,7 @@ impl SteeringRepo {
         .bind(source)
         .bind(&created_at)
         .bind(i64::from(msg.consumed))
+        .bind(&msg.origin_session_id)
         .execute(self.db.as_ref())
         .await?;
 
@@ -103,16 +106,50 @@ impl SteeringRepo {
     /// Returns `AppError::Db` if the query fails.
     pub async fn fetch_unconsumed(&self, session_id: &str) -> Result<Vec<SteeringMessage>> {
         let rows: Vec<SteeringRow> = sqlx::query_as(
-            "SELECT id, session_id, channel_id, message, source, created_at, consumed
+            "SELECT id, session_id, channel_id, message, source, created_at, consumed, origin_session_id
              FROM steering_message
              WHERE session_id = ?1 AND consumed = 0
-             ORDER BY created_at ASC",
+             ORDER BY created_at ASC, rowid ASC",
         )
         .bind(session_id)
         .fetch_all(self.db.as_ref())
         .await?;
 
         rows.into_iter().map(SteeringRow::into_steering).collect()
+    }
+
+    /// Rebind a crashed session's *unconsumed* steering messages to a resumed
+    /// session so the pending queue survives a respawn (F.3-T2).
+    ///
+    /// Moves every unconsumed message from `from_session_id` to
+    /// `to_session_id`, recording the original owning session in
+    /// `origin_session_id` the first time a message is reassigned. Already
+    /// consumed messages are left untouched. Returns the number of messages
+    /// carried forward.
+    ///
+    /// This is the durable persistence primitive that the resume-state
+    /// contract (F.3-T4) wires into the respawn path.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn reassign_unconsumed_to_session(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE steering_message
+             SET session_id = ?1,
+                 origin_session_id = COALESCE(origin_session_id, ?2)
+             WHERE session_id = ?2 AND consumed = 0",
+        )
+        .bind(to_session_id)
+        .bind(from_session_id)
+        .execute(self.db.as_ref())
+        .await?;
+
+        Ok(result.rows_affected())
     }
 
     /// Mark a steering message as consumed (delivered via `ping`).

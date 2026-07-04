@@ -114,3 +114,37 @@ async fn approval_request_table_has_expected_columns() {
         "approval_request table columns should match schema.sql.md"
     );
 }
+
+/// F.3-T2: verify `steering_message` includes the additive `origin_session_id`
+/// column used to rebind a crashed session's pending queue to its resumed session.
+#[tokio::test]
+async fn steering_message_table_has_origin_session_id_column() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("steer-cols.db");
+    let pool = db::connect(db_path.to_str().expect("utf8"))
+        .await
+        .expect("connect");
+
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('steering_message') ORDER BY cid")
+            .fetch_all(&pool)
+            .await
+            .expect("pragma_table_info");
+
+    let column_names: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    let expected = [
+        "id",
+        "session_id",
+        "channel_id",
+        "message",
+        "source",
+        "created_at",
+        "consumed",
+        "origin_session_id",
+    ];
+
+    assert_eq!(
+        column_names, expected,
+        "steering_message table should include additive origin_session_id column"
+    );
+}

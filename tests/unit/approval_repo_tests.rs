@@ -151,3 +151,84 @@ async fn mark_consumed_on_pending_returns_error() {
     let result = repo.mark_consumed(&id).await;
     assert!(result.is_err());
 }
+
+// ─── F.3-T3: pending-clearance persistence + resume rebind ───────────
+
+/// Reassigning carries only the *pending* clearances of a crashed session to
+/// the resumed session, preserving the ACP correlation id (the request id).
+#[tokio::test]
+async fn reassign_pending_carries_clearance_to_resumed_session() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = ApprovalRepo::new(Arc::new(db));
+
+    // One pending clearance and one already-decided clearance for the crashed session.
+    let pending = sample_request("sess-crashed");
+    let pending_id = pending.id.clone();
+    repo.create(&pending).await.expect("create pending");
+
+    let decided = sample_request("sess-crashed");
+    let decided_id = decided.id.clone();
+    repo.create(&decided).await.expect("create decided");
+    repo.update_status(&decided_id, ApprovalStatus::Approved)
+        .await
+        .expect("approve");
+
+    let moved = repo
+        .reassign_pending_to_session("sess-crashed", "sess-resumed")
+        .await
+        .expect("reassign");
+    assert_eq!(moved, 1, "only the pending clearance moves");
+
+    // The crashed session no longer has a pending clearance.
+    assert!(repo
+        .get_pending_for_session("sess-crashed")
+        .await
+        .expect("fetch crashed")
+        .is_none());
+
+    // The resumed session inherits the pending clearance with the same
+    // correlation id (request id) restored.
+    let resumed = repo
+        .get_pending_for_session("sess-resumed")
+        .await
+        .expect("fetch resumed")
+        .expect("pending present");
+    assert_eq!(resumed.id, pending_id, "correlation id must be preserved");
+    assert_eq!(resumed.status, ApprovalStatus::Pending);
+
+    // The decided clearance stays with the crashed session.
+    let decided_after = repo
+        .get_by_id(&decided_id)
+        .await
+        .expect("fetch decided")
+        .expect("present");
+    assert_eq!(decided_after.session_id, "sess-crashed");
+}
+
+/// A pending clearance survives a full DB restart (close pool, reopen the same
+/// file-backed database) with its correlation id and status intact.
+#[tokio::test]
+async fn pending_clearance_survives_db_restart() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("approval-restart.db");
+    let path_str = path.to_str().expect("utf8");
+
+    let saved_id = {
+        let db = db::connect(path_str).await.expect("connect");
+        let repo = ApprovalRepo::new(Arc::new(db));
+        let req = sample_request("sess-restart");
+        let id = req.id.clone();
+        repo.create(&req).await.expect("create");
+        id
+    }; // pool dropped == server shutdown
+
+    let db2 = db::connect(path_str).await.expect("reconnect");
+    let repo2 = ApprovalRepo::new(Arc::new(db2));
+    let restored = repo2
+        .get_pending_for_session("sess-restart")
+        .await
+        .expect("fetch after restart")
+        .expect("pending present after restart");
+    assert_eq!(restored.id, saved_id);
+    assert_eq!(restored.status, ApprovalStatus::Pending);
+}

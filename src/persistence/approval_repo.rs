@@ -296,4 +296,36 @@ impl ApprovalRepo {
 
         rows.into_iter().map(ApprovalRow::into_approval).collect()
     }
+
+    /// Rebind a crashed session's *pending* clearances to a resumed session so
+    /// mid-task approval state survives a respawn (F.3-T3).
+    ///
+    /// Moves every `pending` approval request from `from_session_id` to
+    /// `to_session_id`, preserving each request's id (the ACP correlation id)
+    /// so the resumed agent can match a decision to its original clearance.
+    /// Already decided requests are left untouched. Returns the number of
+    /// clearances carried forward.
+    ///
+    /// This is the durable persistence primitive that the resume-state
+    /// contract (F.3-T4) wires into the respawn path.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Db` if the update fails.
+    pub async fn reassign_pending_to_session(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE approval_request SET session_id = ?1
+             WHERE session_id = ?2 AND status = 'pending'",
+        )
+        .bind(to_session_id)
+        .bind(from_session_id)
+        .execute(self.db.as_ref())
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }

@@ -35,6 +35,10 @@ pub struct SteeringMessage {
     pub created_at: DateTime<Utc>,
     /// Whether this message has been delivered via `ping`.
     pub consumed: bool,
+    /// Session this message was *originally* queued for, set when the message
+    /// is carried forward to a resumed session after a crash. `None` for
+    /// messages that have never been reassigned.
+    pub origin_session_id: Option<String>,
 }
 
 impl SteeringMessage {
@@ -54,6 +58,7 @@ impl SteeringMessage {
             source,
             created_at: Utc::now(),
             consumed: false,
+            origin_session_id: None,
         }
     }
 }

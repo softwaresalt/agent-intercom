@@ -160,3 +160,84 @@ async fn all_prompt_types_round_trip() {
         assert_eq!(fetched.prompt_type, *pt);
     }
 }
+
+// ─── F.3-T3: pending-prompt persistence + resume rebind ──────────────
+
+/// Reassigning carries only the *undecided* prompts of a crashed session to
+/// the resumed session, preserving the ACP correlation id (the prompt id).
+#[tokio::test]
+async fn reassign_pending_carries_prompt_to_resumed_session() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = PromptRepo::new(Arc::new(db));
+
+    // One pending (undecided) prompt and one decided prompt for the crashed session.
+    let pending = sample_prompt("sess-crashed");
+    let pending_id = pending.id.clone();
+    repo.create(&pending).await.expect("create pending");
+
+    let decided = sample_prompt("sess-crashed");
+    let decided_id = decided.id.clone();
+    repo.create(&decided).await.expect("create decided");
+    repo.update_decision(&decided_id, PromptDecision::Continue, None)
+        .await
+        .expect("decide");
+
+    let moved = repo
+        .reassign_pending_to_session("sess-crashed", "sess-resumed")
+        .await
+        .expect("reassign");
+    assert_eq!(moved, 1, "only the undecided prompt moves");
+
+    // The crashed session no longer has a pending prompt.
+    assert!(repo
+        .get_pending_for_session("sess-crashed")
+        .await
+        .expect("fetch crashed")
+        .is_none());
+
+    // The resumed session inherits the pending prompt with the same
+    // correlation id (prompt id) restored.
+    let resumed = repo
+        .get_pending_for_session("sess-resumed")
+        .await
+        .expect("fetch resumed")
+        .expect("pending present");
+    assert_eq!(resumed.id, pending_id, "correlation id must be preserved");
+    assert!(resumed.decision.is_none());
+
+    // The decided prompt stays with the crashed session.
+    let decided_after = repo
+        .get_by_id(&decided_id)
+        .await
+        .expect("fetch decided")
+        .expect("present");
+    assert_eq!(decided_after.session_id, "sess-crashed");
+}
+
+/// A pending prompt survives a full DB restart (close pool, reopen the same
+/// file-backed database) with its correlation id and undecided state intact.
+#[tokio::test]
+async fn pending_prompt_survives_db_restart() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("prompt-restart.db");
+    let path_str = path.to_str().expect("utf8");
+
+    let saved_id = {
+        let db = db::connect(path_str).await.expect("connect");
+        let repo = PromptRepo::new(Arc::new(db));
+        let prompt = sample_prompt("sess-restart");
+        let id = prompt.id.clone();
+        repo.create(&prompt).await.expect("create");
+        id
+    }; // pool dropped == server shutdown
+
+    let db2 = db::connect(path_str).await.expect("reconnect");
+    let repo2 = PromptRepo::new(Arc::new(db2));
+    let restored = repo2
+        .get_pending_for_session("sess-restart")
+        .await
+        .expect("fetch after restart")
+        .expect("pending present after restart");
+    assert_eq!(restored.id, saved_id);
+    assert!(restored.decision.is_none());
+}
