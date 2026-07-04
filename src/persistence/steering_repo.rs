@@ -109,7 +109,7 @@ impl SteeringRepo {
             "SELECT id, session_id, channel_id, message, source, created_at, consumed, origin_session_id
              FROM steering_message
              WHERE session_id = ?1 AND consumed = 0
-             ORDER BY created_at ASC",
+             ORDER BY created_at ASC, rowid ASC",
         )
         .bind(session_id)
         .fetch_all(self.db.as_ref())

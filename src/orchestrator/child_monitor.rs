@@ -219,10 +219,36 @@ async fn attempt_respawn(
                 session_id,
                 "crashed session not found in db; cannot respawn"
             );
+            notify(
+                slack,
+                channel,
+                format!(
+                    "\u{26a0}\u{fe0f} Agent session `{session_id}` crashed but its record could \
+                     not be found; it cannot be automatically recovered."
+                ),
+            )
+            .await;
             return;
         }
         Err(err) => {
             warn!(%err, session_id, "failed to load crashed session for respawn");
+            // Best-effort: mark interrupted so the session is not left shown as
+            // Active with no live child process.
+            if let Err(e) = session_repo
+                .set_terminated(session_id, SessionStatus::Interrupted)
+                .await
+            {
+                warn!(%e, session_id, "failed to mark session interrupted after load error");
+            }
+            notify(
+                slack,
+                channel,
+                format!(
+                    "\u{26a0}\u{fe0f} Agent session `{session_id}` crashed and could not be loaded \
+                     for recovery: {err}. Marked interrupted."
+                ),
+            )
+            .await;
             return;
         }
     };

@@ -188,6 +188,27 @@ async fn insert_defaults_origin_session_id_to_none() {
     assert_eq!(fetched[0].origin_session_id, None);
 }
 
+/// When two messages share the same `created_at`, insertion order (rowid) is a
+/// stable tiebreaker so FIFO delivery order is deterministic.
+#[tokio::test]
+async fn fetch_unconsumed_orders_deterministically_for_equal_timestamps() {
+    let db = db::connect_memory().await.expect("db");
+    let repo = SteeringRepo::new(Arc::new(db));
+
+    let ts = chrono::Utc::now();
+    let mut first = sample_msg("sess-tie", None, "first");
+    let mut second = sample_msg("sess-tie", None, "second");
+    first.created_at = ts;
+    second.created_at = ts;
+    repo.insert(&first).await.expect("insert first");
+    repo.insert(&second).await.expect("insert second");
+
+    let msgs = repo.fetch_unconsumed("sess-tie").await.expect("fetch");
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0].message, "first");
+    assert_eq!(msgs[1].message, "second");
+}
+
 /// Reassigning carries only the *unconsumed* messages of a crashed session to
 /// the resumed session, preserving FIFO order and recording the crashed
 /// session id as the durable origin.
