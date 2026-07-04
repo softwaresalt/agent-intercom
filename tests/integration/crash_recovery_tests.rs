@@ -628,4 +628,12 @@ async fn respawn_spawn_failure_leaves_pending_state_on_crashed_session() {
         .await
         .expect("fetch prompt")
         .is_some());
+
+    // The resumed session row was cleaned up (not left leaking as Created/Active),
+    // so a failed spawn leaves no active session behind.
+    assert!(session_repo
+        .list_active()
+        .await
+        .expect("list active")
+        .is_empty());
 }

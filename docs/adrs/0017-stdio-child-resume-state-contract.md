@@ -26,8 +26,8 @@ the resumed agent starts blank, losing mid-task context.
 ## Decision
 
 On respawn, `orchestrator::spawner::respawn_session` re-binds the crashed
-session's durable pending state to the resumed session before the replacement
-process is activated. The contract is:
+session's durable pending state to the resumed session once the replacement
+process has spawned and the resumed session is activated. The contract is:
 
 1. **Session identity.** The resumed session is a new record with a new `id`.
    It carries forward `owner_user_id`, `workspace_root`, `prompt`, `mode`,

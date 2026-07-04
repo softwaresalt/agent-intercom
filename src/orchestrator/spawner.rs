@@ -198,9 +198,24 @@ pub async fn respawn_session(
     let prompt = created.prompt.clone().unwrap_or_default();
     let mut cmd = build_agent_command(config, &workspace_path, &mcp_url, &created.id, &prompt);
 
-    let child = cmd
-        .spawn()
-        .map_err(|err| AppError::Mcp(format!("failed to respawn host cli: {err}")))?;
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            // Clean up the resumed session row so a failed spawn does not leak a
+            // `Created` session that lingers and can count toward capacity.
+            if let Err(cleanup) = session_repo
+                .set_terminated(&created.id, SessionStatus::Terminated)
+                .await
+            {
+                warn!(
+                    %cleanup,
+                    resumed_session = %created.id,
+                    "failed to clean up resumed session after spawn failure"
+                );
+            }
+            return Err(AppError::Mcp(format!("failed to respawn host cli: {err}")));
+        }
+    };
 
     info!(
         crashed_session = crashed.id,
