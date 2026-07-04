@@ -486,20 +486,11 @@ fn execute_queue_command(
             // The backlogit stash add already succeeded above. If removing the item
             // from the local queue then fails, report success-with-warning rather
             // than an error so an operator retry does not create a duplicate stash.
-            match repo.remove(number) {
-                Ok(removed) if backlogit_output.is_empty() => Ok(format!(
-                    "Transferred queue item {} to backlogit.",
-                    removed.number
-                )),
-                Ok(removed) => Ok(format!(
-                    "Transferred queue item {} to backlogit.\n{}",
-                    removed.number, backlogit_output
-                )),
-                Err(err) => Ok(format!(
-                    "Transferred queue item {number} to backlogit, but failed to remove it \
-                     from the queue: {err}. Remove it manually to avoid a duplicate on retry."
-                )),
-            }
+            let removed = repo
+                .remove(number)
+                .map(|removed| removed.number)
+                .map_err(|err| err.to_string());
+            Ok(format_transfer_response(number, &backlogit_output, removed))
         }
         Some(other) => Ok(format!(
             "Unknown queue subcommand: `{other}`.
@@ -513,6 +504,33 @@ fn parse_queue_number(arg: Option<&str>, usage: &str) -> crate::Result<u32> {
     let raw = arg.ok_or_else(|| crate::AppError::Config(usage.to_owned()))?;
     raw.parse::<u32>()
         .map_err(|err| crate::AppError::Config(format!("parse number: {err}")))
+}
+
+/// Build the operator-facing response for a `queue transfer` after the backlogit
+/// stash add has already succeeded.
+///
+/// `removed` carries the removed item number on success, or the removal error
+/// text on failure. When removal fails the operator is warned that the stash
+/// entry already exists and that re-running the transfer would duplicate it
+/// (PR #18 review P1/P2 follow-up).
+fn format_transfer_response(
+    number: u32,
+    backlogit_output: &str,
+    removed: std::result::Result<u32, String>,
+) -> String {
+    match removed {
+        Ok(removed_number) if backlogit_output.is_empty() => {
+            format!("Transferred queue item {removed_number} to backlogit.")
+        }
+        Ok(removed_number) => {
+            format!("Transferred queue item {removed_number} to backlogit.\n{backlogit_output}")
+        }
+        Err(err) => format!(
+            "Transferred queue item {number} to backlogit (stash entry created), but removing \
+             it from the local queue failed: {err}. Do not re-run transfer for item {number} \
+             or the stash entry will be duplicated; remove it from the queue manually."
+        ),
+    }
 }
 
 fn transfer_to_backlogit(text: &str, workspace_root: Option<&Path>) -> crate::Result<String> {
@@ -1812,5 +1830,42 @@ fn ephemeral_response(text: &str) -> SlackCommandEventResponse {
             metadata: None,
         },
         response_type: Some(SlackMessageResponseType::Ephemeral),
+    }
+}
+
+#[cfg(test)]
+mod transfer_response_tests {
+    use super::format_transfer_response;
+
+    #[test]
+    fn success_without_backlogit_output() {
+        let msg = format_transfer_response(3, "", Ok(3));
+        assert_eq!(msg, "Transferred queue item 3 to backlogit.");
+    }
+
+    #[test]
+    fn success_appends_backlogit_output() {
+        let msg = format_transfer_response(3, "stashed as A1B2C3D4", Ok(3));
+        assert_eq!(
+            msg,
+            "Transferred queue item 3 to backlogit.\nstashed as A1B2C3D4"
+        );
+    }
+
+    #[test]
+    fn removal_failure_warns_about_duplicate() {
+        let msg = format_transfer_response(7, "stashed", Err("disk full".to_owned()));
+        assert!(
+            msg.contains("stash entry created"),
+            "should confirm the stash side effect: {msg}"
+        );
+        assert!(
+            msg.contains("disk full"),
+            "should surface the removal error: {msg}"
+        );
+        assert!(
+            msg.contains("Do not re-run transfer for item 7"),
+            "should warn against a duplicating retry: {msg}"
+        );
     }
 }

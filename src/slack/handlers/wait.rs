@@ -18,6 +18,50 @@ use crate::slack::blocks;
 use crate::slack::handlers::check_session_ownership;
 use crate::state::AppState;
 
+/// Route a `wait_resume_instruct` press takes after inspecting the triggering
+/// message's thread context (F-16/F-17).
+///
+/// Slack silently suppresses `views.open` when the triggering message lives
+/// inside a thread, so the handler must proactively detect thread context and
+/// pick the thread-reply fallback instead of opening a doomed modal.
+#[derive(Debug, PartialEq, Eq)]
+enum WaitInstructRoute {
+    /// Message is not in a thread — open the instruction modal normally.
+    OpenModal,
+    /// Message is in a thread — skip `views.open` and activate the thread-reply
+    /// fallback rooted at these coordinates.
+    ThreadFallback {
+        channel_id: String,
+        thread_ts: String,
+    },
+    /// Message is in a thread but the channel coordinate is missing, so the
+    /// fallback cannot be rooted.
+    ThreadContextIncomplete,
+}
+
+/// Decide the `wait_resume_instruct` route from the trigger message coordinates.
+///
+/// * `thread_ts` — `message.origin.thread_ts`; present only inside a thread and
+///   therefore the sole thread-detection signal (matches [`message_is_in_thread`]).
+/// * `channel_id` — the channel the button message lives in.
+///
+/// [`message_is_in_thread`]: crate::slack::handlers::thread_reply::message_is_in_thread
+fn resolve_wait_instruct_route(
+    thread_ts: Option<&str>,
+    channel_id: Option<&str>,
+) -> WaitInstructRoute {
+    if !crate::slack::handlers::thread_reply::message_is_in_thread(thread_ts) {
+        return WaitInstructRoute::OpenModal;
+    }
+    match (thread_ts, channel_id) {
+        (Some(thread_root), Some(channel)) => WaitInstructRoute::ThreadFallback {
+            channel_id: channel.to_owned(),
+            thread_ts: thread_root.to_owned(),
+        },
+        _ => WaitInstructRoute::ThreadContextIncomplete,
+    }
+}
+
 /// Process a single wait button action from Slack.
 ///
 /// # Arguments
@@ -97,24 +141,17 @@ pub async fn handle_wait_action(
             let thread_ts_str: Option<&str> = message
                 .and_then(|m| m.origin.thread_ts.as_ref())
                 .map(|ts| ts.0.as_str());
-            if crate::slack::handlers::thread_reply::message_is_in_thread(thread_ts_str) {
-                // This branch only runs in thread context (origin.thread_ts is
-                // Some), so thread_ts is guaranteed present here. We still mirror
-                // prompt.rs's defensive origin.ts fallback so the two paths stay
-                // structurally identical; it is a no-op in this proactive path.
-                let thread_ts_opt = message.map(|m| {
-                    m.origin
-                        .thread_ts
-                        .as_ref()
-                        .map_or_else(|| m.origin.ts.0.clone(), |ts| ts.0.clone())
-                });
-                let chan_id_opt = channel.map(|c| c.id.to_string());
-                if let (Some(thread_ts), Some(chan_id)) = (thread_ts_opt, chan_id_opt) {
+            let chan_id_str: Option<String> = channel.map(|c| c.id.to_string());
+            match resolve_wait_instruct_route(thread_ts_str, chan_id_str.as_deref()) {
+                WaitInstructRoute::ThreadFallback {
+                    channel_id,
+                    thread_ts,
+                } => {
                     let button_msg_ts = message.map(|m| m.origin.ts.clone());
                     let state_clone = Arc::clone(state);
                     let session_id_owned = session_id.to_owned();
                     crate::slack::handlers::thread_reply::activate_thread_reply_fallback(
-                        chan_id.as_str(),
+                        channel_id.as_str(),
                         thread_ts.as_str(),
                         session_id.to_owned(),
                         user_id.to_owned(),
@@ -140,7 +177,10 @@ pub async fn handle_wait_action(
                     .await?;
                     return Ok(());
                 }
-                return Err("thread context: missing channel for wait fallback".to_owned());
+                WaitInstructRoute::ThreadContextIncomplete => {
+                    return Err("thread context: missing channel for wait fallback".to_owned());
+                }
+                WaitInstructRoute::OpenModal => {}
             }
 
             // Cache the original message coordinates so the ViewSubmission
@@ -255,4 +295,46 @@ pub async fn handle_wait_action(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::{resolve_wait_instruct_route, WaitInstructRoute};
+
+    #[test]
+    fn non_threaded_message_opens_modal() {
+        assert_eq!(
+            resolve_wait_instruct_route(None, Some("C123")),
+            WaitInstructRoute::OpenModal
+        );
+    }
+
+    #[test]
+    fn non_threaded_short_circuits_before_channel_check() {
+        // thread_ts is None (not in a thread), so a missing channel must not
+        // matter — the modal path is chosen regardless.
+        assert_eq!(
+            resolve_wait_instruct_route(None, None),
+            WaitInstructRoute::OpenModal
+        );
+    }
+
+    #[test]
+    fn threaded_message_with_channel_uses_fallback() {
+        assert_eq!(
+            resolve_wait_instruct_route(Some("1620000000.000100"), Some("C123")),
+            WaitInstructRoute::ThreadFallback {
+                channel_id: "C123".to_owned(),
+                thread_ts: "1620000000.000100".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn threaded_message_without_channel_is_incomplete() {
+        assert_eq!(
+            resolve_wait_instruct_route(Some("1620000000.000100"), None),
+            WaitInstructRoute::ThreadContextIncomplete
+        );
+    }
 }
