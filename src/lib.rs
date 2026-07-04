@@ -21,6 +21,7 @@ pub mod orchestrator;
 pub mod persistence;
 pub mod policy;
 pub mod slack;
+pub mod state;
 
 pub use config::GlobalConfig;
 pub use errors::{AppError, Result};

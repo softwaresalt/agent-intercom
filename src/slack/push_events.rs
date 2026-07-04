@@ -13,8 +13,8 @@ use slack_morphism::prelude::{
 };
 use tracing::{debug, info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::slack::{client::SlackMessage, handlers};
+use crate::state::AppState;
 
 /// Handle push events (app mentions, channel messages) from Socket Mode.
 ///

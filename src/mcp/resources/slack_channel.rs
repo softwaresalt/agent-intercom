@@ -12,7 +12,7 @@ use rmcp::model::{
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::mcp::handler::AppState;
+use crate::state::AppState;
 use crate::{AppError, Result};
 
 /// Default number of messages returned when limit is not specified.

@@ -34,10 +34,11 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use super::handler::{AppState, IntercomServer};
+use super::handler::IntercomServer;
 use crate::mode::ServerMode;
 use crate::models::session::SessionStatus;
 use crate::persistence::session_repo::SessionRepo;
+use crate::state::AppState;
 use crate::{AppError, Result};
 
 /// Handler for `GET /health` — returns 200 OK with a plain-text body.

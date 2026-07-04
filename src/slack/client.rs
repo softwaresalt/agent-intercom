@@ -20,10 +20,10 @@ use slack_morphism::prelude::{
 use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::{error, info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::models::session::SessionMode;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::{commands, events, push_events};
+use crate::state::AppState;
 use crate::{config::SlackConfig, AppError, Result};
 
 const QUEUE_CAPACITY: usize = 256;

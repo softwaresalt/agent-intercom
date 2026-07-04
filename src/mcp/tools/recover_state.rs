@@ -9,13 +9,14 @@ use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::CallToolResult;
 use tracing::{info, info_span, Instrument};
 
-use crate::mcp::handler::{AppState, IntercomServer};
+use crate::mcp::handler::IntercomServer;
 use crate::models::session::Session;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::checkpoint_repo::CheckpointRepo;
 use crate::persistence::inbox_repo::InboxRepo;
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::persistence::session_repo::SessionRepo;
+use crate::state::AppState;
 
 /// Input parameters per mcp-tools.json contract.
 #[derive(Debug, serde::Deserialize)]

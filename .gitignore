@@ -22,15 +22,25 @@ Thumbs.db
 # VS Code MCP config — contains personal channel IDs and API keys, never committed
 .vscode/mcp.json
 
-# Logs, temp files, environment
+# Local environment files (secrets) — never commit. Only .env.example may be tracked.
+.env
+.env.local
+.env.*.local
+.env.*
+*.env
+.copilot/
+.mcp.json
+
+# Logs and temp files
 *.log
 *.tmp
 *.swp
 *.txt
 logs/
 temp/
+tmp/
+*.txt
 %SystemDrive%/*
-.copilot/*
 
 # Development debug scripts — contain env-specific config, never committed
 run-debug-*.ps1
@@ -65,10 +75,11 @@ tests/visual/.env
 *.db-journal
 
 # Engram runtime data (keep templates/, registry.yaml, .version)
-.engram/code-graph/
-.engram/db/
-.engram/run/
-.engram/logs/
+.engram/
+!.engram/.version
+!.engram/.workspace-id
+!.engram/config.toml
+!.engram/registry.yaml
 
 # Autoharness runtime artifacts (keep config.yaml and workspace-profile.yaml)
 .autoharness/*.lock
@@ -87,3 +98,6 @@ docs/closure/browser-automation/
 # are already ignored above. stash.jsonl is intentionally kept tracked while it
 # holds durable deferred-work entries.
 .backlogit/hooks_queue.jsonl
+
+# graphtor-docs — managed by graphtor-docs install
+.graphtor/

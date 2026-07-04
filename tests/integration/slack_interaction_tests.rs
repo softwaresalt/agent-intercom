@@ -22,10 +22,6 @@ use slack_morphism::prelude::{
 use tokio::sync::{oneshot, Mutex};
 
 use agent_intercom::driver::mcp_driver::McpDriver;
-use agent_intercom::mcp::handler::{
-    AppState, ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
-    WaitResponse,
-};
 use agent_intercom::mode::ServerMode;
 use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
 use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
@@ -37,6 +33,10 @@ use agent_intercom::persistence::prompt_repo::PromptRepo;
 use agent_intercom::persistence::session_repo::SessionRepo;
 use agent_intercom::persistence::stall_repo::StallAlertRepo;
 use agent_intercom::slack::handlers;
+use agent_intercom::state::{
+    AppState, ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
+    WaitResponse,
+};
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 

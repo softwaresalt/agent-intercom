@@ -29,12 +29,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, info_span, warn, Instrument};
 
-use crate::mcp::handler::{AppState, ApprovalResponse, WaitResponse};
 use crate::models::session::SessionMode;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::handlers::steer as steer_handler;
 use crate::slack::handlers::task as task_handler;
+use crate::state::{AppState, ApprovalResponse, WaitResponse};
 use crate::{AppError, Result};
 
 /// Inbound IPC request from `agent-intercom-ctl`.

@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::driver::mcp_driver::McpDriver;
-use agent_intercom::mcp::handler::{AppState, IntercomServer};
+use agent_intercom::mcp::handler::IntercomServer;
 use agent_intercom::mode::ServerMode;
 use agent_intercom::models::session::{Session, SessionMode, SessionStatus};
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::state::AppState;
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 

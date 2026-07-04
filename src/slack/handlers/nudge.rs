@@ -12,11 +12,11 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::models::stall::StallAlertStatus;
 use crate::persistence::session_repo::SessionRepo;
 use crate::persistence::stall_repo::StallAlertRepo;
 use crate::slack::blocks;
+use crate::state::AppState;
 
 /// Process a single stall-alert button action from Slack.
 ///

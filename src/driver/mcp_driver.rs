@@ -3,7 +3,7 @@
 //! Bridges operator actions (Slack button presses, modal submissions) with
 //! in-flight MCP tool calls that are suspended on `oneshot` channels.
 //! All maps are `Arc<tokio::sync::Mutex<...>>` clones of the maps held by
-//! [`AppState`](crate::mcp::handler::AppState) so every Slack handler and
+//! [`AppState`](crate::state::AppState) so every Slack handler and
 //! every MCP tool handler share the same in-memory state.
 
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::driver::AgentDriver;
-use crate::mcp::handler::{
+use crate::state::{
     ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse, WaitResponse,
 };
 use crate::AppError;
@@ -24,7 +24,7 @@ use crate::Result;
 /// MCP-protocol implementation of [`AgentDriver`].
 ///
 /// Resolves pending agent requests by delivering responses through the
-/// `oneshot` channels registered in [`AppState`](crate::mcp::handler::AppState).
+/// `oneshot` channels registered in [`AppState`](crate::state::AppState).
 /// This makes the Slack interaction layer independent of MCP internals — the
 /// handlers only call trait methods, never touch the maps directly.
 // The `pending_` prefix is intentional and mirrors the field names on `AppState`

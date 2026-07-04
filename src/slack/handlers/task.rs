@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::audit::{AuditEntry, AuditEventType};
-use crate::mcp::handler::AppState;
 use crate::models::inbox::{InboxSource, TaskInboxItem};
 use crate::persistence::inbox_repo::InboxRepo;
+use crate::state::AppState;
 
 /// Store a task inbox item from a Slack slash command.
 ///

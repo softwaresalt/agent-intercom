@@ -25,7 +25,6 @@ use crate::acp::spawner::SpawnConfig;
 use crate::audit::{AuditEntry, AuditEventType};
 use crate::diff::path_safety::validate_path;
 use crate::driver::AgentDriver;
-use crate::mcp::handler::AppState;
 use crate::mode::ServerMode;
 use crate::models::session::truncate_session_title;
 use crate::models::session::{ProtocolMode, Session, SessionMode, SessionStatus};
@@ -38,6 +37,7 @@ use crate::slack::blocks;
 use crate::slack::client::SlackMessage;
 use crate::slack::handlers::steer as steer_handler;
 use crate::slack::handlers::task as task_handler;
+use crate::state::AppState;
 
 /// Handle incoming `/acom` or `/arc` slash commands routed via Socket Mode.
 ///

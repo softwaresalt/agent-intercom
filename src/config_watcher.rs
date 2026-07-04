@@ -199,7 +199,7 @@ impl ConfigWatcher {
 
     /// Return a clone of the shared workspace mappings `Arc`.
     ///
-    /// The returned handle can be stored in [`crate::mcp::handler::AppState`]
+    /// The returned handle can be stored in [`crate::state::AppState`]
     /// or passed to the SSE factory so that every new session sees the
     /// latest mappings.
     #[must_use]

@@ -14,12 +14,12 @@ use slack_morphism::prelude::{
 use tracing::{info, warn};
 
 use crate::audit::{AuditEntry, AuditEventType};
-use crate::mcp::handler::{AppState, ApprovalResponse};
 use crate::models::approval::ApprovalStatus;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::handlers::{check_session_ownership, command_approve};
+use crate::state::{AppState, ApprovalResponse};
 
 /// Process a single approval button action from Slack.
 ///

@@ -22,7 +22,7 @@ use super::test_helpers::{test_app_state, test_config};
 async fn spawn_acp_http_server() -> (
     String,
     CancellationToken,
-    Arc<agent_intercom::mcp::handler::AppState>,
+    Arc<agent_intercom::state::AppState>,
 ) {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().to_str().expect("utf8");
@@ -38,7 +38,7 @@ async fn spawn_acp_http_server() -> (
     let port = addr.port();
 
     // Build an ACP-mode AppState sharing the same DB.
-    let acp_state = Arc::new(agent_intercom::mcp::handler::AppState {
+    let acp_state = Arc::new(agent_intercom::state::AppState {
         config: {
             let mut cfg = (*state.config).clone();
             cfg.http_port = port;

@@ -23,7 +23,7 @@ use super::test_helpers::{create_active_session, test_app_state, test_config};
 // ── Helper: create an approved request with file on disk ─────
 
 async fn setup_approved_request(
-    state: &Arc<agent_intercom::mcp::handler::AppState>,
+    state: &Arc<agent_intercom::state::AppState>,
     session_id: &str,
     file_path: &str,
     diff_content: &str,

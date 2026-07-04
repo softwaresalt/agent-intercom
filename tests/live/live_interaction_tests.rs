@@ -38,9 +38,6 @@ use uuid::Uuid;
 
 use agent_intercom::config::GlobalConfig;
 use agent_intercom::driver::mcp_driver::McpDriver;
-use agent_intercom::mcp::handler::{
-    AppState, ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
-};
 use agent_intercom::mode::ServerMode;
 use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
 use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
@@ -52,6 +49,9 @@ use agent_intercom::persistence::prompt_repo::PromptRepo;
 use agent_intercom::persistence::session_repo::SessionRepo;
 use agent_intercom::persistence::stall_repo::StallAlertRepo;
 use agent_intercom::slack::{blocks, handlers};
+use agent_intercom::state::{
+    AppState, ApprovalResponse, PendingApprovals, PendingPrompts, PendingWaits, PromptResponse,
+};
 
 use super::live_helpers::{assert_blocks_contain, LiveSlackClient, LiveTestConfig};
 

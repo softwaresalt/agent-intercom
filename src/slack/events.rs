@@ -26,8 +26,8 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::slack::{blocks, handlers};
+use crate::state::AppState;
 
 // ── Centralized authorization check (T093 / FR-013, SC-009) ──────────
 

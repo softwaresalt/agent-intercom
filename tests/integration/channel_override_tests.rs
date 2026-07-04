@@ -14,8 +14,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent_intercom::config::GlobalConfig;
-use agent_intercom::mcp::handler::{AppState, IntercomServer};
+use agent_intercom::mcp::handler::IntercomServer;
 use agent_intercom::persistence::db;
+use agent_intercom::state::AppState;
 use tokio::sync::Mutex;
 
 /// Build a minimal test configuration with in-memory DB and a known default channel.

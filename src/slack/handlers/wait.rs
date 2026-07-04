@@ -13,10 +13,10 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::persistence::session_repo::SessionRepo;
 use crate::slack::blocks;
 use crate::slack::handlers::check_session_ownership;
+use crate::state::AppState;
 
 /// Process a single wait button action from Slack.
 ///

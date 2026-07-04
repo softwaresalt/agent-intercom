@@ -13,8 +13,8 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::slack::blocks;
+use crate::state::AppState;
 
 /// Build Slack block kit blocks for an auto-approve suggestion prompt.
 ///

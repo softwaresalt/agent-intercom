@@ -15,12 +15,12 @@ use std::time::Duration;
 
 use tokio::sync::oneshot;
 
-use agent_intercom::mcp::handler::{ApprovalResponse, PromptResponse, WaitResponse};
 use agent_intercom::models::approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
 use agent_intercom::models::prompt::{ContinuationPrompt, PromptDecision, PromptType};
 use agent_intercom::persistence::approval_repo::ApprovalRepo;
 use agent_intercom::persistence::prompt_repo::PromptRepo;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::state::{ApprovalResponse, PromptResponse, WaitResponse};
 
 use super::test_helpers::{create_active_session, test_app_state, test_config};
 

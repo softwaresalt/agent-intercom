@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::driver::AgentDriver;
-use agent_intercom::mcp::handler::{ApprovalResponse, PendingApprovals};
+use agent_intercom::state::{ApprovalResponse, PendingApprovals};
 use agent_intercom::AppError;
 use tokio::sync::{oneshot, Mutex};
 

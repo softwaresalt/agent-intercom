@@ -4,9 +4,9 @@
 //! regardless of Slack configuration (US15 robustness).
 
 use super::test_helpers::test_config;
-use agent_intercom::mcp::handler::AppState;
 use agent_intercom::persistence::db;
 use agent_intercom::persistence::session_repo::SessionRepo;
+use agent_intercom::state::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

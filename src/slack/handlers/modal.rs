@@ -13,12 +13,12 @@ use slack_morphism::prelude::{
 };
 use tracing::{info, warn};
 
-use crate::mcp::handler::AppState;
 use crate::models::approval::ApprovalStatus;
 use crate::models::prompt::PromptDecision;
 use crate::persistence::approval_repo::ApprovalRepo;
 use crate::persistence::prompt_repo::PromptRepo;
 use crate::slack::blocks;
+use crate::state::AppState;
 
 /// Process a modal `ViewSubmission` event from Slack.
 ///

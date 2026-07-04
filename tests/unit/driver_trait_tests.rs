@@ -240,7 +240,7 @@ async fn mcp_driver_concurrent_clearance_resolution() {
 
     use agent_intercom::driver::mcp_driver::McpDriver;
     use agent_intercom::driver::AgentDriver;
-    use agent_intercom::mcp::handler::{PendingApprovals, PendingPrompts, PendingWaits};
+    use agent_intercom::state::{PendingApprovals, PendingPrompts, PendingWaits};
     use tokio::sync::{oneshot, Mutex};
 
     // Pre-seed two entries.
