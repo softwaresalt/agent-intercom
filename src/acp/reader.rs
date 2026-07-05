@@ -492,6 +492,34 @@ pub async fn deliver_queued_messages(
     delivered
 }
 
+/// Fetch all unconsumed steering messages for `session_id` and deliver them to
+/// the agent, marking each consumed only on successful delivery.
+///
+/// Returns the number of messages successfully delivered. Used by the ACP
+/// heartbeat handler (T8.4) so operator steering queued while the agent was
+/// offline or busy is delivered at the next liveness signal, without depending
+/// on the HTTP MCP endpoint. Factored out as a reusable helper; the reconnect
+/// flush ([`flush_queued_messages`]) performs an equivalent fetch-and-deliver
+/// inline because it additionally reports the total queued count and emits
+/// per-message stream activity.
+///
+/// # Errors
+///
+/// Returns an error only if the initial fetch of unconsumed messages fails;
+/// per-message delivery failures are logged and leave the message unconsumed
+/// for a later retry.
+pub async fn deliver_pending_steering(
+    session_id: &str,
+    driver: &dyn AgentDriver,
+    steering_repo: &SteeringRepo,
+) -> Result<usize> {
+    let queued = steering_repo.fetch_unconsumed(session_id).await?;
+    if queued.is_empty() {
+        return Ok(0);
+    }
+    Ok(deliver_queued_messages(session_id, &queued, driver, steering_repo).await)
+}
+
 /// Set connectivity to Online, deliver queued messages, and notify Slack.
 ///
 /// This is the reconnect flush logic (T089/T090 — S059, S060, S062).

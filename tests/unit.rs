@@ -4,6 +4,7 @@ mod unit {
     mod acp_codec_tests;
     mod acp_event_wiring;
     mod acp_handshake_tests;
+    mod acp_heartbeat_tests;
     mod acp_permission_tests;
     mod acp_reader_steering_delivery;
     mod acp_session_tests;
