@@ -861,8 +861,9 @@ async fn run_acp_event_consumer(
                         )
                         .await;
                     }
-                    Some(AgentEvent::HeartbeatReceived { ref session_id, .. }) => {
+                    Some(AgentEvent::HeartbeatReceived { ref session_id, ref progress }) => {
                         info!(session_id, "acp event: heartbeat received");
+                        handle_heartbeat_received(&state, session_id, progress.clone()).await;
                     }
                     Some(AgentEvent::SessionTerminated { ref session_id, exit_code, ref reason }) => {
                         info!(
@@ -1230,6 +1231,74 @@ async fn handle_clearance_requested(
             .await
         {
             warn!(%err, session_id, approval_id, "failed to upload diff file to Slack");
+        }
+    }
+}
+
+/// Handle the `HeartbeatReceived` ACP event (T8.4).
+///
+/// Mirrors the MCP `heartbeat` tool so ACP mode gets the same liveness and
+/// steering-pickup behaviour without the HTTP endpoint: updates the progress
+/// snapshot (when valid), refreshes last activity, resets the stall timer, and
+/// delivers any queued operator steering to the agent over the ACP stream.
+async fn handle_heartbeat_received(
+    state: &Arc<AppState>,
+    session_id: &str,
+    progress: Option<Vec<agent_intercom::models::progress::ProgressItem>>,
+) {
+    use agent_intercom::acp::reader::deliver_pending_steering;
+    use agent_intercom::models::progress::validate_snapshot;
+    use agent_intercom::persistence::session_repo::SessionRepo;
+    use agent_intercom::persistence::steering_repo::SteeringRepo;
+
+    let session_repo = SessionRepo::new(Arc::clone(&state.db));
+
+    // Update the progress snapshot when a valid one is supplied.
+    if let Some(snapshot) = progress {
+        match validate_snapshot(&snapshot) {
+            Ok(()) => {
+                if let Err(err) = session_repo
+                    .update_progress_snapshot(session_id, Some(snapshot))
+                    .await
+                {
+                    warn!(%err, session_id, "heartbeat: failed to update progress snapshot");
+                }
+            }
+            Err(err) => {
+                warn!(%err, session_id, "heartbeat: invalid progress snapshot — ignoring");
+            }
+        }
+    }
+
+    // Refresh last activity so the session is not considered idle.
+    if let Err(err) = session_repo
+        .update_last_activity(session_id, Some("heartbeat".into()))
+        .await
+    {
+        warn!(%err, session_id, "heartbeat: failed to update last activity");
+    }
+
+    // Reset the stall detector timer for this session.
+    if let Some(ref detectors) = state.stall_detectors {
+        let guards = detectors.lock().await;
+        if let Some(handle) = guards.get(session_id) {
+            handle.reset();
+        }
+    }
+
+    // Deliver any queued operator steering to the agent.
+    let steering_repo = SteeringRepo::new(Arc::clone(&state.db));
+    match deliver_pending_steering(session_id, state.driver.as_ref(), &steering_repo).await {
+        Ok(count) if count > 0 => {
+            info!(
+                session_id,
+                delivered = count,
+                "heartbeat: delivered queued steering"
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(%err, session_id, "heartbeat: failed to fetch or deliver steering");
         }
     }
 }
