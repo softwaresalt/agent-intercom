@@ -495,10 +495,13 @@ pub async fn deliver_queued_messages(
 /// Fetch all unconsumed steering messages for `session_id` and deliver them to
 /// the agent, marking each consumed only on successful delivery.
 ///
-/// Returns the number of messages successfully delivered. Shared by the
-/// reconnect flush and the ACP heartbeat handler (T8.4) so operator steering
-/// queued while the agent was offline or busy is delivered at the next liveness
-/// signal, without depending on the HTTP MCP endpoint.
+/// Returns the number of messages successfully delivered. Used by the ACP
+/// heartbeat handler (T8.4) so operator steering queued while the agent was
+/// offline or busy is delivered at the next liveness signal, without depending
+/// on the HTTP MCP endpoint. Factored out as a reusable helper; the reconnect
+/// flush ([`flush_queued_messages`]) performs an equivalent fetch-and-deliver
+/// inline because it additionally reports the total queued count and emits
+/// per-message stream activity.
 ///
 /// # Errors
 ///
