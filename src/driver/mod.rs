@@ -60,6 +60,9 @@ pub enum AgentEvent {
     PermissionRequested {
         /// JSON-RPC request `id` to correlate the `result` reply.
         request_id: String,
+        /// The exact JSON-RPC `id` value (string or number) to echo back in the
+        /// `result` reply, preserving type per JSON-RPC correlation rules.
+        request_id_raw: serde_json::Value,
         /// Session this request belongs to.
         session_id: String,
         /// Human-readable title derived from the tool call.

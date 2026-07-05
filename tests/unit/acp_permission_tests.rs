@@ -69,3 +69,29 @@ fn session_request_permission_missing_title_and_location_uses_defaults() {
         other => panic!("expected PermissionRequested, got {other:?}"),
     }
 }
+
+#[test]
+fn parses_numeric_json_rpc_id() {
+    // Real conformant ACP agents (e.g. copilot --acp) use numeric JSON-RPC ids.
+    let line = r#"{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"a","toolCall":{"title":"Run tests"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}"#;
+
+    let event = parse_inbound_line("sess-int-num", line)
+        .expect("parse must succeed for a numeric id")
+        .expect("must emit an event");
+
+    match event {
+        AgentEvent::PermissionRequested {
+            request_id,
+            request_id_raw,
+            ..
+        } => {
+            assert_eq!(request_id, "7", "numeric id is keyed as its decimal string");
+            assert!(
+                request_id_raw.is_number(),
+                "raw id must be preserved as a number"
+            );
+            assert_eq!(request_id_raw, serde_json::json!(7));
+        }
+        other => panic!("expected PermissionRequested, got {other:?}"),
+    }
+}

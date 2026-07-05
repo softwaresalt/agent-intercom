@@ -801,6 +801,7 @@ async fn run_acp_event_consumer(
                     Some(AgentEvent::PermissionRequested {
                         ref session_id,
                         ref request_id,
+                        ref request_id_raw,
                         ref title,
                         ref description,
                         ref file_path,
@@ -822,7 +823,10 @@ async fn run_acp_event_consumer(
                             None,
                             file_path,
                             risk_level,
-                            ClearanceRegistration::Permission(options.clone()),
+                            ClearanceRegistration::Permission(
+                                options.clone(),
+                                request_id_raw.clone(),
+                            ),
                         )
                         .await;
                     }
@@ -1008,8 +1012,9 @@ enum ClearanceRegistration {
     /// Bespoke `clearance/request` — register via `register_clearance`.
     Clearance,
     /// Standard `session/request_permission` (ADR-0016) — register via
-    /// `register_permission`, carrying the offered options for outcome echo.
-    Permission(Vec<PermissionOption>),
+    /// `register_permission`, carrying the offered options and the raw JSON-RPC
+    /// id to echo in the outcome.
+    Permission(Vec<PermissionOption>, serde_json::Value),
 }
 
 /// Handle the `ClearanceRequested` ACP event (FR-002, FR-003, FR-010, FR-011).
@@ -1125,9 +1130,9 @@ async fn handle_clearance_requested(
                     .register_clearance(session_id, &approval_id)
                     .await;
             }
-            ClearanceRegistration::Permission(options) => {
+            ClearanceRegistration::Permission(options, raw_id) => {
                 acp_driver
-                    .register_permission(session_id, &approval_id, options.clone())
+                    .register_permission(session_id, &approval_id, options.clone(), raw_id.clone())
                     .await;
             }
         }

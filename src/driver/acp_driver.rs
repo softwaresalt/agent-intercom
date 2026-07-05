@@ -48,6 +48,10 @@ struct PendingPromptAcp {
 struct PendingPermission {
     session_id: String,
     options: Vec<PermissionOption>,
+    /// The original JSON-RPC `id` value, echoed verbatim in the `result` reply
+    /// to preserve its type (numeric ids from conformant agents must not be
+    /// stringified).
+    raw_id: Value,
 }
 
 /// Shared map type alias for session writer channels.
@@ -224,12 +228,14 @@ impl AcpDriver {
         session_id: &str,
         request_id: &str,
         options: Vec<PermissionOption>,
+        raw_id: Value,
     ) {
         self.pending_permissions.lock().await.insert(
             request_id.to_owned(),
             PendingPermission {
                 session_id: session_id.to_owned(),
                 options,
+                raw_id,
             },
         );
         debug!(
@@ -293,6 +299,7 @@ impl AgentDriver for AcpDriver {
             if let Some(PendingPermission {
                 session_id,
                 options,
+                raw_id,
             }) = permission
             {
                 let outcome = match select_option_id(&options, approved) {
@@ -301,7 +308,7 @@ impl AgentDriver for AcpDriver {
                 };
                 let msg = json!({
                     "jsonrpc": "2.0",
-                    "id": request_id,
+                    "id": raw_id,
                     "result": { "outcome": outcome },
                 });
                 return send_to_session(&self.stream_writers, &session_id, msg).await;
