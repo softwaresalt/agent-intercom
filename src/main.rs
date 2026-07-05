@@ -1253,7 +1253,25 @@ async fn handle_heartbeat_received(
 
     let session_repo = SessionRepo::new(Arc::clone(&state.db));
 
+    // A heartbeat proves the agent is alive and reachable, so restore Online
+    // (mirrors the reconnect flush). Without this, an actively-heartbeating
+    // session left Offline/Stalled would keep getting operator steering routed
+    // to the durable queue with a misleading "agent offline" notice, instead of
+    // direct delivery.
+    if let Err(err) = session_repo
+        .set_connectivity_status(
+            session_id,
+            agent_intercom::models::session::ConnectivityStatus::Online,
+        )
+        .await
+    {
+        warn!(%err, session_id, "heartbeat: failed to set connectivity Online");
+    }
+
     // Update the progress snapshot when a valid one is supplied.
+    // Divergence from the MCP `heartbeat` tool (which returns an error to the
+    // caller): this is a fire-and-forget event with no caller to reject, so an
+    // invalid snapshot is logged and ignored rather than surfaced as an error.
     if let Some(snapshot) = progress {
         match validate_snapshot(&snapshot) {
             Ok(()) => {
