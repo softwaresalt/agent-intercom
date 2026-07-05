@@ -38,7 +38,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::acp::codec::AcpCodec;
-use crate::driver::{AgentDriver, AgentEvent};
+use crate::driver::{AgentDriver, AgentEvent, PermissionOption};
 use crate::models::progress::ProgressItem;
 use crate::models::session::ConnectivityStatus;
 use crate::models::steering::SteeringMessage;
@@ -127,8 +127,10 @@ struct AcpEnvelope {
     /// Message type identifier (e.g., `clearance/request`).  Optional because
     /// JSON-RPC result messages carry only `id` + `result`/`error`.
     method: Option<String>,
-    /// Optional correlation ID; required for request/response pairs.
-    id: Option<String>,
+    /// Optional correlation ID; required for request/response pairs. Typed as a
+    /// raw JSON value because conformant ACP agents use numeric ids (`"id": 1`)
+    /// while bespoke intercom methods use string ids — both must parse.
+    id: Option<serde_json::Value>,
     /// Method-specific payload.  Defaults to `null` for result messages.
     #[serde(default)]
     params: serde_json::Value,
@@ -163,6 +165,28 @@ struct PromptForwardParams {
 #[derive(Debug, Deserialize)]
 struct HeartbeatParams {
     progress: Option<Vec<ProgressItem>>,
+}
+
+/// Parameters for the standard ACP `session/request_permission` method (ADR-0016).
+#[derive(Debug, Deserialize)]
+struct SessionRequestPermissionParams {
+    #[serde(rename = "toolCall", default)]
+    tool_call: PermissionToolCall,
+    #[serde(default)]
+    options: Vec<PermissionOption>,
+}
+
+/// The tool-call subset relevant to operator presentation.
+#[derive(Debug, Default, Deserialize)]
+struct PermissionToolCall {
+    title: Option<String>,
+    locations: Option<Vec<PermissionLocation>>,
+}
+
+/// A single tool-call file location.
+#[derive(Debug, Deserialize)]
+struct PermissionLocation {
+    path: String,
 }
 
 /// Parameters for the ACP `session/update` method (streaming content).
@@ -236,6 +260,10 @@ pub fn parse_inbound_line(session_id: &str, line: &str) -> Result<Option<AgentEv
         // ACP `session/update` — streaming content from the agent during prompt
         // execution.  Treated as a status update so the operator sees progress.
         "session/update" => parse_session_update(session_id, envelope),
+        // Standard ACP permission request (ADR-0016). Previously unhandled — a
+        // conformant agent's request was silently dropped. Now parsed and routed
+        // through the operator approval path.
+        "session/request_permission" => parse_session_request_permission(session_id, envelope),
         // Handshake response from the agent — silently accepted. The
         // `initialized` message is consumed by `handshake::wait_for_initialize_result`
         // before `run_reader` starts; if one slips through, skip it gracefully.
@@ -540,8 +568,8 @@ async fn flush_queued_messages(
 
 /// Parse a `clearance/request` envelope into [`AgentEvent::ClearanceRequested`].
 fn parse_clearance_request(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEvent>> {
-    let request_id = env.id.ok_or_else(|| {
-        AppError::Acp("missing required field: `id` in clearance/request envelope".into())
+    let request_id = env.id.as_ref().and_then(json_rpc_id_key).ok_or_else(|| {
+        AppError::Acp("missing or invalid `id` in clearance/request envelope".into())
     })?;
 
     let params: ClearanceParams = serde_json::from_value(env.params).map_err(|e| {
@@ -574,8 +602,8 @@ fn parse_status_update(session_id: &str, env: AcpEnvelope) -> Result<Option<Agen
 
 /// Parse a `prompt/forward` envelope into [`AgentEvent::PromptForwarded`].
 fn parse_prompt_forward(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEvent>> {
-    let prompt_id = env.id.ok_or_else(|| {
-        AppError::Acp("missing required field: `id` in prompt/forward envelope".into())
+    let prompt_id = env.id.as_ref().and_then(json_rpc_id_key).ok_or_else(|| {
+        AppError::Acp("missing or invalid `id` in prompt/forward envelope".into())
     })?;
 
     let params: PromptForwardParams = serde_json::from_value(env.params).map_err(|e| {
@@ -601,6 +629,71 @@ fn parse_heartbeat(session_id: &str, env: AcpEnvelope) -> Result<Option<AgentEve
         session_id: session_id.to_owned(),
         progress: params.progress,
     }))
+}
+
+/// Parse a standard ACP `session/request_permission` envelope into
+/// [`AgentEvent::PermissionRequested`] (ADR-0016 conformance).
+///
+/// The `id` is required for the JSON-RPC `result` correlation. A human-readable
+/// `title` and target `file_path` are derived from the tool call for operator
+/// presentation; risk defaults to `high` since a permission request is an
+/// approval gate. The offered `options` are carried through so the driver can
+/// echo the selected `optionId` in the outcome.
+fn parse_session_request_permission(
+    session_id: &str,
+    env: AcpEnvelope,
+) -> Result<Option<AgentEvent>> {
+    let request_id_raw = env.id.ok_or_else(|| {
+        AppError::Acp("missing required field: `id` in session/request_permission envelope".into())
+    })?;
+    let request_id = json_rpc_id_key(&request_id_raw).ok_or_else(|| {
+        AppError::Acp("invalid `id` type in session/request_permission envelope".into())
+    })?;
+
+    let params: SessionRequestPermissionParams =
+        serde_json::from_value(env.params).map_err(|e| {
+            AppError::Acp(format!(
+                "missing required field: session/request_permission params: {e}"
+            ))
+        })?;
+
+    let title = params
+        .tool_call
+        .title
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "Permission requested".to_owned());
+    let file_path = params
+        .tool_call
+        .locations
+        .as_ref()
+        .and_then(|locs| locs.first())
+        .map(|loc| loc.path.clone())
+        .unwrap_or_default();
+
+    Ok(Some(AgentEvent::PermissionRequested {
+        request_id,
+        request_id_raw,
+        session_id: session_id.to_owned(),
+        title,
+        description: String::new(),
+        file_path,
+        risk_level: "high".to_owned(),
+        options: params.options,
+    }))
+}
+
+/// Render a JSON-RPC `id` (string or number) as a stable correlation key.
+///
+/// Conformant ACP agents may use numeric ids (`"id": 1`); bespoke intercom
+/// methods use string ids. Both are accepted. Returns `None` for `null` or
+/// structurally-invalid ids (bool/array/object), which are not valid JSON-RPC
+/// request ids.
+fn json_rpc_id_key(id: &serde_json::Value) -> Option<String> {
+    match id {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
 }
 
 /// Parse an ACP `session/update` envelope into [`AgentEvent::StatusUpdated`].

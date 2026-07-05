@@ -20,6 +20,7 @@ use agent_intercom::config_watcher::ConfigWatcher;
 use agent_intercom::driver::acp_driver::AcpDriver;
 use agent_intercom::driver::mcp_driver::McpDriver;
 use agent_intercom::driver::AgentEvent;
+use agent_intercom::driver::PermissionOption;
 use agent_intercom::mcp::{sse, transport};
 use agent_intercom::mode::ServerMode;
 use agent_intercom::orchestrator::{child_monitor, stall_consumer};
@@ -793,6 +794,39 @@ async fn run_acp_event_consumer(
                             diff.clone(),
                             file_path,
                             risk_level,
+                            ClearanceRegistration::Clearance,
+                        )
+                        .await;
+                    }
+                    Some(AgentEvent::PermissionRequested {
+                        ref session_id,
+                        ref request_id,
+                        ref request_id_raw,
+                        ref title,
+                        ref description,
+                        ref file_path,
+                        ref risk_level,
+                        ref options,
+                    }) => {
+                        info!(
+                            session_id,
+                            request_id,
+                            title,
+                            "acp event: permission requested (session/request_permission)"
+                        );
+                        handle_clearance_requested(
+                            &state,
+                            session_id,
+                            request_id,
+                            title,
+                            description,
+                            None,
+                            file_path,
+                            risk_level,
+                            ClearanceRegistration::Permission(
+                                options.clone(),
+                                request_id_raw.clone(),
+                            ),
                         )
                         .await;
                     }
@@ -972,6 +1006,17 @@ async fn flush_text_to_slack(state: &Arc<AppState>, session_id: &str, text: &str
     }
 }
 
+/// Which ACP response-routing registration a clearance/permission handler
+/// should perform so the operator's decision reaches the agent.
+enum ClearanceRegistration {
+    /// Bespoke `clearance/request` — register via `register_clearance`.
+    Clearance,
+    /// Standard `session/request_permission` (ADR-0016) — register via
+    /// `register_permission`, carrying the offered options and the raw JSON-RPC
+    /// id to echo in the outcome.
+    Permission(Vec<PermissionOption>, serde_json::Value),
+}
+
 /// Handle the `ClearanceRequested` ACP event (FR-002, FR-003, FR-010, FR-011).
 ///
 /// Creates and persists an [`ApprovalRequest`], registers it with the ACP
@@ -993,6 +1038,7 @@ async fn handle_clearance_requested(
     diff: Option<String>,
     file_path: &str,
     risk_level_str: &str,
+    registration: ClearanceRegistration,
 ) {
     use std::path::Path;
 
@@ -1078,9 +1124,18 @@ async fn handle_clearance_requested(
 
     // Step 6: register with ACP driver for response routing.
     if let Some(ref acp_driver) = state.acp_driver {
-        acp_driver
-            .register_clearance(session_id, &approval_id)
-            .await;
+        match &registration {
+            ClearanceRegistration::Clearance => {
+                acp_driver
+                    .register_clearance(session_id, &approval_id)
+                    .await;
+            }
+            ClearanceRegistration::Permission(options, raw_id) => {
+                acp_driver
+                    .register_permission(session_id, &approval_id, options.clone(), raw_id.clone())
+                    .await;
+            }
+        }
     }
 
     // Step 7: post interactive approval message to Slack.

@@ -89,7 +89,144 @@ async fn acp_driver_resolve_clearance_unknown_id_returns_not_found() {
     );
 }
 
-// ── send_prompt — success path ──────────────────────────────────────────────
+// ── resolve_clearance — standard permission path (T8.1, ADR-0016) ────────────
+
+/// A registered standard `session/request_permission` resolved with
+/// `approved = true` emits a JSON-RPC `result` carrying a `selected` outcome
+/// whose `optionId` is the `allow_once` option — not a bespoke `clearance/response`.
+#[tokio::test]
+async fn acp_driver_resolve_permission_approved_emits_selected_allow_outcome() {
+    use agent_intercom::driver::PermissionOption;
+
+    let (driver, mut rx) = setup_driver_with_session("sess-p1").await;
+    let options = vec![
+        PermissionOption {
+            option_id: "allow-once".to_owned(),
+            name: "Allow".to_owned(),
+            kind: "allow_once".to_owned(),
+        },
+        PermissionOption {
+            option_id: "reject-once".to_owned(),
+            name: "Reject".to_owned(),
+            kind: "reject_once".to_owned(),
+        },
+    ];
+    driver
+        .register_permission(
+            "sess-p1",
+            "perm-req-1",
+            options,
+            serde_json::json!("perm-req-1"),
+        )
+        .await;
+
+    driver
+        .resolve_clearance("perm-req-1", true, None)
+        .await
+        .expect("resolve_clearance should succeed for a permission");
+
+    let msg = rx.recv().await.expect("must receive a message");
+    assert_eq!(msg["id"], "perm-req-1");
+    assert_eq!(msg["result"]["outcome"]["outcome"], "selected");
+    assert_eq!(msg["result"]["outcome"]["optionId"], "allow-once");
+    assert!(
+        msg["method"].is_null(),
+        "a standard JSON-RPC result reply carries no `method`"
+    );
+}
+
+/// Rejecting a permission selects the `reject_once` option.
+#[tokio::test]
+async fn acp_driver_resolve_permission_rejected_selects_reject_option() {
+    use agent_intercom::driver::PermissionOption;
+
+    let (driver, mut rx) = setup_driver_with_session("sess-p2").await;
+    let options = vec![
+        PermissionOption {
+            option_id: "allow-once".to_owned(),
+            name: "Allow".to_owned(),
+            kind: "allow_once".to_owned(),
+        },
+        PermissionOption {
+            option_id: "reject-once".to_owned(),
+            name: "Reject".to_owned(),
+            kind: "reject_once".to_owned(),
+        },
+    ];
+    driver
+        .register_permission(
+            "sess-p2",
+            "perm-req-2",
+            options,
+            serde_json::json!("perm-req-2"),
+        )
+        .await;
+
+    driver
+        .resolve_clearance("perm-req-2", false, Some("too risky".to_owned()))
+        .await
+        .expect("resolve_clearance should succeed");
+
+    let msg = rx.recv().await.expect("must receive a message");
+    assert_eq!(msg["result"]["outcome"]["outcome"], "selected");
+    assert_eq!(msg["result"]["outcome"]["optionId"], "reject-once");
+}
+
+/// A permission with no options cannot be selected, so approval yields a
+/// `cancelled` outcome (the conformant way to decline without a valid option).
+#[tokio::test]
+async fn acp_driver_resolve_permission_no_options_emits_cancelled() {
+    let (driver, mut rx) = setup_driver_with_session("sess-p3").await;
+    driver
+        .register_permission(
+            "sess-p3",
+            "perm-req-3",
+            vec![],
+            serde_json::json!("perm-req-3"),
+        )
+        .await;
+
+    driver
+        .resolve_clearance("perm-req-3", true, None)
+        .await
+        .expect("resolve_clearance should succeed");
+
+    let msg = rx.recv().await.expect("must receive a message");
+    assert_eq!(msg["result"]["outcome"]["outcome"], "cancelled");
+    assert!(msg["result"]["outcome"]["optionId"].is_null());
+}
+
+/// A numeric JSON-RPC `id` (as used by real conformant ACP agents) must be
+/// echoed back as a number, not stringified — otherwise the agent cannot match
+/// the response to its request and the session deadlocks.
+#[tokio::test]
+async fn acp_driver_resolve_permission_preserves_numeric_id() {
+    use agent_intercom::driver::PermissionOption;
+
+    let (driver, mut rx) = setup_driver_with_session("sess-p4").await;
+    let options = vec![PermissionOption {
+        option_id: "allow-once".to_owned(),
+        name: "Allow".to_owned(),
+        kind: "allow_once".to_owned(),
+    }];
+    // Correlation key is the stringified id "7"; the raw id is numeric 7.
+    driver
+        .register_permission("sess-p4", "7", options, serde_json::json!(7))
+        .await;
+
+    driver
+        .resolve_clearance("7", true, None)
+        .await
+        .expect("resolve_clearance should succeed");
+
+    let msg = rx.recv().await.expect("must receive a message");
+    assert_eq!(msg["id"], 7, "numeric id must be echoed as a number");
+    assert!(
+        msg["id"].is_number(),
+        "id must remain numeric, not stringified"
+    );
+    assert_eq!(msg["result"]["outcome"]["optionId"], "allow-once");
+}
 
 /// Sending a prompt to a registered session delivers a `session/prompt`
 /// message with the correct agent session ID and prompt text.
