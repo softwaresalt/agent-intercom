@@ -725,6 +725,10 @@ async fn handle_acp_session_start(
             .workspace_mappings
             .read()
             .map_err(|_| crate::AppError::Config("workspace_mappings lock poisoned".to_owned()))?;
+        // Enforce ACP channel_id uniqueness on the live (hot-reloaded) snapshot,
+        // not just the static startup config, so a config edit that introduces a
+        // duplicate channel cannot silently make routing ambiguous at runtime.
+        crate::config::validate_unique_channel_ids(&mappings)?;
         let mapping = mappings.iter().find(|m| m.channel_id == channel_id);
         let root = mapping
             .and_then(|m| m.path.clone())

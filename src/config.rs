@@ -70,6 +70,33 @@ pub struct WorkspaceMapping {
     pub path: Option<PathBuf>,
 }
 
+/// Validate that every workspace mapping has a unique `channel_id`.
+///
+/// ACP resolves an incoming slash command to a workspace by its Slack
+/// `channel_id` (see [`GlobalConfig::resolve_workspace_by_channel_id`]), where
+/// the first matching entry wins. Duplicate channel IDs would make that routing
+/// ambiguous. This check is shared between the startup validation
+/// ([`GlobalConfig::validate_for_acp_mode`]) and the live hot-reloaded snapshot
+/// consulted at ACP session start, so the guarantee holds at runtime, not just
+/// at boot.
+///
+/// # Errors
+///
+/// Returns `AppError::Config` when two entries share a `channel_id`.
+pub(crate) fn validate_unique_channel_ids(mappings: &[WorkspaceMapping]) -> Result<()> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    for mapping in mappings {
+        if !seen.insert(mapping.channel_id.as_str()) {
+            return Err(AppError::Config(format!(
+                "duplicate channel_id '{}' in [[workspace]] entries; ACP routing \
+                 requires each channel_id to map to exactly one workspace",
+                mapping.channel_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Nested Slack configuration for Socket Mode connectivity.
 ///
 /// Tokens and team ID are loaded at runtime via OS keychain or environment
@@ -644,21 +671,9 @@ impl GlobalConfig {
                 self.host_cli
             )));
         }
-        // ACP resolves an incoming slash command to a workspace by its Slack
-        // `channel_id` (see `resolve_workspace_by_channel_id`), where the first
-        // matching entry wins. Duplicate channel IDs would make that routing
-        // ambiguous, so require each channel to map to exactly one workspace.
-        let mut seen: HashSet<&str> = HashSet::new();
-        for mapping in &self.workspaces {
-            if !seen.insert(mapping.channel_id.as_str()) {
-                return Err(AppError::Config(format!(
-                    "duplicate channel_id '{}' in [[workspace]] entries; ACP routing \
-                     requires each channel_id to map to exactly one workspace",
-                    mapping.channel_id
-                )));
-            }
-        }
-        Ok(())
+        // ACP routes an incoming slash command to a workspace by its Slack
+        // `channel_id`, so each channel must map to exactly one workspace.
+        validate_unique_channel_ids(&self.workspaces)
     }
 
     /// Validate `host_cli` path security and log a warning if the binary is

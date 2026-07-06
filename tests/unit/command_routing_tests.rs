@@ -281,6 +281,50 @@ async fn session_start_accepted_in_acp_mode() {
     }
 }
 
+/// A duplicate `channel_id` present only in the hot-reloaded `workspace_mappings`
+/// snapshot (e.g. introduced by a live config edit) must be rejected at ACP
+/// session start, even when the static startup config is clean. This guards the
+/// runtime hot-reload routing path, not just the startup validation.
+#[tokio::test]
+async fn session_start_rejects_duplicate_channel_in_hot_reload_snapshot() {
+    use agent_intercom::config::WorkspaceMapping;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_str().expect("utf8");
+    let user = "U_TEST";
+
+    // Static config has no `[[workspace]]` entries, so `validate_for_acp_mode`
+    // on `state.config` passes — the duplicate lives only in the live snapshot.
+    let state = app_state_with_mode(root, user, ServerMode::Acp).await;
+    {
+        let mut mappings = state.workspace_mappings.write().expect("mappings lock");
+        mappings.push(WorkspaceMapping {
+            workspace_id: "repo-a".into(),
+            channel_id: "CDUP".into(),
+            label: None,
+            path: None,
+        });
+        mappings.push(WorkspaceMapping {
+            workspace_id: "repo-b".into(),
+            channel_id: "CDUP".into(),
+            label: None,
+            path: None,
+        });
+    }
+
+    let result = dispatch_command("session-start", &["do work"], user, "CDUP", &state).await;
+
+    assert!(
+        result.is_err(),
+        "duplicate channel_id in the hot-reload snapshot must fail ACP session start"
+    );
+    let msg = result.expect_err("expected error").to_string();
+    assert!(
+        msg.contains("duplicate channel_id") && msg.contains("CDUP"),
+        "error must name the duplicate channel_id, got: {msg}"
+    );
+}
+
 // ── Help command — prefix reflects server mode ────────────────────────────────
 
 /// In MCP mode, the help command output references the `/acom` prefix.
