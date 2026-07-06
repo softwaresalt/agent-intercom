@@ -400,6 +400,61 @@ fn acp_validate_accepts_relative_command_name() {
         "relative command name accepted at config validation time: {result:?}"
     );
 }
+
+/// ACP mode validation rejects two `[[workspace]]` entries that share a
+/// `channel_id`. ACP routes an incoming slash command to a workspace by its
+/// Slack channel, so duplicate channel IDs would make that routing ambiguous.
+#[test]
+fn acp_validate_rejects_duplicate_channel_id() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let toml = format!(
+        "{}\n\
+         [[workspace]]\n\
+         workspace_id = \"repo-a\"\n\
+         channel_id = \"CDUP\"\n\
+         \n\
+         [[workspace]]\n\
+         workspace_id = \"repo-b\"\n\
+         channel_id = \"CDUP\"\n",
+        sample_toml(temp.path().to_str().expect("utf8"))
+    );
+    // Parses: workspace_id values are unique and channel_ids are non-empty.
+    let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
+
+    let result = config.validate_for_acp_mode();
+    assert!(
+        result.is_err(),
+        "duplicate channel_id should fail ACP validation"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("duplicate channel_id") && msg.contains("CDUP"),
+        "error must name the duplicate channel_id, got: {msg}"
+    );
+}
+
+/// ACP mode validation accepts distinct `channel_id`s across workspaces.
+#[test]
+fn acp_validate_accepts_unique_channel_ids() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let toml = format!(
+        "{}\n\
+         [[workspace]]\n\
+         workspace_id = \"repo-a\"\n\
+         channel_id = \"CAAA\"\n\
+         \n\
+         [[workspace]]\n\
+         workspace_id = \"repo-b\"\n\
+         channel_id = \"CBBB\"\n",
+        sample_toml(temp.path().to_str().expect("utf8"))
+    );
+    let config = GlobalConfig::from_toml_str(&toml).expect("config parses");
+
+    assert!(
+        config.validate_for_acp_mode().is_ok(),
+        "unique channel_ids should pass ACP validation"
+    );
+}
 ///
 /// Verifies the spawner uses INTERCOM_ prefix by checking that config
 /// parsing does not reference MONOCOQUE_ prefixed env vars.
