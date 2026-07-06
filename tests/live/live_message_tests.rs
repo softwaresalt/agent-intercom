@@ -54,15 +54,24 @@ async fn smoke_post_and_retrieve_message() {
         "retrieved message text should match the posted text"
     );
 
-    // The blocks array is absent for plain-text messages; assert_blocks_contain
-    // should reflect an empty/null structure rather than panicking.
-    // (Verifies the helper is robust for messages without Block Kit payloads.)
-    let blocks_json =
-        serde_json::to_string(&message["blocks"]).unwrap_or_else(|_| String::from("null"));
-    // Plain-text messages have no blocks array — either null or empty.
+    // Plain-text messages carry no author-supplied Block Kit payload. Slack may
+    // still return an auto-generated `rich_text` block that mirrors the message
+    // text, so accept an absent/empty blocks array or one composed solely of
+    // auto-generated `rich_text` blocks. Any other block type (section, actions,
+    // …) would indicate an unexpected Block Kit payload.
+    let blocks = &message["blocks"];
+    let is_plain_text_blocks = match blocks {
+        serde_json::Value::Null => true,
+        serde_json::Value::Array(items) => items
+            .iter()
+            .all(|block| block["type"].as_str() == Some("rich_text")),
+        _ => false,
+    };
     assert!(
-        blocks_json == "null" || blocks_json == "[]",
-        "plain-text message should have no blocks; got: {blocks_json}"
+        is_plain_text_blocks,
+        "plain-text message should carry no Block Kit payload (only an optional \
+         auto-generated rich_text block); got: {}",
+        serde_json::to_string(blocks).unwrap_or_else(|_| String::from("null"))
     );
 
     // Cleanup — always runs regardless of assertion results.
