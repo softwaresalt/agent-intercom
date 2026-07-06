@@ -617,7 +617,10 @@ impl GlobalConfig {
     ///
     /// Verifies that `host_cli` is non-empty and, if it is an absolute path,
     /// that the path exists on disk. Relative command names (resolved via
-    /// `PATH` at spawn time) are accepted as-is.
+    /// `PATH` at spawn time) are accepted as-is. Also verifies that every
+    /// `[[workspace]]` entry has a unique `channel_id`, which ACP mode relies
+    /// on to deterministically route an incoming slash command to a single
+    /// workspace.
     ///
     /// Call this before starting the ACP transport to surface misconfiguration
     /// early with a clear error message.
@@ -627,6 +630,7 @@ impl GlobalConfig {
     /// Returns `AppError::Config` when:
     /// - `host_cli` is empty
     /// - `host_cli` is an absolute path that does not exist
+    /// - two `[[workspace]]` entries share the same `channel_id`
     pub fn validate_for_acp_mode(&self) -> Result<()> {
         if self.host_cli.is_empty() {
             return Err(AppError::Config(
@@ -639,6 +643,20 @@ impl GlobalConfig {
                 "host_cli '{}' does not exist",
                 self.host_cli
             )));
+        }
+        // ACP resolves an incoming slash command to a workspace by its Slack
+        // `channel_id` (see `resolve_workspace_by_channel_id`), where the first
+        // matching entry wins. Duplicate channel IDs would make that routing
+        // ambiguous, so require each channel to map to exactly one workspace.
+        let mut seen: HashSet<&str> = HashSet::new();
+        for mapping in &self.workspaces {
+            if !seen.insert(mapping.channel_id.as_str()) {
+                return Err(AppError::Config(format!(
+                    "duplicate channel_id '{}' in [[workspace]] entries; ACP routing \
+                     requires each channel_id to map to exactly one workspace",
+                    mapping.channel_id
+                )));
+            }
         }
         Ok(())
     }
